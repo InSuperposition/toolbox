@@ -1127,7 +1127,11 @@ finding above. Run with Claude Code or Codex; checkbox as you ship.
     exists in Node 24.20.0, confirmed live, but `builder-jammy-base`
     hasn't indexed it yet) — both accepted as time-boxed exceptions in
     `.trivyignore` (`exp:2026-12-04`, tracked in TODOS.md), not silently
-    worked around.
+    worked around. Simplified further after this run's own logs showed
+    510 lines of doomed Tiny-stack detection churn:
+    [run 33982413276](https://github.com/InSuperposition/toolbox/actions/runs/33982413276)
+    confirms the Tiny attempt's removal — same green result, zero
+    `Resolving plan` lines.
 - [ ] **T5 (P1, human: ~1-2h / CC: ~15min)** — approve/consume — `mise run
   approve -- <digest>` (schema.json with verdict+reason, `cosign attest`
   via OpenBao) and `mise run consume -- <digest>` (one-line `cosign
