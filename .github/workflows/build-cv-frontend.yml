@@ -22,15 +22,19 @@ permissions:
   contents: read
   packages: write
 
-env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/cv-frontend
-
 jobs:
   build-scan-attach:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout toolbox (mise.toml's pinned tool versions)
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v7.0.1
+
+      # GitHub Actions has no toLower() expression function (verified
+      # against GitHub's own expressions docs) -- Docker/OCI image
+      # references must be all-lowercase, but github.repository_owner
+      # preserves exact case. Computed here, once, via the shell instead.
+      - name: Compute lowercase image reference
+        run: echo "IMAGE=ghcr.io/$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')/cv-frontend" >> "$GITHUB_ENV"
 
       - name: Checkout cv_frontend at pinned SHA
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v7.0.1
