@@ -53,8 +53,9 @@ Target: the Platform/SRE/DevOps hiring manager named above. Narrowest wedge:
 a reusable Tekton build/scan/approve pipeline (see File Layout) that
 produces a digest-addressed build artifact for a real external consumer —
 `cv_frontend` (inspected: `/Users/tensor/code/cv/frontend`, Remix v3 beta,
-node server, `npm start` entry, Node ≥24.3 — statically compatible with the
-Paketo Node.js buildpack; an actual `pack build` dry run not yet run).
+node server, `npm start` entry, Node ≥24.3 — a real `pack build` dry run
+confirms the Base stack builds it successfully; see Dependencies for the
+full result, including a runtime-only issue found and deferred to T7).
 Retrofitting the three existing OpenTofu modules (vm-orbstack,
 cluster-k0sctl, secret-openbao) to digest-pinning is explicitly a separate
 follow-up phase — not part of this wedge.
@@ -283,9 +284,20 @@ gate a real trust boundary rather than an unenforced formality.
   removed. Fix: pin `paketobuildpacks/builder-jammy-tiny`/`-base` and every
   Task's container image by digest (`image@sha256:...`), not a floating
   tag, once the Tiny-vs-Base decision (Constraints) is settled.
-- Target architecture: **arm64 only**, matching the OrbStack (Apple Silicon)
-  dev/CI host — buildpacks defaults to builder-host arch, zero extra
-  config. Multi-arch is a real feature to add later once an actual amd64
+- **Target architecture: amd64** (revised — the original "arm64 only,
+  buildpacks defaults to builder-host arch, zero extra config" claim was
+  wrong, caught by actually running the pack build dry run named in
+  Dependencies: `paketobuildpacks/builder-jammy-tiny`/`-base` are
+  published **amd64-only** — no arm64 manifest exists, `pack build
+  --platform linux/arm64` fails outright fetching the builder image.
+  This doesn't block T4: GitHub Actions' standard `ubuntu-latest` runners
+  are amd64 natively, a direct match, zero extra config needed *there*.
+  It only ever surfaces when building locally on this Apple Silicon dev
+  host, which now needs `docker run --platform linux/amd64` under
+  emulation to test a built image — noted for T7's OrbStack demo
+  namespace, which will run this same amd64 image under emulation on an
+  arm64 k8s node, not natively; a real cost, not "zero extra config").
+  Multi-arch is a real feature to add later once an actual second
   deployment target exists; not built speculatively against no target.
 - Ephemeral debug container (a throwaway pod/shell attached to a
   running build for interactive debugging) is explicitly **deferred to a
@@ -435,11 +447,20 @@ own + the dedicated approval key). Risk:
 Low-Med — no OpenTofu/`cluster-k0sctl` coupling, but new moving parts
 (Tekton CRDs, Chains controller, two new pinned tools: `cosign`, `zot`).
 Base image:
-try `paketobuildpacks/builder-jammy-tiny` first (distroless-like, no
-verified Node.js compatibility found externally — genuine unknown), fall
-back to `builder-jammy-base` (well-documented Node.js support) if the
-buildpack rejects Tiny — the `pack build` dry run makes this a concrete,
-gated implementation step, not a lingering question.
+**Verified via a real `pack build` dry run (T4's explicit first step,
+not a lingering question):** `paketobuildpacks/builder-jammy-tiny`
+doesn't just risk rejecting Node.js — it fails detection outright (zero
+buildpack groups participate; the builder's own metadata says it ships
+buildpacks for "Java, Java Native Image and Go" only, no Node.js
+buildpack exists in it at all). `builder-jammy-base` builds `cv_frontend`
+successfully (Node 24.19.0 resolved from `package.json`'s `engines`
+constraint, `npm-install` + `npm-start` buildpacks both fire). The
+Tiny→Base `if: failure()` fallback in T4's workflow is therefore not a
+speculative safety net — it will trigger on **every** build, always
+taking the Base path. Worth keeping the fallback structure anyway
+(matches the buildpacks ecosystem's own stated intent that Tiny is worth
+trying first when unsure), but it's a known-certain fallback, not a
+maybe.
 Reuses: buildpacks, oras, trivy, tekton-cli, kubectl — all already
 mise-managed; adds `cosign` (named exception, see Constraints).
 
@@ -475,7 +496,9 @@ belongs after D is proven, not instead of it.
   wedge touches, including the newly-added `cosign` and `zot`.
 - The full path (checkout pinned SHA → build → push → scan+SBOM → Chains
   provenance → attach approval → consume) runs end to end against the real
-  `cv_frontend` repo, on `arm64`, via `orb start k8s`.
+  `cv_frontend` repo, via `orb start k8s` on this Apple Silicon host's
+  native `arm64` cluster — running an `amd64` built image (Constraints:
+  Paketo's builders are amd64-only) under emulation, not natively.
 - Every build produces a Chains-generated provenance attestation, verifiable
   with `cosign verify-attestation --key <chains-public-key>` (Chains' own
   keypair, distinct from `<approval-public-key>` used elsewhere) against
@@ -527,7 +550,8 @@ belongs after D is proven, not instead of it.
   (GHCR remains the fallback candidate) can still be swapped in later
   without changing the mechanism.
 - **Base image / stack:** try Tiny, fall back to Base — see Approach D.
-- **Target architecture:** arm64 only for now — see Constraints.
+- **Target architecture:** amd64 (revised — see Constraints) — matches
+  GitHub Actions' runners natively.
 - **SBOM:** added as a third referrer — see Approach D.
 - **Ephemeral debug container:** explicitly deferred to a future session.
 - **Approval trust boundary:** a dedicated cosign keypair (not registry ACL,
@@ -550,9 +574,28 @@ Pipeline runs on demand / manually triggered, not yet webhook-driven).
 ## Dependencies
 
 - `cv_frontend` must remain buildable via `npm start` under Node ≥24.3 —
-  statically inspected as compatible with the Paketo Node.js buildpack this
-  session; a `pack build` dry run is the first implementation step, not yet
-  executed.
+  **verified via a real `pack build` dry run** (T4's explicit first
+  step): `builder-jammy-tiny` fails detection outright (no Node.js
+  buildpack in it at all — see Approach D's Base image note),
+  `builder-jammy-base` builds successfully (Node 24.19.0 resolved from
+  `package.json`). Caught one real testing-methodology trap along the
+  way: running `pack build --path` against a local checkout with
+  `node_modules/` already installed makes `npm-install` choose `npm
+  rebuild` over a clean install, producing wrong-platform native
+  bindings (`oxc-transform` built for macOS/arm64 inside a linux/amd64
+  image) — confirmed as a dry-run artifact, not a real T4 bug, by
+  rebuilding against a clean `git archive` checkout (no `node_modules/`,
+  matching what GitHub Actions' `checkout` action always produces). The
+  clean-checkout build launches, but crashes at runtime with a Remix v3
+  beta `fileMap`/asset-compiler error (`IMPORT_OUTSIDE_FILE_MAP`) — a
+  `cv_frontend`-side application config issue, not a toolbox/buildpacks
+  problem, out of this repo's scope to fix. **Real, currently-unverified
+  gap this surfaces:** T4 only proves the image *builds*, not that it
+  *runs* — that gap is inherited by T7's demo namespace, which is the
+  first point in this design that would actually try to run the built
+  image and discover this crash. Not blocking T4 (matches its stated
+  scope: build+scan+SBOM, not deploy+health-check) — tracked as a T7
+  input, not solved here.
 - OrbStack's built-in Kubernetes (`orb start k8s`) must be running to host
   Tekton Pipelines + Chains — a dev/CI-only cluster, distinct from
   `cluster-k0sctl`'s production cluster (see Premises #5 clarification).
@@ -809,9 +852,17 @@ procedure — not a new tool, `bao` already ships the snapshot command.
 - **Ephemeral debug container** — a throwaway pod/shell for interactive
   build debugging. Named as a deliberate omission (Constraints), no TODO
   yet — revisit when actually needed.
-- **Multi-arch (amd64) builds** — arm64-only until a real amd64 deployment
-  target exists (Constraints). Adding `pack build --platform` support later
-  is unblocked by anything in this design.
+- **Multi-arch (arm64) builds** — amd64-only until a real arm64 deployment
+  target exists (Constraints, revised: Paketo's Jammy builders are
+  amd64-only, matching GitHub Actions' runners natively; arm64 was never
+  actually available as a build target here). Adding a second-arch build
+  later is unblocked by anything in this design.
+- **cv_frontend's runtime `IMPORT_OUTSIDE_FILE_MAP` crash** (found during
+  T4's `pack build` dry run, see Dependencies) — a Remix v3 beta
+  application-config issue in a different repo, out of toolbox's scope to
+  fix. T7's demo namespace is the first point this design would actually
+  run the built image; fix it there or in `cv_frontend` directly before
+  that lands.
 - **Pipelines-as-Code webhook triggering** — this wedge's Pipeline runs
   on-demand/manually triggered; webhook-driven triggering is the
   already-researched future mechanism per CLAUDE.md, not required to prove
@@ -851,11 +902,11 @@ GitHub Actions (public repo, unmetered)          Local (repo owner's machine)
 │ checkout cv_frontend@pinned-SHA  │              │ pitchfork: openbao (local│
 │           │                     │              │ process, raft storage)   │
 │           ▼                     │              │   Transit: approval-key │
-│ pack build (Tiny → [fail] → Base)│              │            └─ never    │
-│           │                     │              │               leaves    │
-│           ▼                     │              │               OpenBao   │
-│ oras push --> GHCR (GITHUB_TOKEN, │              └──────────────────────────┘
-│   per-job, no PAT to manage)     │                          ▲
+│ pack build --publish (Tiny →      │              │            └─ never    │
+│   [fail, always] → Base) direct  │              │               leaves    │
+│   to GHCR (GITHUB_TOKEN, per-job)│              │               OpenBao   │
+│           │                     │              └──────────────────────────┘
+│           ▼                     │                          ▲
 │           │                     │                          │ cosign attest
 │           ▼                     │                          │ --key openbao://
 │ trivy scan (cached DB) + SBOM    │                          │ approval-key
@@ -971,14 +1022,47 @@ finding above. Run with Claude Code or Codex; checkbox as you ship.
   - Verify: `bao secrets list` shows `transit/`, key exists, pitchfork
     autostarts it from **repo root** cwd specifically,
     `environments/local/tests/bootstrap.bats` passes
+- [x] **T4a (P1, human: ~15min / CC: ~10min)** — de-risk — real `pack
+  build` dry run against `cv_frontend`, both stacks, made an explicit
+  step rather than implied by Dependencies' prose
+  - Surfaced by: this session's own "could other tasks replace T4"
+    review — the dry run was named as an open uncertainty in three
+    places (Narrowest Wedge, Dependencies, Approach D) but never had its
+    own checkbox
+  - Files: none (verification-only; findings folded into Dependencies,
+    Approach D, and Constraints above)
+  - Verify: **done** — `builder-jammy-tiny` fails detection outright (no
+    Node.js buildpack in it), `builder-jammy-base` builds successfully
+    (Node 24.19.0). Caught and resolved a dry-run-only false failure
+    (local `node_modules/` confusing `npm-install`'s process selection —
+    doesn't occur against a real CI checkout). Found and deferred to T7:
+    the built image crashes at runtime with a `cv_frontend`-side Remix v3
+    `IMPORT_OUTSIDE_FILE_MAP` error — out of scope for T4 (build-only),
+    a real gap T7's demo namespace inherits.
 - [ ] **T4 (P1, human: ~1-2h / CC: ~15min)** — GitHub Actions — Workflow:
-  checkout pinned SHA → buildpacks (Tiny, `if: failure()` → Base) → oras
-  push to GHCR (`GITHUB_TOKEN`) → trivy scan+SBOM (cached DB) → oras
-  attach SBOM
+  checkout pinned SHA → buildpacks (Tiny, `if: failure()` → Base,
+  `--publish` direct to GHCR) → `GITHUB_TOKEN` auth → trivy scan+SBOM
+  (cached DB) → oras attach SBOM. **Corrected while implementing:** "oras
+  push to GHCR" as originally worded doesn't map to a real command —
+  `oras push` pushes arbitrary files as OCI artifacts, not a
+  buildpacks-built image; `pack build --publish` is buildpacks' own
+  native direct-to-registry publish, and it's what actually produces the
+  digest this workflow reads back (`report.toml`'s `[image].digest`).
+  `oras` stays scoped to what File Layout already says it's for:
+  attaching referrers (SBOM here, approval/provenance later), never the
+  primary image push.
   - Surfaced by: eng-review Issues 1 & 3, Test gap 1, Performance issue
-  - Files: `.github/workflows/build-cv-frontend.yml`
-  - Verify: workflow succeeds against real `cv_frontend`@some SHA, produces
-    an image+SBOM in GHCR
+  - Files: `.github/workflows/build-cv-frontend.yml` — every third-party
+    action pinned by commit SHA, not a tag (this design's own
+    digest-over-tag thesis applied to its own CI, not just what it
+    builds)
+  - Verify: `actionlint` clean. Not yet run for real — `toolbox` has no
+    GitHub remote yet, so no workflow run exists to point at. Confirmed
+    working pieces locally first (T4a): `pack build --publish
+    --report-output-dir` against a local test registry correctly
+    produces a `digest = "sha256:..."` field; `cv_frontend`
+    (`InSuperposition/cv_frontend`, public, HEAD `cb333ee1...`) is
+    already pushed and buildable via the Base stack.
 - [ ] **T5 (P1, human: ~1-2h / CC: ~15min)** — approve/consume — `mise run
   approve -- <digest>` (schema.json with verdict+reason, `cosign attest`
   via OpenBao) and `mise run consume -- <digest>` (one-line `cosign

@@ -1,0 +1,106 @@
+# Builds cv_frontend at a pinned commit SHA, pushes it to GHCR by digest,
+# scans it, and attaches a CycloneDX SBOM as an OCI 1.1 referrer.
+#
+# Manually triggered (workflow_dispatch) -- this wedge proves the pipeline
+# works; it isn't webhook-driven yet (Pipelines-as-Code is the deferred
+# future mechanism for that, see CLAUDE.md).
+#
+# Every third-party action is pinned by commit SHA, not a tag -- this
+# repo's own digest-over-tag thesis applied to its own CI, not just the
+# artifacts it builds (see docs/designs/digest-as-source-of-truth.md).
+
+name: Build cv_frontend
+
+on:
+  workflow_dispatch:
+    inputs:
+      cv_frontend_sha:
+        description: "cv_frontend commit SHA to build (a full commit SHA, not a branch or tag)"
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/cv-frontend
+
+jobs:
+  build-scan-attach:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout toolbox (mise.toml's pinned tool versions)
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v7.0.1
+
+      - name: Checkout cv_frontend at pinned SHA
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v7.0.1
+        with:
+          repository: InSuperposition/cv_frontend
+          ref: ${{ inputs.cv_frontend_sha }}
+          path: cv_frontend
+
+      - name: Install pinned tools (buildpacks, oras, trivy)
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install: true
+          cache: true
+
+      - name: Cache trivy vulnerability DB
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ github.run_id }}
+          restore-keys: trivy-db-
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      # Tiny always fails detection for this app (verified: T4a's pack
+      # build dry run found builder-jammy-tiny ships no Node.js buildpack
+      # at all -- not a maybe, a certainty for this stack). The fallback
+      # stays anyway: harmless if Tiny ever becomes viable, and keeps this
+      # workflow honest about what "Tiny, fall back to Base" actually means
+      # rather than hardcoding Base and hiding the attempt.
+      - name: Build with buildpacks (Tiny stack)
+        id: build_tiny
+        continue-on-error: true
+        run: |
+          pack build "$IMAGE:${{ inputs.cv_frontend_sha }}" \
+            --path cv_frontend \
+            --builder paketobuildpacks/builder-jammy-tiny \
+            --pull-policy if-not-present \
+            --publish \
+            --report-output-dir .
+
+      - name: Build with buildpacks (Base stack fallback)
+        if: steps.build_tiny.outcome == 'failure'
+        run: |
+          pack build "$IMAGE:${{ inputs.cv_frontend_sha }}" \
+            --path cv_frontend \
+            --builder paketobuildpacks/builder-jammy-base \
+            --pull-policy if-not-present \
+            --publish \
+            --report-output-dir .
+
+      - name: Extract the pushed image's digest
+        id: digest
+        run: |
+          digest=$(grep -E '^\s*digest\s*=' report.toml | sed -E 's/.*"(sha256:[a-f0-9]+)".*/\1/')
+          test -n "$digest" || { echo "no digest found in report.toml" >&2; exit 1; }
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Trivy vulnerability scan (blocks on CRITICAL)
+        run: |
+          trivy image --exit-code 1 --severity CRITICAL \
+            "$IMAGE@${{ steps.digest.outputs.digest }}"
+
+      - name: Trivy SBOM (CycloneDX)
+        run: |
+          trivy image --format cyclonedx --output sbom.cdx.json \
+            "$IMAGE@${{ steps.digest.outputs.digest }}"
+
+      - name: Attach SBOM as an OCI referrer
+        run: |
+          oras attach --artifact-type application/vnd.cyclonedx+json \
+            "$IMAGE@${{ steps.digest.outputs.digest }}" \
+            sbom.cdx.json:application/vnd.cyclonedx+json
