@@ -44,6 +44,11 @@ composition) owns:
 
 - Naming which keys exist (`transit_keys`) — a new consumer adds an entry
   here, it doesn't provision a second OpenBao instance.
+- Naming which access policies exist (`policies`, default empty) — e.g.
+  T8 (Tekton Chains) scoping its auth to only its own Transit key. Policy
+  HCL syntax isn't validated offline; see `tests/policies.tftest.hcl`'s
+  header comment and `environments/local/tests/bootstrap.bats` for the
+  live check.
 - Where the rendered config lands (`openbao_config_path`) and what the
   supervising `pitchfork.toml`'s daemon command points at.
 
@@ -61,5 +66,6 @@ module "secret_openbao_local" {
 ```
 
 Bootstrap (init/unseal) is a one-time, human-driven, out-of-band step —
-documented at the repo root, not here, since it's a property of the
-running OpenBao process, not of this module's `.tf` files.
+documented in `environments/local/README.md`, not here, since it's a
+property of the running OpenBao process, not of this module's `.tf`
+files.

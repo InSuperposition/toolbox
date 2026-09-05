@@ -1,0 +1,10 @@
+# Repo-wide dev secret access (CLAUDE.md: fnox is a client, never a store
+# of record -- OpenBao is). Today's only entry is the OpenBao bootstrap
+# root token, injected into the shell instead of a manual `export`.
+
+[providers.keychain]
+type = "keychain"
+service = "toolbox-openbao"
+
+[secrets]
+VAULT_TOKEN = { provider = "keychain" }

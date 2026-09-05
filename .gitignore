@@ -1,4 +1,5 @@
 .claude/
 .terraform/
-/openbao/data/
+/environments/local/openbao/data/
 modules/*/tests/tmp/
+*.tfstate*

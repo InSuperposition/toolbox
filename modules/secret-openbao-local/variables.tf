@@ -39,3 +39,12 @@ variable "cluster_address" {
   type        = string
   default     = "127.0.0.1:8201"
 }
+
+variable "policies" {
+  description = "OpenBao access policies to create (e.g. scoping Tekton Chains' auth to only its own Transit key). Empty by default — no consumer needs this until T8."
+  type = list(object({
+    name = string
+    hcl  = string
+  }))
+  default = []
+}

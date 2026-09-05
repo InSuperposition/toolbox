@@ -26,6 +26,16 @@ resource "vault_transit_secret_backend_key" "keys" {
   deletion_allowed = false # an accidental `tofu destroy` must not be able to burn a signing key
 }
 
+resource "vault_policy" "policies" {
+  # Empty by default (T3 has no consumer for this yet) — T8 (Tekton
+  # Chains) adds an entry here to scope its auth to only its own key,
+  # denying it approval-key. See modules/secret-openbao-local/README.md.
+  for_each = { for p in var.policies : p.name => p }
+
+  name   = each.value.name
+  policy = each.value.hcl
+}
+
 resource "local_file" "openbao_data_dir_keep" {
   # raft's bolt-based FSM does not auto-create its storage directory the
   # way the (now-deprecated) `file` backend did — verified live: `bao

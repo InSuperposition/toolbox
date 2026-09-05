@@ -1,6 +1,6 @@
 [daemons.openbao]
 run = "bao server -config=openbao/openbao.hcl"
-dir = "."
+dir = "environments/local"
 auto = ["start", "stop"]
 retry = 0
 ready_delay = 2

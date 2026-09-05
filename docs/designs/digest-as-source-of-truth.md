@@ -122,18 +122,28 @@ Assignment). Nothing is lost: the directory was empty.
 
 **OpenBao/Transit placement (added after T3's first ship — this diagram
 never covered it originally, a real gap, not a revision of a stated
-decision):** `modules/secret-openbao-local/` is a reusable module —
-Transit engine + an arbitrary set of signing keys + the rendered
-`openbao.hcl` server config — instantiated **once**, at the repo root
-(`main.tf`, alongside `pitchfork.toml` supervising the one shared OpenBao
-daemon). It is not per-consumer: T3's `approval-key` and T8's future
-`chains-provenance-key` are two entries in the same root `main.tf`'s
-`transit_keys` list, not two OpenBao instances. `deploy/cv-frontend/` only
-ever references the key by name (`openbao://approval-key`) — it never
+decision; revised again after a second rework moved it off bare repo
+root):** `modules/secret-openbao-local/` is a reusable module — Transit
+engine + an arbitrary set of signing keys and access policies + the
+rendered `openbao.hcl` server config — instantiated **once**, in
+`environments/local/` (`main.tf`). It is not per-consumer: T3's
+`approval-key` and T8's future `chains-provenance-key` are two entries in
+the same `transit_keys` list, not two OpenBao instances.
+`pitchfork.toml` itself stays at the **repo root**, not in
+`environments/local/` — pitchfork only discovers the nearest
+`pitchfork.toml` searching upward from the current directory, never into
+subdirectories, so it has to live somewhere reachable from wherever
+`mise` tasks run; its daemon's `dir = "environments/local"` points the
+actual `bao server` process at the right working directory without
+splitting path conventions. Bootstrap is `mise run openbao-bootstrap`
+(`scripts/bootstrap-openbao.sh`), which also stores the root token via
+`fnox` (OS keychain) instead of a manual `export`. `deploy/cv-frontend/`
+only ever references a key by name (`openbao://approval-key`) — it never
 provisions OpenBao itself. Separate from the deferred production
 `secret-openbao` module (different lifecycle: local pitchfork-supervised
 dev daemon vs. real cluster infra) — see that module's sibling
-`secret-openbao-local/README.md` for the full reasoning.
+`secret-openbao-local/README.md` for the full reasoning, and
+`environments/local/README.md` for the bootstrap/reset runbook.
 
 **No embedded scripts in Tekton YAML** — this is already this repo's
 mandatory global rule ("No code inside configuration files... CI pipeline
@@ -599,13 +609,13 @@ are folded in below, each with its reasoning — not just the conclusion.
 - **Phase 1** (digest + approval, no Tekton, no cluster):
   - **Registry: GHCR, not `zot`** (eng-review finding — Phase 1 claimed "0
     new services" but originally put `zot` in it anyway; GHCR is hosted,
-    zero-ops, and its OIDC support is already documented in this doc —
-    genuinely zero-service for Phase 1. `zot` moves to Phase 2, where
-    cluster infrastructure work starts anyway; migration is a config swap,
-    both speak OCI 1.1 Referrers).
+    zero-ops — genuinely zero-service for Phase 1. `zot` moves to Phase 2,
+    where cluster infrastructure work starts anyway; migration is a config
+    swap, both speak OCI 1.1 Referrers).
   - **Execution: GitHub Actions, not a local script** (eng-review finding —
-    GHCR's OIDC support is GitHub Actions' `id-token: write` token
-    exchange specifically; it doesn't apply to a script on a laptop. Running
+    GHCR push auth is GitHub's own automatic per-job `GITHUB_TOKEN`
+    specifically (see the corrected Constraints entry below); it doesn't
+    apply to a script on a laptop. Running
     the automated build/scan/SBOM path as a real GitHub Actions workflow
     from Phase 1 avoids the same "not very DevOps to run CLI locally"
     complaint resurfacing before Tekton even exists, at zero new-service
@@ -619,9 +629,11 @@ are folded in below, each with its reasoning — not just the conclusion.
     official [OpenBao+Flux blog post](https://openbao.org/blog/flux-openbao-secrets-signatures/)
     describing exactly this pattern: OpenBao's Transit engine signs without
     ever releasing key material, with native rotation via key versioning.
-    Run as a `pitchfork`-supervised **local process** — file-backed
+    Run as a `pitchfork`-supervised **local process** — raft (integrated)
     storage, not `-dev` mode, which is ephemeral/insecure and unsuitable
-    even at this scale. This is local-dev-daemon supervision exactly as
+    even at this scale (revised from an original `file`-storage choice
+    after OpenBao's deprecation of that backend surfaced during T3's
+    build). This is local-dev-daemon supervision exactly as
     `pitchfork` is scoped for in this repo, not a production service, and
     does **not** reopen the deferred `secret-openbao` production module.).
   - **OpenBao Transit setup: OpenTofu, not a shell script** (eng-review
@@ -631,13 +643,19 @@ are folded in below, each with its reasoning — not just the conclusion.
     [`opentofu/vault` provider](https://search.opentofu.org/provider/opentofu/vault/latest),
     which works against OpenBao's API-compatible endpoint. Matches this
     repo's own Tool Boundaries table exactly: "OpenTofu owns... the OpenBao
-    secret engine." A lightweight `.tf` file under `deploy/cv-frontend/`,
-    not the deferred production `secret-openbao` module.).
+    secret engine." A reusable module (`modules/secret-openbao-local/`)
+    instantiated from `environments/local/main.tf` — not `deploy/
+    cv-frontend/` (moved there after T3's first ship revealed this isn't
+    cv-frontend-specific — see File Layout's OpenBao/Transit placement
+    note) and not the deferred production `secret-openbao` module.).
   - **Fallback/auth logic: declarative, no scripts** (eng-review finding —
     the Tiny→Base buildpack fallback is a GitHub Actions `if:
     steps.tiny.outcome == 'failure'` conditional between two steps, not a
-    custom script; GHCR auth is `docker/login-action` + `permissions:
-    id-token: write`, native OIDC, no PAT to manage).
+    custom script; GHCR auth is `docker/login-action` + `password:
+    secrets.GITHUB_TOKEN` — GitHub's own automatic per-job token,
+    short-lived and scoped to the workflow run, no PAT to manage and no
+    `id-token: write`/OIDC federation needed for GHCR specifically; see
+    the corrected Constraints entry below).
   - **`consume.sh` is not a file** (eng-review finding — verifying a
     signature is one CLI invocation, `cosign verify-attestation --key
     cosign-approval.pub <image>@<digest>`; exposed as a `mise run consume`
@@ -763,18 +781,21 @@ a bats test proving the Tiny→Base fallback actually triggers (not just a
 manual dry run), a bats test exercising the explicit-rejection branch
 (verdict=rejected still produces a signed, consume-rejected record), and
 an integration test proving OpenBao Transit key rotation doesn't break
-verification of pre-rotation referrers. GitHub Actions' OIDC token is
-requested by `docker/login-action` at push time (not once at job start),
-so mid-build expiry during the earlier build/scan steps doesn't apply the
-way it would for a long-lived credential — documented, no test needed.
+verification of pre-rotation referrers. GitHub's automatic per-job
+`GITHUB_TOKEN` is scoped to the workflow run and requested implicitly by
+`docker/login-action` at push time, not a long-lived credential fetched
+once at job start — mid-build expiry doesn't apply the way it would for a
+separate OIDC federation flow — documented, no test needed.
 
-**OpenBao storage backup (eng-review critical gap):** the file-backed
-Transit storage directory itself — not just the key it holds — has no
-backup story; losing it destroys both signing keys at once, the same
+**OpenBao storage backup (eng-review critical gap):** the Transit storage
+directory itself — not just the key it holds — has no backup story;
+losing it destroys both signing keys at once, the same
 single-point-of-failure this design fixed at the keypair level, moved one
-layer down. Resolution: a periodic backup of OpenBao's storage directory
-to a second location, with a documented restore procedure — not a new
-tool, OpenBao's storage is plain files.
+layer down. Resolution: periodic `bao operator raft snapshot save` (not a
+raw directory copy — revised after T3 switched OpenBao from the
+deprecated `file` backend to `raft`; a plain file copy of a live raft
+store can grab its bolt-based FSM mid-write) with a documented restore
+procedure — not a new tool, `bao` already ships the snapshot command.
 
 ## NOT in scope
 
@@ -828,13 +849,13 @@ tool, OpenBao's storage is plain files.
 GitHub Actions (public repo, unmetered)          Local (repo owner's machine)
 ┌─────────────────────────────────┐              ┌──────────────────────────┐
 │ checkout cv_frontend@pinned-SHA  │              │ pitchfork: openbao (local│
-│           │                     │              │ process, file storage)   │
+│           │                     │              │ process, raft storage)   │
 │           ▼                     │              │   Transit: approval-key │
 │ pack build (Tiny → [fail] → Base)│              │            └─ never    │
 │           │                     │              │               leaves    │
 │           ▼                     │              │               OpenBao   │
-│ oras push --> GHCR (OIDC token,  │              └──────────────────────────┘
-│   requested at push time)        │                          ▲
+│ oras push --> GHCR (GITHUB_TOKEN, │              └──────────────────────────┘
+│   per-job, no PAT to manage)     │                          ▲
 │           │                     │                          │ cosign attest
 │           ▼                     │                          │ --key openbao://
 │ trivy scan (cached DB) + SBOM    │                          │ approval-key
@@ -869,7 +890,7 @@ GitHub Actions (public repo, unmetered)          Local (repo owner's machine)
 |---|---|---|---|---|
 | Buildpack detection | Tiny stack rejects Node.js app | Yes (added this review) | Yes — falls back to Base | Clear (fallback logs which stack won) |
 | trivy scan | CRITICAL finding | Yes (Success Criteria) | Yes — blocks before attach | Clear (CI job fails with reason) |
-| GHCR push | OIDC token expiry mid-build | No test (documented instead) | N/A — token requested at push time, not job start | N/A, doesn't apply as analyzed |
+| GHCR push | `GITHUB_TOKEN` permissions misconfigured (missing `packages: write`) | No test (documented instead) | Push fails loudly with a permissions error | Clear — CI job fails, not silent |
 | `mise run approve` | OpenBao process not running | **Gap** — not yet specified | Not yet specified | **Should be**: clear connection-refused error, not silent |
 | `mise run consume` | Missing/invalid approval signature | Yes (Success Criteria) | Yes — reject | Clear (explicit rejection reason) |
 | `mise run consume` | Explicit `verdict: rejected` | Yes (added this review) | Yes — reject | Clear (`reason` field visible) |
@@ -892,7 +913,7 @@ a generic exit code.
 |---|---|---|
 | Phase 0 (mise.toml + CLAUDE.md) | root files only | — |
 | Phase 1 build/scan (GHA workflow) | `.github/workflows/`, `deploy/cv-frontend/` | Phase 0 |
-| Phase 1 approve/consume (OpenBao + cosign) | `deploy/cv-frontend/`, OpenTofu Transit config | Phase 0 |
+| Phase 1 approve/consume (OpenBao + cosign) | `deploy/cv-frontend/scripts/`, `environments/local/`, `modules/secret-openbao-local/` | Phase 0 |
 | Phase 4 (hk bisect-safety) | `hk.pkl`, CI config | — (independent of everything) |
 | Phase 2 (Tekton Tasks/Pipeline) | `modules/task-*`, `modules/pipeline-*` | Phase 1 proven |
 | Phase 3 (Chains) | Tekton install, OpenBao (2nd Transit key) | Phase 2 |
@@ -932,36 +953,54 @@ finding above. Run with Claude Code or Codex; checkbox as you ship.
   revised from the original `file`-storage spec, see File Layout below)
   - Surfaced by: eng-review Issue 2, script-minimization pass
   - Files: `modules/secret-openbao-local/` (reusable: Transit engine +
-    N keys + rendered server config), root `main.tf`/`pitchfork.toml`
-    (the one shared instance), `deploy/cv-frontend/` no longer owns any
-    of this — reworked after the first ship surfaced OpenBao's `file`
-    backend deprecation and that this isn't cv-frontend-specific (T8
-    needs a second key in the same instance)
+    N keys + N policies + rendered server config), `environments/local/
+    *.tf` (the one shared instance), root `pitchfork.toml` (stays at
+    repo root for daemon discoverability — pitchfork only searches
+    upward from cwd, never into subdirectories),
+    `scripts/{bootstrap,reset}-openbao.sh` + 2 `mise.toml` tasks
+    (`openbao-bootstrap`/`openbao-reset`), `fnox.toml` (root token in OS
+    keychain, no manual `export`), `environments/local/tests/
+    bootstrap.bats`, `deploy/cv-frontend/` no longer owns any of this —
+    reworked twice: first after the initial ship surfaced OpenBao's
+    `file` backend deprecation and that this isn't cv-frontend-specific
+    (T8 needs a second key in the same instance), then again to move off
+    bare repo root into `environments/local/` (industry convention,
+    leaves room for `environments/production/` later) after a Codex
+    outside-voice pass caught that naively moving `pitchfork.toml` there
+    too would have broken daemon discovery from repo root.
   - Verify: `bao secrets list` shows `transit/`, key exists, pitchfork
-    autostarts it from repo root
+    autostarts it from **repo root** cwd specifically,
+    `environments/local/tests/bootstrap.bats` passes
 - [ ] **T4 (P1, human: ~1-2h / CC: ~15min)** — GitHub Actions — Workflow:
   checkout pinned SHA → buildpacks (Tiny, `if: failure()` → Base) → oras
-  push to GHCR (OIDC) → trivy scan+SBOM (cached DB) → oras attach SBOM
+  push to GHCR (`GITHUB_TOKEN`) → trivy scan+SBOM (cached DB) → oras
+  attach SBOM
   - Surfaced by: eng-review Issues 1 & 3, Test gap 1, Performance issue
   - Files: `.github/workflows/build-cv-frontend.yml`
   - Verify: workflow succeeds against real `cv_frontend`@some SHA, produces
     an image+SBOM in GHCR
 - [ ] **T5 (P1, human: ~1-2h / CC: ~15min)** — approve/consume — `mise run
   approve -- <digest>` (schema.json with verdict+reason, `cosign attest`
-  via OpenBao) and `mise run consume -- <digest>` (one-line
-  `cosign verify-attestation`)
+  via OpenBao) and `mise run consume -- <digest>` (one-line `cosign
+  verify-attestation --policy verdict-approved.cue`)
   - Surfaced by: File Layout, script-minimization pass, Test gap 2
   - Files: `deploy/cv-frontend/scripts/approve.sh`, `mise.toml` (consume
     task), `deploy/cv-frontend/cosign-approval.pub`
   - Verify: bats tests pass (tag-irrelevant, no-approval-rejected,
     invalid-signature-rejected, explicit-rejection-accountable,
     provenance/SBOM-without-approval-rejected)
-- [ ] **T6 (P2, human: ~1h / CC: ~10min)** — backup — Periodic backup of
-  OpenBao's storage directory + documented restore procedure
-  - Surfaced by: eng-review critical gap (this review)
+- [ ] **T6 (P2, human: ~1h / CC: ~10min)** — backup — Periodic `bao
+  operator raft snapshot save` + documented restore procedure (not a raw
+  directory copy — raft's bolt store can be mid-write during a plain file
+  copy; revised after T3 switched from `file` to `raft` storage)
+  - Surfaced by: eng-review critical gap (this review); method revised in
+    a follow-up eng-review pass after the raft switch
   - Files: a backup script/cron entry (location TBD at implementation),
-    `deploy/cv-frontend/README.md` (restore procedure)
-  - Verify: restore procedure tested once against a copy
+    `environments/local/README.md` (restore procedure — moved from
+    `deploy/cv-frontend/README.md` when OpenBao relocated)
+  - Verify: restore procedure tested once against a copy; snapshot
+    restored into a fresh instance signs successfully against the
+    previously trusted public key, not just "the server starts"
 - [ ] **T7 (P2, human: ~3-5d / CC: ~1-2h)** — Tekton — `modules/task-*`,
   `modules/pipeline-build-scan-approve`, `orb start k8s`, migrate registry
   GHCR→`zot`
@@ -971,10 +1010,21 @@ finding above. Run with Claude Code or Codex; checkbox as you ship.
   - Verify: kubeconform passes on the new YAML, chainsaw passes against the
     OrbStack cluster, full path runs end-to-end
 - [ ] **T8 (P2, human: ~2-3d / CC: ~30min)** — Chains — Install Tekton
-  Chains, second OpenBao Transit key (`chains-provenance-key`), verify
-  automatic provenance per build
+  Chains, second OpenBao Transit key (`chains-provenance-key`) + a scoped
+  access policy denying it `approval-key`, verify automatic provenance
+  per build
   - Surfaced by: Approach D, Code Quality issue 1
-  - Files: Chains install manifests, OpenTofu Transit key resource
+  - Files: one `transit_keys` entry + one `policies` entry in
+    `environments/local/main.tf` (module already generic — see T3
+    rework); no new `.tf` resources needed for the key/policy themselves
+  - **Real blocker, not yet solved by this design:** Tekton Chains runs
+    in a pod on OrbStack's k8s, OpenBao listens on `127.0.0.1:8200` on
+    the Mac host. Researched resolution path: OrbStack pods reach the
+    host at `host.orb.internal` (https://docs.orbstack.dev/kubernetes/),
+    but only once OpenBao's listener is widened past loopback-only —
+    which also means `tls_disable = true` (safe today only because the
+    listener is loopback-only) needs to become real TLS at the same
+    time, not independently. Not implemented; T8's actual first task.
   - Verify: `cosign verify-attestation --key <chains-public-key>` succeeds
     against a fresh build's digest
 - [ ] **T9 (P3, human: ~1d / CC: ~20min)** — hk gate — `check-history.sh`
