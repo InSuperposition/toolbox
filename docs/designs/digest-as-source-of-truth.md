@@ -281,9 +281,10 @@ gate a real trust boundary rather than an unenforced formality.
   GitHub Actions runner image. The whole point of this design is digest
   over tag; applying that only to the outer tools and not the build's own
   inputs is the same gap this design exists to close, just one layer
-  removed. Fix: pin `paketobuildpacks/builder-jammy-tiny`/`-base` and every
+  removed. Fix: pin `paketobuildpacks/builder-jammy-base` (the only
+  builder T4 uses — Tiny was tried and dropped, see Approach D) and every
   Task's container image by digest (`image@sha256:...`), not a floating
-  tag, once the Tiny-vs-Base decision (Constraints) is settled.
+  tag.
 - **Target architecture: amd64** (revised — the original "arm64 only,
   buildpacks defaults to builder-host arch, zero extra config" claim was
   wrong, caught by actually running the pack build dry run named in
@@ -455,12 +456,14 @@ buildpacks for "Java, Java Native Image and Go" only, no Node.js
 buildpack exists in it at all). `builder-jammy-base` builds `cv_frontend`
 successfully (Node 24.19.0 resolved from `package.json`'s `engines`
 constraint, `npm-install` + `npm-start` buildpacks both fire). The
-Tiny→Base `if: failure()` fallback in T4's workflow is therefore not a
-speculative safety net — it will trigger on **every** build, always
-taking the Base path. Worth keeping the fallback structure anyway
-(matches the buildpacks ecosystem's own stated intent that Tiny is worth
-trying first when unsure), but it's a known-certain fallback, not a
-maybe.
+Tiny attempt was dropped from T4's workflow entirely (revised after the
+first live run's own logs showed 510 lines of Java/Go buildpack
+detection churn, every single run, for zero chance of ever matching):
+the "Tiny, fall back to Base" design hedged against genuine uncertainty
+("no verified Node.js compatibility found externally"); once that
+uncertainty resolved into a permanent certainty, keeping the doomed
+attempt was dead weight, not honesty about a real fallback. `builder-
+jammy-base` is now T4's only build step, unconditional.
 Reuses: buildpacks, oras, trivy, tekton-cli, kubectl — all already
 mise-managed; adds `cosign` (named exception, see Constraints).
 
@@ -554,7 +557,9 @@ belongs after D is proven, not instead of it.
   static binary, no elevated privileges, self-hostable. A hosted registry
   (GHCR remains the fallback candidate) can still be swapped in later
   without changing the mechanism.
-- **Base image / stack:** try Tiny, fall back to Base — see Approach D.
+- **Base image / stack:** `builder-jammy-base` only — Tiny was tried,
+  proven permanently incompatible (no Node.js buildpack in it at all),
+  and dropped rather than kept as a doomed attempt. See Approach D.
 - **Target architecture:** amd64 (revised — see Constraints) — matches
   GitHub Actions' runners natively.
 - **SBOM:** added as a third referrer — see Approach D.
@@ -698,14 +703,15 @@ are folded in below, each with its reasoning — not just the conclusion.
     frontend/` (moved there after T3's first ship revealed this isn't
     frontend-specific — see File Layout's OpenBao/Transit placement
     note) and not the deferred production `secret-openbao` module.).
-  - **Fallback/auth logic: declarative, no scripts** (eng-review finding —
-    the Tiny→Base buildpack fallback is a GitHub Actions `if:
-    steps.tiny.outcome == 'failure'` conditional between two steps, not a
-    custom script; GHCR auth is `docker/login-action` + `password:
-    secrets.GITHUB_TOKEN` — GitHub's own automatic per-job token,
-    short-lived and scoped to the workflow run, no PAT to manage and no
-    `id-token: write`/OIDC federation needed for GHCR specifically; see
-    the corrected Constraints entry below).
+  - **Auth logic: declarative, no scripts** (eng-review finding — GHCR
+    auth is `docker/login-action` + `password: secrets.GITHUB_TOKEN` —
+    GitHub's own automatic per-job token, short-lived and scoped to the
+    workflow run, no PAT to manage and no `id-token: write`/OIDC
+    federation needed for GHCR specifically; see the corrected
+    Constraints entry below. Originally paired with a Tiny→Base buildpack
+    fallback as a GitHub Actions `if:` conditional — dropped later once
+    the live workflow's own logs proved Tiny permanently unusable for
+    this app, not a real fallback to keep declarative or otherwise).
   - **`consume.sh` is not a file** (eng-review finding — verifying a
     signature is one CLI invocation, `cosign verify-attestation --key
     cosign-approval.pub <image>@<digest>`; exposed as a `mise run consume`
@@ -864,8 +870,11 @@ default. If that stated intent didn't exist, the honest recommendation
 would be: ship Phase 1, stop, and let a second real requirement — not
 portfolio optics — justify Phase 2's complexity before building it. Additional test
 coverage locked this review, beyond what Success Criteria already listed:
-a bats test proving the Tiny→Base fallback actually triggers (not just a
-manual dry run), a bats test exercising the explicit-rejection branch
+a bats test proving the buildpack build actually succeeds against a
+real checkout (not just a manual dry run — moot for the Tiny→Base
+fallback specifically, since Tiny was later dropped entirely rather than
+kept as a permanently-failing branch to test), a bats test exercising
+the explicit-rejection branch
 (verdict=rejected still produces a signed, consume-rejected record), and
 an integration test proving OpenBao Transit key rotation doesn't break
 verification of pre-rotation referrers. GitHub's automatic per-job
@@ -946,9 +955,10 @@ GitHub Actions (public repo, unmetered)          Local (repo owner's machine)
 │ checkout cv_frontend@pinned-SHA  │              │ pitchfork: openbao (local│
 │           │                     │              │ process, raft storage)   │
 │           ▼                     │              │   Transit: approval-key │
-│ pack build --publish (Tiny →      │              │            └─ never    │
-│   [fail, always] → Base) direct  │              │               leaves    │
-│   to GHCR (GITHUB_TOKEN, per-job)│              │               OpenBao   │
+│ pack build --publish (Base stack │              │            └─ never    │
+│   only -- Tiny dropped, no       │              │               leaves    │
+│   Node.js support at all) direct │              │               OpenBao   │
+│   to GHCR (GITHUB_TOKEN, per-job)│              │                          │
 │           │                     │              └──────────────────────────┘
 │           ▼                     │                          ▲
 │           │                     │                          │ cosign attest
@@ -983,7 +993,7 @@ GitHub Actions (public repo, unmetered)          Local (repo owner's machine)
 
 | Codepath | Realistic failure | Test? | Error handling? | User-visible? |
 |---|---|---|---|---|
-| Buildpack detection | Tiny stack rejects Node.js app | Yes (added this review) | Yes — falls back to Base | Clear (fallback logs which stack won) |
+| Buildpack detection | `builder-jammy-base` fails to detect a valid buildpack group | No (only ever seen with Tiny, now dropped; a Base-detection failure would be a genuinely new app-shape problem) | No — `pack build` exits non-zero, workflow fails | Clear (CI job fails, exact detection log visible) |
 | trivy scan | CRITICAL finding | Yes (Success Criteria) | Yes — blocks before attach | Clear (CI job fails with reason) |
 | GHCR push | `GITHUB_TOKEN` permissions misconfigured (missing `packages: write`) | No test (documented instead) | Push fails loudly with a permissions error | Clear — CI job fails, not silent |
 | `mise run approve` | OpenBao process not running | **Gap** — not yet specified | Not yet specified | **Should be**: clear connection-refused error, not silent |
@@ -1084,17 +1094,21 @@ finding above. Run with Claude Code or Codex; checkbox as you ship.
     `IMPORT_OUTSIDE_FILE_MAP` error — out of scope for T4 (build-only),
     a real gap T5b's acceptance criteria account for explicitly.
 - [x] **T4 (P1, human: ~1-2h / CC: ~15min)** — GitHub Actions — Workflow:
-  checkout pinned SHA → buildpacks (Tiny, `if: failure()` → Base,
-  `--publish` direct to GHCR) → `GITHUB_TOKEN` auth → trivy scan+SBOM
-  (cached DB) → oras attach SBOM. **Corrected while implementing:** "oras
-  push to GHCR" as originally worded doesn't map to a real command —
-  `oras push` pushes arbitrary files as OCI artifacts, not a
-  buildpacks-built image; `pack build --publish` is buildpacks' own
-  native direct-to-registry publish, and it's what actually produces the
-  digest this workflow reads back (`report.toml`'s `[image].digest`).
-  `oras` stays scoped to what File Layout already says it's for:
-  attaching referrers (SBOM here, approval/provenance later), never the
-  primary image push.
+  checkout pinned SHA → buildpacks (`builder-jammy-base`, `--publish`
+  direct to GHCR) → `GITHUB_TOKEN` auth → trivy scan+SBOM (cached DB) →
+  oras attach SBOM. **Two corrections made after the design, both while
+  implementing or from the first live run:** (1) "oras push to GHCR" as
+  originally worded doesn't map to a real command — `oras push` pushes
+  arbitrary files as OCI artifacts, not a buildpacks-built image;
+  `pack build --publish` is buildpacks' own native direct-to-registry
+  publish, and it's what actually produces the digest this workflow
+  reads back (`report.toml`'s `[image].digest`). `oras` stays scoped to
+  what File Layout already says it's for: attaching referrers (SBOM
+  here, approval/provenance later), never the primary image push.
+  (2) The Tiny→Base fallback (T4a: Tiny fails outright, no Node.js
+  buildpack in it) was dropped entirely after the first live run's logs
+  showed 510 lines of doomed Java/Go detection churn every run — Base is
+  now the only, unconditional build step.
   - Surfaced by: eng-review Issues 1 & 3, Test gap 1, Performance issue
   - Files: `.github/workflows/build-cv-frontend.yml` — every third-party
     action pinned by commit SHA, not a tag (this design's own

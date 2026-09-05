@@ -59,25 +59,14 @@ jobs:
       - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-      # Tiny always fails detection for this app (verified: T4a's pack
-      # build dry run found builder-jammy-tiny ships no Node.js buildpack
-      # at all -- not a maybe, a certainty for this stack). The fallback
-      # stays anyway: harmless if Tiny ever becomes viable, and keeps this
-      # workflow honest about what "Tiny, fall back to Base" actually means
-      # rather than hardcoding Base and hiding the attempt.
-      - name: Build with buildpacks (Tiny stack)
-        id: build_tiny
-        continue-on-error: true
-        run: |
-          pack build "$IMAGE:${{ inputs.cv_frontend_sha }}" \
-            --path cv_frontend \
-            --builder paketobuildpacks/builder-jammy-tiny \
-            --pull-policy if-not-present \
-            --publish \
-            --report-output-dir .
-
-      - name: Build with buildpacks (Base stack fallback)
-        if: steps.build_tiny.outcome == 'failure'
+      # No Tiny-stack attempt: verified twice (T4a's local dry run, and
+      # this workflow's own live logs -- 510 lines of Java/Go buildpack
+      # detection churn per run, every run) that builder-jammy-tiny ships
+      # no Node.js buildpack at all. Not a maybe, a permanent certainty
+      # for this stack -- keeping a doomed attempt "in case Tiny becomes
+      # viable" was dead weight once the uncertainty it hedged against
+      # was actually resolved, not still open.
+      - name: Build with buildpacks (Base stack -- Tiny doesn't support Node.js)
         run: |
           pack build "$IMAGE:${{ inputs.cv_frontend_sha }}" \
             --path cv_frontend \
