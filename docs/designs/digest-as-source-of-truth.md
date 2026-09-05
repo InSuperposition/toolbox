@@ -898,20 +898,20 @@ a generic exit code.
 Synthesized from this review's findings. Each task derives from a specific
 finding above. Run with Claude Code or Codex; checkbox as you ship.
 
-- [ ] **T1 (P1, human: ~2-4h / CC: ~20min)** — mise.toml — Pin `mise.toml`'s
+- [x] **T1 (P1, human: ~2-4h / CC: ~20min)** — mise.toml — Pin `mise.toml`'s
   wedge-relevant tools to concrete versions, dropping `latest`
   - Surfaced by: The Assignment
   - Files: `mise.toml`
   - Verify: `mise install` succeeds, no `latest` entries remain for the
     named tools
-- [ ] **T2 (P1, human: ~1h / CC: ~15min)** — repo hygiene — Remove empty
+- [x] **T2 (P1, human: ~1h / CC: ~15min)** — repo hygiene — Remove empty
   `modules/ci-build-frontend/`, update CLAUDE.md's Tool Boundaries row +
   §Module Structure exception
   - Surfaced by: The Assignment, File Layout
   - Files: `CLAUDE.md`, `modules/ci-build-frontend/` (deleted)
   - Verify: directory gone, CLAUDE.md describes the real `task-*`/
     `pipeline-*`/`deploy/` layout
-- [ ] **T3 (P1, human: ~2h / CC: ~20min)** — OpenBao — Provision Transit
+- [x] **T3 (P1, human: ~2h / CC: ~20min)** — OpenBao — Provision Transit
   engine + approval-key via `opentofu/vault` provider, run OpenBao as a
   `pitchfork`-supervised local process (file storage, not `-dev` mode)
   - Surfaced by: eng-review Issue 2, script-minimization pass

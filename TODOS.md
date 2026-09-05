@@ -98,3 +98,29 @@ documented alternative already.
 **Effort:** M
 **Priority:** P3
 **Depends on:** digest-as-source-of-truth Phase 1-3 stable
+
+### Migrate OpenBao off the file storage backend before v2.7.0
+
+**What:** Run `bao operator migrate` to move `deploy/cv-frontend`'s local
+OpenBao process off the `file` storage backend to a supported one (e.g.
+`raft`/integrated storage) before upgrading past OpenBao v2.6.x.
+
+**Why:** Starting the pitchfork-supervised OpenBao process (T3) surfaced a
+live warning not previously known when the design was written: `storage.
+file: the file physical backend is deprecated; use bao operator migrate to
+move to a supported storage backend by v2.7.0`. `openbao.hcl` pins `file`
+today deliberately (matches the design doc's original T3 spec verbatim),
+but that spec predates this deprecation notice — this is a real,
+version-pin-relevant gap the design didn't anticipate, not a hypothetical.
+
+**Context:** Discovered 2026-09-05 during T3's live smoke test (`pitchfork
+start openbao`, real init/unseal/apply cycle against OpenBao 2.6.2).
+Migrating changes the storage stanza in `deploy/cv-frontend/openbao/
+openbao.hcl` and the daemon's data layout — do this deliberately, with a
+tested backup first (see T6 in `docs/designs/digest-as-source-of-truth.md`,
+also not yet built), not as a surprise side effect of a routine `mise
+install` version bump.
+
+**Effort:** S
+**Priority:** P1 (blocks safely bumping `openbao` past 2.6.x in mise.toml)
+**Depends on:** T6 (OpenBao storage backup/restore) landing first
