@@ -120,6 +120,21 @@ Boundaries table row + §Module Structure's named exception for it are
 updated to describe this real layout instead of a placeholder name (see The
 Assignment). Nothing is lost: the directory was empty.
 
+**OpenBao/Transit placement (added after T3's first ship — this diagram
+never covered it originally, a real gap, not a revision of a stated
+decision):** `modules/secret-openbao-local/` is a reusable module —
+Transit engine + an arbitrary set of signing keys + the rendered
+`openbao.hcl` server config — instantiated **once**, at the repo root
+(`main.tf`, alongside `pitchfork.toml` supervising the one shared OpenBao
+daemon). It is not per-consumer: T3's `approval-key` and T8's future
+`chains-provenance-key` are two entries in the same root `main.tf`'s
+`transit_keys` list, not two OpenBao instances. `deploy/cv-frontend/` only
+ever references the key by name (`openbao://approval-key`) — it never
+provisions OpenBao itself. Separate from the deferred production
+`secret-openbao` module (different lifecycle: local pitchfork-supervised
+dev daemon vs. real cluster infra) — see that module's sibling
+`secret-openbao-local/README.md` for the full reasoning.
+
 **No embedded scripts in Tekton YAML** — this is already this repo's
 mandatory global rule ("No code inside configuration files... CI pipeline
 steps"), applied here explicitly: every Task step that's a single pinned-CLI
@@ -913,11 +928,17 @@ finding above. Run with Claude Code or Codex; checkbox as you ship.
     `pipeline-*`/`deploy/` layout
 - [x] **T3 (P1, human: ~2h / CC: ~20min)** — OpenBao — Provision Transit
   engine + approval-key via `opentofu/vault` provider, run OpenBao as a
-  `pitchfork`-supervised local process (file storage, not `-dev` mode)
+  `pitchfork`-supervised local process (raft storage, not `-dev` mode —
+  revised from the original `file`-storage spec, see File Layout below)
   - Surfaced by: eng-review Issue 2, script-minimization pass
-  - Files: `deploy/cv-frontend/*.tf`, `.pitchfork.toml` (or equivalent)
+  - Files: `modules/secret-openbao-local/` (reusable: Transit engine +
+    N keys + rendered server config), root `main.tf`/`pitchfork.toml`
+    (the one shared instance), `deploy/cv-frontend/` no longer owns any
+    of this — reworked after the first ship surfaced OpenBao's `file`
+    backend deprecation and that this isn't cv-frontend-specific (T8
+    needs a second key in the same instance)
   - Verify: `bao secrets list` shows `transit/`, key exists, pitchfork
-    autostarts it
+    autostarts it from repo root
 - [ ] **T4 (P1, human: ~1-2h / CC: ~15min)** — GitHub Actions — Workflow:
   checkout pinned SHA → buildpacks (Tiny, `if: failure()` → Base) → oras
   push to GHCR (OIDC) → trivy scan+SBOM (cached DB) → oras attach SBOM

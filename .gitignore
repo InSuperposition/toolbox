@@ -1,3 +1,4 @@
 .claude/
 .terraform/
-deploy/cv-frontend/openbao/data/
+/openbao/data/
+modules/*/tests/tmp/

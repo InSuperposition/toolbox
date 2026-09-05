@@ -1,6 +1,6 @@
-# Points at the local pitchfork-supervised OpenBao process (pitchfork.toml)
-# — NOT the deferred production `secret-openbao` module. See CLAUDE.md
-# § Tool Boundaries and TODOS.md.
+# Points at the local pitchfork-supervised OpenBao process (pitchfork.toml
+# at repo root) — NOT the deferred production `secret-openbao` module. See
+# CLAUDE.md § Tool Boundaries and TODOS.md.
 #
 # Auth: `token` is left unset here on purpose (Zero Trust — no plaintext
 # secret in repo). The vault provider's SDK falls back to the VAULT_ADDR /

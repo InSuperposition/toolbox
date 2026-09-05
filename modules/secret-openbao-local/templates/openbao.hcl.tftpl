@@ -1,0 +1,23 @@
+# Rendered by modules/secret-openbao-local — do not edit by hand, edit
+# the module inputs instead (tofu apply re-renders this file).
+#
+# Raft storage, not `file` — OpenBao >=2.0's `file` physical backend is
+# deprecated (removal targeted for v2.7.0). `disable_mlock` is
+# intentionally absent: OpenBao >=2.0 removed mlock support entirely
+# (openbao/openbao GH-363), so the option is an obsolete no-op.
+#
+# Loopback-only, TLS disabled: this is a local dev daemon
+# (pitchfork-supervised), not production infra.
+
+storage "raft" {
+  path    = "${data_path}"
+  node_id = "${node_id}"
+}
+
+listener "tcp" {
+  address     = "${listener_address}"
+  tls_disable = true
+}
+
+api_addr     = "http://${listener_address}"
+cluster_addr = "https://${cluster_address}"

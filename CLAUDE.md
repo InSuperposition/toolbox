@@ -94,12 +94,17 @@ each row links to.
 ## Module Structure & Naming
 
 Naming: `modules/<type>-<tool>` — existing: `vm-orbstack`, `cluster-k0sctl`,
-`secret-openbao`, plus the Tekton catalog pieces below.
+`secret-openbao`, `secret-openbao-local`, plus the Tekton catalog pieces
+below.
 
 Standard per-module layout — `main.tf`, `variables.tf`, `outputs.tf`,
 `versions.tf`, `README.md`, `tests/*.tftest.hcl` — applies to **OpenTofu
-modules specifically**: `vm-orbstack`, `cluster-k0sctl`, `secret-openbao`
-are OpenTofu modules and get this skeleton.
+modules specifically**: `vm-orbstack`, `cluster-k0sctl`, `secret-openbao`,
+`secret-openbao-local` are OpenTofu modules and get this skeleton.
+`secret-openbao-local` is deliberately a sibling of `secret-openbao`, not
+a variant of it — one provisions a real cluster secret store (deferred),
+the other a disposable local dev daemon consumed by the root composition
+today (see `modules/secret-openbao-local/README.md`).
 
 **Resolved exception:** `modules/task-buildpacks-build`,
 `modules/task-trivy-scan`, `modules/task-oras-attach`,
