@@ -1083,7 +1083,7 @@ finding above. Run with Claude Code or Codex; checkbox as you ship.
     the built image crashes at runtime with a `cv_frontend`-side Remix v3
     `IMPORT_OUTSIDE_FILE_MAP` error — out of scope for T4 (build-only),
     a real gap T5b's acceptance criteria account for explicitly.
-- [ ] **T4 (P1, human: ~1-2h / CC: ~15min)** — GitHub Actions — Workflow:
+- [x] **T4 (P1, human: ~1-2h / CC: ~15min)** — GitHub Actions — Workflow:
   checkout pinned SHA → buildpacks (Tiny, `if: failure()` → Base,
   `--publish` direct to GHCR) → `GITHUB_TOKEN` auth → trivy scan+SBOM
   (cached DB) → oras attach SBOM. **Corrected while implementing:** "oras
@@ -1100,13 +1100,20 @@ finding above. Run with Claude Code or Codex; checkbox as you ship.
     action pinned by commit SHA, not a tag (this design's own
     digest-over-tag thesis applied to its own CI, not just what it
     builds)
-  - Verify: `actionlint` clean. Not yet run for real — `toolbox` has no
-    GitHub remote yet, so no workflow run exists to point at. Confirmed
-    working pieces locally first (T4a): `pack build --publish
-    --report-output-dir` against a local test registry correctly
-    produces a `digest = "sha256:..."` field; `cv_frontend`
-    (`InSuperposition/cv_frontend`, public, HEAD `cb333ee1...`) is
-    already pushed and buildable via the Base stack.
+  - Verify: **done, run live** —
+    [run 33981326429](https://github.com/InSuperposition/toolbox/actions/runs/33981326429),
+    `conclusion: success`, against `cv_frontend@d1bfdd19...`. Two real
+    bugs caught by the live run, not by review: `IMAGE` needed
+    lowercasing (GHCR rejects mixed-case refs; GitHub Actions has no
+    `toLower()` expression function — computed via a shell step into
+    `$GITHUB_ENV` instead) and two CRITICAL CVEs, both bundled-tooling
+    issues neither `cv_frontend` nor toolbox can fix directly today
+    (`golang.org/x/crypto` in `npm-install`'s helper binary, `node-tar`
+    bundled in Node 24.19.0's own npm — a real fix for the second one
+    exists in Node 24.20.0, confirmed live, but `builder-jammy-base`
+    hasn't indexed it yet) — both accepted as time-boxed exceptions in
+    `.trivyignore` (`exp:2026-12-04`, tracked in TODOS.md), not silently
+    worked around.
 - [ ] **T5 (P1, human: ~1-2h / CC: ~15min)** — approve/consume — `mise run
   approve -- <digest>` (schema.json with verdict+reason, `cosign attest`
   via OpenBao) and `mise run consume -- <digest>` (one-line `cosign
