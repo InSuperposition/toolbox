@@ -2,6 +2,35 @@
 
 ## Infrastructure
 
+### Remove `.trivyignore` entry for CVE-2026-56854
+
+**What:** Delete the `CVE-2026-56854 exp:2026-12-04` line from `.trivyignore`
+once `paketo-buildpacks/npm-install` bumps `golang.org/x/crypto` past
+0.54.0, or re-evaluate the risk acceptance if the expiry passes first.
+
+**Why:** T4's live workflow run blocked on this CRITICAL CVE
+(`golang.org/x/crypto/ssh` auth bypass) in `builder-jammy-base`'s
+`npm-install` buildpack's own `exec.d` symlink-setup helper — not
+`cv_frontend`'s or toolbox's code. Confirmed no fix exists yet: still
+pinned at `v0.54.0 // indirect` on `npm-install`'s `main` branch, no
+upstream GitHub issue filed by anyone as of this writing. Accepted as a
+time-boxed risk (the helper never establishes an SSH connection, so the
+auth-bypass vector doesn't apply here) rather than blocking T4
+indefinitely on someone else's unscheduled dependency bump.
+
+**Context:** Researched via `gh search issues` across `paketo-buildpacks`
+org and GitHub-wide — this CVE is hitting many unrelated Go projects
+right now (disclosed ~2026-08-30), several using the same
+trivyignore-with-tracked-removal pattern. Check `paketo-buildpacks/
+npm-install`'s `go.mod` on `main` for the current pinned version before
+removing this entry — don't assume a new builder tag alone fixed it.
+
+**Effort:** S (check + delete one line, or file an upstream issue if none
+exists by the expiry)
+**Priority:** P2
+**Depends on:** `paketo-buildpacks/npm-install` releasing a fix, or the
+2026-12-04 expiry forcing a re-check
+
 ### Decide public hosting for cv_frontend
 
 **What:** Choose where the actual public `cv_frontend` site lives for a

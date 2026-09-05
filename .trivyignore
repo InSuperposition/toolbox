@@ -1,0 +1,13 @@
+# Accepted risk, tracked in TODOS.md ("Remove .trivyignore entry for
+# CVE-2026-56854") -- remove this line once either is true:
+#   1. paketo-buildpacks/npm-install bumps golang.org/x/crypto to >=0.55.0
+#      (confirmed still pinned at 0.54.0 on its main branch as of this
+#      writing -- no fix released yet, no upstream issue filed either),
+#   2. or this expiry passes, forcing a re-check rather than silently
+#      accepting the risk indefinitely.
+# The vulnerable binary is npm-install's own exec.d symlink-setup helper
+# (a build-time buildpack tool embedded in the launch layer), not
+# cv_frontend's or toolbox's code -- CVE-2026-56854 is an SSH
+# auth-bypass in golang.org/x/crypto/ssh; that helper never establishes
+# an SSH connection.
+CVE-2026-56854 exp:2026-12-04
