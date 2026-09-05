@@ -31,6 +31,36 @@ exists by the expiry)
 **Depends on:** `paketo-buildpacks/npm-install` releasing a fix, or the
 2026-12-04 expiry forcing a re-check
 
+### Remove `.trivyignore` entry for CVE-2026-59873
+
+**What:** Delete the `CVE-2026-59873 exp:2026-12-04` line from
+`.trivyignore` once `builder-jammy-base` indexes Node `>=24.20.0`, or
+re-evaluate if the expiry passes first.
+
+**Why:** T4's live workflow run also blocked on this CRITICAL CVE
+(`node-tar` DoS via crafted gzip bomb) — but not in `cv_frontend`'s
+dependency tree at all (verified: no `tar` entry anywhere in its
+`package-lock.json`). It's bundled inside Node 24.19.0's own npm
+installation, selected by the `node-engine` buildpack. The fix already
+exists upstream — confirmed live: Node 24.20.0 bundles npm 11.19.0 →
+`tar` 7.5.19 — but `builder-jammy-base`'s own Node version index tops out
+at 24.19.0 (`pack build --env BP_NODE_VERSION=24.20.0` fails outright,
+lists supported versions ending at 24.19.0/26.6.0). Accepted as a
+time-boxed risk (npm is never invoked at runtime by this app) rather than
+blocking T4 on a builder-image rebuild with no committed schedule.
+
+**Context:** Same investigation session as the CVE-2026-56854 entry
+above — searched `paketo-buildpacks/node-engine` and GitHub-wide, no
+upstream issue tracks this specific version-index gap. Re-run `pack
+build --env BP_NODE_VERSION=24.20.0` (or whatever the target version is
+by then) against the current builder to check if the index caught up —
+don't assume a new builder tag alone means every version is indexed.
+
+**Effort:** S (check + delete one line)
+**Priority:** P2
+**Depends on:** `builder-jammy-base` indexing a fixed Node version, or
+the 2026-12-04 expiry forcing a re-check
+
 ### Decide public hosting for cv_frontend
 
 **What:** Choose where the actual public `cv_frontend` site lives for a

@@ -11,3 +11,23 @@
 # auth-bypass in golang.org/x/crypto/ssh; that helper never establishes
 # an SSH connection.
 CVE-2026-56854 exp:2026-12-04
+
+# Accepted risk, tracked in TODOS.md ("Remove .trivyignore entry for
+# CVE-2026-59873") -- remove this line once either is true:
+#   1. paketo-buildpacks/node-engine's builder-jammy-base indexes Node
+#      >=24.20.0 (confirmed live: Node 24.20.0 already bundles npm 11.19.0
+#      -> tar 7.5.19, the fix -- but builder-jammy-base's own Node index
+#      tops out at 24.19.0; `pack build --env BP_NODE_VERSION=24.20.0`
+#      fails outright: "no compatible versions... Supported versions are:
+#      [...24.18.1, 24.19.0, 26.6.0...]". The fix exists upstream, this
+#      builder image just hasn't re-baked to include it yet.),
+#   2. or this expiry passes, forcing a re-check.
+# The vulnerable tar is bundled inside Node 24.19.0's own npm installation
+# (layers/paketo-buildpacks_node-engine/node/lib/node_modules/npm/
+# node_modules/tar) -- not cv_frontend's dependency tree (confirmed: it
+# has no `tar` entry anywhere in its own package-lock.json). npm is never
+# invoked at runtime by this app (`node --import remix/node-tsx
+# server.ts`, no npm subprocess), so the DoS-via-crafted-gzip vector needs
+# something to feed it attacker-controlled archive data at runtime, which
+# doesn't happen here.
+CVE-2026-59873 exp:2026-12-04
