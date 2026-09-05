@@ -63,7 +63,7 @@ each row links to.
 | **pitchfork** | Local dev daemon supervision only (directory-scoped autostart/autostop). | Repo-policy choice — pitchfork itself can run production daemons; we simply don't use it that way here. |
 | **hk** | Sole git-hook gate — concurrent, file-locked, three-way-merge stash-safe. | Config in `hk.pkl`. |
 | **mise** | Bootstrap + task runner. | Call graph is one direction only: `mise run check` → `hk check` → individual linters/formatters. `hk.pkl` never calls back into a mise task. |
-| **CI build/scan/approve pipeline** | Digest-pinned build → scan+SBOM → cosign-signed approval gate for app repos consumed by this stack (e.g. `cv_frontend`). | Reusable pieces live in `modules/task-buildpacks-build`, `modules/task-trivy-scan`, `modules/task-oras-attach`, `modules/pipeline-build-scan-approve` (Tekton Tasks/Pipeline, parameterized — not app-specific); a per-consumer instance lives in `deploy/<consumer>/` (e.g. `deploy/cv-frontend/`). Design: `docs/designs/digest-as-source-of-truth.md`. Replaces the earlier placeholder `ci-build-frontend` module name/directory. |
+| **CI build/scan/approve pipeline** | Digest-pinned build → scan+SBOM → cosign-signed approval gate for app repos consumed by this stack (e.g. `cv_frontend`). | Reusable pieces live in `modules/task-buildpacks-build`, `modules/task-trivy-scan`, `modules/task-oras-attach`, `modules/pipeline-build-scan-approve` (Tekton Tasks/Pipeline, parameterized — not app-specific); a per-consumer instance lives in `deploy/<consumer>/` (e.g. `deploy/frontend/`). Design: `docs/designs/digest-as-source-of-truth.md`. Replaces the earlier placeholder `ci-build-frontend` module name/directory. |
 | **chainsaw / kubeconform** | Primary test tools for k8s manifests — not strictly exclusive. | See Testing Strategy (§9). |
 
 ## GitOps Flow
@@ -113,7 +113,7 @@ OpenTofu — they mirror [tektoncd/catalog](https://github.com/tektoncd/catalog)
 kind-first, versioned convention instead (`<kind>/<name>/<version>/`),
 parameterized so they're reusable across any future app, not one consumer.
 A per-consumer instantiation (PipelineRun binding + consumer-specific
-scripts/tests) lives in `deploy/<consumer>/` (e.g. `deploy/cv-frontend/`),
+scripts/tests) lives in `deploy/<consumer>/` (e.g. `deploy/frontend/`),
 matching this repo's own Repo Role split (`modules/` reusable, a root
 composition applies them) extended to a new resource kind rather than
 inventing a separate pattern. This replaces the earlier placeholder

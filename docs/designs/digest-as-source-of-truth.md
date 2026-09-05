@@ -74,7 +74,7 @@ modules/task-oras-attach/         # reusable Task: attach an arbitrary OCI refer
 modules/pipeline-build-scan-approve/  # reusable Pipeline: build -> scan+SBOM -> attach SBOM (3 automated Tasks;
                                    # "approve" in the name is the Pipeline's PURPOSE, not a 4th in-Pipeline Task —
                                    # see Approach D for the concrete approval mechanism, resolved below)
-deploy/cv-frontend/               # THE instantiation: PipelineRun binding the reusable Pipeline to
+deploy/frontend/               # THE instantiation: PipelineRun binding the reusable Pipeline to
                                    # cv_frontend's repo URL + pinned SHA;
                                    #   scripts/approve.sh    - repo owner runs this, outside Tekton (below)
                                    #   scripts/consume.sh    - the consume-side gate: cosign verify-attestation
@@ -94,7 +94,7 @@ Pipeline's TaskRuns independently and auto-attaches its provenance referrer
 — also not a Task, a separate controller reacting to TaskRun completion.
 **Approval happens after and outside that automatic run, and outside
 Tekton entirely**: the repo owner, having read the SBOM and provenance
-evidence, runs `deploy/cv-frontend/scripts/approve.sh <digest>` directly —
+evidence, runs `deploy/frontend/scripts/approve.sh <digest>` directly —
 a plain script, not a Task, not embedded in any YAML. It runs exactly one
 command: `cosign attest --predicate schema.json --key
 <approval-private-key> <image>@<digest>` — this alone both signs the JSON
@@ -138,7 +138,7 @@ subdirectories, so it has to live somewhere reachable from wherever
 actual `bao server` process at the right working directory without
 splitting path conventions. Bootstrap is `mise run openbao-bootstrap`
 (`scripts/bootstrap-openbao.sh`), which also stores the root token via
-`fnox` (OS keychain) instead of a manual `export`. `deploy/cv-frontend/`
+`fnox` (OS keychain) instead of a manual `export`. `deploy/frontend/`
 only ever references a key by name (`openbao://approval-key`) — it never
 provisions OpenBao itself. Separate from the deferred production
 `secret-openbao` module (different lifecycle: local pitchfork-supervised
@@ -151,7 +151,7 @@ mandatory global rule ("No code inside configuration files... CI pipeline
 steps"), applied here explicitly: every Task step that's a single pinned-CLI
 invocation (`pack build`, `oras push`, `oras attach`, `trivy image`) uses
 Kubernetes' native `command`/`args` fields directly — no `script:` block, no
-inline shell. `deploy/cv-frontend/scripts/approve.sh` (the one place with
+inline shell. `deploy/frontend/scripts/approve.sh` (the one place with
 real logic — reading evidence, deciding go/no-go) is **not part of any
 Tekton Task or Pipeline at all** — it's a plain script the repo owner runs
 directly, outside the cluster. That's not a gap in "not very DevOps to run
@@ -173,7 +173,7 @@ gate a real trust boundary rather than an unenforced formality.
 - **`zot` is also a new pinned tool** (missed in an earlier pass, corrected
   here) — same category as `cosign` below: not in `mise.toml` today. Runs
   as a single static binary on the OrbStack cluster (or locally via `mise`
-  for dev), config at `deploy/cv-frontend/zot-config.json`.
+  for dev), config at `deploy/frontend/zot-config.json`.
 - *Public-trust* signing is explicitly deferred — human-friendly tags and
   Fulcio/keyless cosign signing come later. The approval step itself now
   uses a private, unpublished cosign keypair (see the credential-boundary
@@ -405,7 +405,7 @@ command (`orb start k8s`), no OpenTofu, no `cluster-k0sctl` involvement
 Mechanism: the reusable `modules/pipeline-build-scan-approve/` Pipeline
 (composing `task-buildpacks-build`, `task-trivy-scan`, `task-oras-attach` —
 see File Layout) runs fully automatically on the OrbStack cluster,
-instantiated for `cv_frontend` via `deploy/cv-frontend/`. Each Task step
+instantiated for `cv_frontend` via `deploy/frontend/`. Each Task step
 invokes its pinned CLI directly via `command`/`args` (no embedded scripts —
 see File Layout). Approval runs entirely outside Tekton, after the
 automatic run completes — see File Layout's "Concrete approval mechanism"
@@ -496,9 +496,14 @@ belongs after D is proven, not instead of it.
   wedge touches, including the newly-added `cosign` and `zot`.
 - The full path (checkout pinned SHA → build → push → scan+SBOM → Chains
   provenance → attach approval → consume) runs end to end against the real
-  `cv_frontend` repo, via `orb start k8s` on this Apple Silicon host's
-  native `arm64` cluster — running an `amd64` built image (Constraints:
-  Paketo's builders are amd64-only) under emulation, not natively.
+  `cv_frontend` repo. `orb start k8s` on this Apple Silicon host's native
+  `arm64` cluster hosts Tekton Pipelines/Chains (the build engine) only
+  — revised this session: consumption/running the approved `amd64` image
+  (Constraints: Paketo's builders are amd64-only) happens via a
+  `pitchfork`-supervised Docker container on the host directly (T5b), not
+  in-cluster. Either way it's under Rosetta emulation somewhere, not
+  natively — the cluster's own build execution still needs the same
+  emulation question resolved separately (T7's open feasibility flag).
 - Every build produces a Chains-generated provenance attestation, verifiable
   with `cosign verify-attestation --key <chains-public-key>` (Chains' own
   keypair, distinct from `<approval-public-key>` used elsewhere) against
@@ -591,11 +596,13 @@ Pipeline runs on demand / manually triggered, not yet webhook-driven).
   `cv_frontend`-side application config issue, not a toolbox/buildpacks
   problem, out of this repo's scope to fix. **Real, currently-unverified
   gap this surfaces:** T4 only proves the image *builds*, not that it
-  *runs* — that gap is inherited by T7's demo namespace, which is the
+  *runs* — that gap is inherited by T5b (the local pitchfork deploy,
+  revised this session from an earlier k8s-namespace plan), which is the
   first point in this design that would actually try to run the built
   image and discover this crash. Not blocking T4 (matches its stated
-  scope: build+scan+SBOM, not deploy+health-check) — tracked as a T7
-  input, not solved here.
+  scope: build+scan+SBOM, not deploy+health-check) — T5b's own acceptance
+  criteria account for it explicitly (proves the pipeline mechanism, not
+  `cv_frontend`'s correctness) rather than blocking on it.
 - OrbStack's built-in Kubernetes (`orb start k8s`) must be running to host
   Tekton Pipelines + Chains — a dev/CI-only cluster, distinct from
   `cluster-k0sctl`'s production cluster (see Premises #5 clarification).
@@ -688,8 +695,8 @@ are folded in below, each with its reasoning — not just the conclusion.
     repo's own Tool Boundaries table exactly: "OpenTofu owns... the OpenBao
     secret engine." A reusable module (`modules/secret-openbao-local/`)
     instantiated from `environments/local/main.tf` — not `deploy/
-    cv-frontend/` (moved there after T3's first ship revealed this isn't
-    cv-frontend-specific — see File Layout's OpenBao/Transit placement
+    frontend/` (moved there after T3's first ship revealed this isn't
+    frontend-specific — see File Layout's OpenBao/Transit placement
     note) and not the deferred production `secret-openbao` module.).
   - **Fallback/auth logic: declarative, no scripts** (eng-review finding —
     the Tiny→Base buildpack fallback is a GitHub Actions `if:
@@ -743,15 +750,52 @@ are folded in below, each with its reasoning — not just the conclusion.
   lifecycle-execution approach for Tekton, which sidesteps needing a daemon
   at all. This is a feasibility spike that belongs *before* the Task YAML
   is written, not discovered during it.
-  **Demo consumption (outside-voice finding, locked):** a `cv-frontend`
-  namespace on this same cluster gets a Deployment referencing the
-  verified digest — `mise run consume` gates a real `kubectl apply`, not
-  just a standalone signature check. Closes the "verification passes but
-  nothing actually consumes it" gap. This is explicitly a **demo/proof**
-  deployment on the dev/CI cluster, not where the real public `cv_frontend`
-  site lives — actual public hosting (Vercel/Netlify, or the eventual
-  `cluster-k0sctl` production cluster) is a separate, tracked decision
-  (TODOS.md), not solved by this namespace.
+  **Demo consumption — reopened (T5b, was locked via an earlier
+  outside-voice finding, now revised):** the original version of this
+  paragraph put a `cv-frontend` namespace on this same cluster, with
+  `mise run consume` gating a real `kubectl apply`. Revised this
+  session: the app's deploy target moves to a standalone
+  `pitchfork`-supervised Docker container on the dev Mac instead —
+  `orb start k8s` is unaffected, it still exists solely to host Tekton
+  Pipelines/Chains (this Phase 2/3 build engine), not the app. Rationale
+  (a `/plan-eng-review` + Codex pass, D1-D6): Tekton's k8s dependency is
+  about the *build engine*, not a requirement that the deployed app also
+  live in-cluster — the same separation this design already applies to
+  the approval step itself (which runs "outside Tekton entirely," see
+  File Layout). Keeps the cluster architecture-agnostic (arm64-native,
+  no amd64-image scheduling concerns) and the app genuinely doesn't need
+  orchestration for a single instance.
+  Mechanism: `pitchfork.toml` (repo root) gets one `[daemons.frontend]`
+  entry whose `run=` always points at a fixed wrapper script
+  (`deploy/frontend/run.sh`) — never edited after initial setup, to
+  avoid a script mutating pitchfork's own config on every approval. The
+  wrapper reads the currently-approved image reference from a
+  git-ignored state file (`deploy/frontend/current-image.txt`, written
+  **atomically** — temp file + rename — storing the *full*
+  `registry/repo@sha256:...` reference so a later GHCR→zot registry
+  migration can't silently reinterpret an old file) and **re-verifies
+  its cosign approval at launch time too**, not only at consume time —
+  via a small shared script (`deploy/frontend/scripts/
+  verify-approval.sh`) both `mise run consume` and the wrapper call.
+  `mise run consume` writes the new reference, then `pitchfork restart
+  frontend`; a real HTTP readiness check on port 44100 (Remix v3's own
+  default) after restart reports the truthful result, not an assumed
+  success. Concurrent `mise run consume` invocations are a **named,
+  accepted constraint** (single-operator CLI tool, don't run it twice at
+  once) — not solved with locking, a deliberate scope cut. `docker run`
+  stays foreground, no `-d`, no `--restart` — pitchfork is the sole
+  supervisor, never two competing ones.
+  **What this proves, precisely (Codex catch):** the *pipeline
+  mechanism* — right image pulled, container starts under pitchfork,
+  readiness genuinely checked — not `cv_frontend`'s own correctness.
+  `cv_frontend` currently crashes at runtime with a Remix v3
+  `IMPORT_OUTSIDE_FILE_MAP` error (T4a's dry run, a different repo's
+  bug) — T5b's acceptance criteria account for this explicitly rather
+  than blocking on unscheduled work elsewhere. Still explicitly a
+  **demo/proof** mechanism, not where the real public `cv_frontend` site
+  lives — actual public hosting (Vercel/Netlify, or the eventual
+  `cluster-k0sctl` production cluster) stays a separate, tracked decision
+  (TODOS.md), unaffected by this change.
 
 - **Phase 3** (Tekton Chains): install Chains on Phase 2's cluster. Its
   provenance-signing key is **also OpenBao Transit-backed** (eng-review
@@ -860,9 +904,9 @@ procedure — not a new tool, `bao` already ships the snapshot command.
 - **cv_frontend's runtime `IMPORT_OUTSIDE_FILE_MAP` crash** (found during
   T4's `pack build` dry run, see Dependencies) — a Remix v3 beta
   application-config issue in a different repo, out of toolbox's scope to
-  fix. T7's demo namespace is the first point this design would actually
-  run the built image; fix it there or in `cv_frontend` directly before
-  that lands.
+  fix. T5b (local pitchfork deploy) is the first point this design would
+  actually run the built image; T5b's own acceptance criteria account
+  for the crash explicitly rather than blocking on a fix landing first.
 - **Pipelines-as-Code webhook triggering** — this wedge's Pipeline runs
   on-demand/manually triggered; webhook-driven triggering is the
   already-researched future mechanism per CLAUDE.md, not required to prove
@@ -963,14 +1007,14 @@ a generic exit code.
 | Step | Modules touched | Depends on |
 |---|---|---|
 | Phase 0 (mise.toml + CLAUDE.md) | root files only | — |
-| Phase 1 build/scan (GHA workflow) | `.github/workflows/`, `deploy/cv-frontend/` | Phase 0 |
-| Phase 1 approve/consume (OpenBao + cosign) | `deploy/cv-frontend/scripts/`, `environments/local/`, `modules/secret-openbao-local/` | Phase 0 |
+| Phase 1 build/scan (GHA workflow) | `.github/workflows/`, `deploy/frontend/` | Phase 0 |
+| Phase 1 approve/consume (OpenBao + cosign) | `deploy/frontend/scripts/`, `environments/local/`, `modules/secret-openbao-local/` | Phase 0 |
 | Phase 4 (hk bisect-safety) | `hk.pkl`, CI config | — (independent of everything) |
 | Phase 2 (Tekton Tasks/Pipeline) | `modules/task-*`, `modules/pipeline-*` | Phase 1 proven |
 | Phase 3 (Chains) | Tekton install, OpenBao (2nd Transit key) | Phase 2 |
 
 **Lanes:**
-- Lane A: Phase 0 → Phase 1 (sequential, both touch `deploy/cv-frontend/`
+- Lane A: Phase 0 → Phase 1 (sequential, both touch `deploy/frontend/`
   and root config).
 - Lane B: Phase 4 (independent — `hk.pkl` only, no shared modules with
   Lane A).
@@ -1011,9 +1055,9 @@ finding above. Run with Claude Code or Codex; checkbox as you ship.
     `scripts/{bootstrap,reset}-openbao.sh` + 2 `mise.toml` tasks
     (`openbao-bootstrap`/`openbao-reset`), `fnox.toml` (root token in OS
     keychain, no manual `export`), `environments/local/tests/
-    bootstrap.bats`, `deploy/cv-frontend/` no longer owns any of this —
+    bootstrap.bats`, `deploy/frontend/` no longer owns any of this —
     reworked twice: first after the initial ship surfaced OpenBao's
-    `file` backend deprecation and that this isn't cv-frontend-specific
+    `file` backend deprecation and that this isn't frontend-specific
     (T8 needs a second key in the same instance), then again to move off
     bare repo root into `environments/local/` (industry convention,
     leaves room for `environments/production/` later) after a Codex
@@ -1035,10 +1079,10 @@ finding above. Run with Claude Code or Codex; checkbox as you ship.
     Node.js buildpack in it), `builder-jammy-base` builds successfully
     (Node 24.19.0). Caught and resolved a dry-run-only false failure
     (local `node_modules/` confusing `npm-install`'s process selection —
-    doesn't occur against a real CI checkout). Found and deferred to T7:
+    doesn't occur against a real CI checkout). Found and deferred to T5b:
     the built image crashes at runtime with a `cv_frontend`-side Remix v3
     `IMPORT_OUTSIDE_FILE_MAP` error — out of scope for T4 (build-only),
-    a real gap T7's demo namespace inherits.
+    a real gap T5b's acceptance criteria account for explicitly.
 - [ ] **T4 (P1, human: ~1-2h / CC: ~15min)** — GitHub Actions — Workflow:
   checkout pinned SHA → buildpacks (Tiny, `if: failure()` → Base,
   `--publish` direct to GHCR) → `GITHUB_TOKEN` auth → trivy scan+SBOM
@@ -1068,11 +1112,41 @@ finding above. Run with Claude Code or Codex; checkbox as you ship.
   via OpenBao) and `mise run consume -- <digest>` (one-line `cosign
   verify-attestation --policy verdict-approved.cue`)
   - Surfaced by: File Layout, script-minimization pass, Test gap 2
-  - Files: `deploy/cv-frontend/scripts/approve.sh`, `mise.toml` (consume
-    task), `deploy/cv-frontend/cosign-approval.pub`
+  - Files: `deploy/frontend/scripts/approve.sh`, `deploy/frontend/
+    scripts/verify-approval.sh` (shared verification logic — also called
+    by T5b's launch-time reverify, retires the earlier "`consume.sh` is
+    not a file" framing now that it's genuinely shared), `mise.toml`
+    (consume task), `deploy/frontend/cosign-approval.pub`
+  - **Open pre-req (Codex catch, not yet resolved):** the "latest
+    `approvedAt` wins" conflict-resolution rule (Constraints) has no
+    named mechanism actually selecting the newest record among multiple
+    referrers — checking `--policy` says "approved," not "the *latest*
+    record is approved." Verify this for real before T5b depends on it.
   - Verify: bats tests pass (tag-irrelevant, no-approval-rejected,
     invalid-signature-rejected, explicit-rejection-accountable,
-    provenance/SBOM-without-approval-rejected)
+    provenance/SBOM-without-approval-rejected, approve-then-reject
+    picks up the latest verdict correctly)
+- [ ] **T5b (P1, human: ~1h / CC: ~20min)** — local deploy — pitchfork
+  daemon + state-file consume mechanism, replaces the earlier "locked"
+  k8s-namespace demo consumption (Approach D, revised this session)
+  - Surfaced by: this session's deploy-target discussion +
+    `/plan-eng-review` D1-D6 (Codex outside-voice)
+  - Depends on: T5 (approve/consume must exist for real; its open
+    pre-req above must be verified working)
+  - Files: `pitchfork.toml` (new `[daemons.frontend]` entry,
+    `run=./run.sh`, `dir=deploy/frontend`, `ready_port=44100`),
+    `deploy/frontend/run.sh`, `deploy/frontend/scripts/
+    verify-approval.sh` (shared with T5, see above), `deploy/frontend/
+    tests/deploy.bats`, `.gitignore` (`current-image.txt`)
+  - Verify: `tests/deploy.bats` — approved image serves (readiness
+    checked on port 44100, not assumed), rejected image leaves the
+    existing deployment untouched, restart preserves the current
+    verified state, failed activation reports failure. Live: `pitchfork
+    stop frontend` actually stops the container, no orphaned process,
+    restart leaves exactly one instance running (pitchfork-Docker
+    lifecycle isn't proven by the OpenBao daemon precedent alone).
+    Proves the pipeline mechanism, not `cv_frontend`'s own correctness —
+    its current Remix v3 runtime crash (T4a) doesn't block this task.
 - [ ] **T6 (P2, human: ~1h / CC: ~10min)** — backup — Periodic `bao
   operator raft snapshot save` + documented restore procedure (not a raw
   directory copy — raft's bolt store can be mid-write during a plain file
@@ -1081,16 +1155,28 @@ finding above. Run with Claude Code or Codex; checkbox as you ship.
     a follow-up eng-review pass after the raft switch
   - Files: a backup script/cron entry (location TBD at implementation),
     `environments/local/README.md` (restore procedure — moved from
-    `deploy/cv-frontend/README.md` when OpenBao relocated)
+    `deploy/frontend/README.md` when OpenBao relocated)
   - Verify: restore procedure tested once against a copy; snapshot
     restored into a fresh instance signs successfully against the
     previously trusted public key, not just "the server starts"
 - [ ] **T7 (P2, human: ~3-5d / CC: ~1-2h)** — Tekton — `modules/task-*`,
   `modules/pipeline-build-scan-approve`, `orb start k8s`, migrate registry
-  GHCR→`zot`
+  GHCR→`zot`. Hosts Tekton Pipelines/Chains only — the app's own deploy
+  target moved to T5b's pitchfork mechanism (Approach D, revised this
+  session), not a k8s namespace; scope here is unaffected by that beyond
+  no longer needing a Deployment/namespace piece.
   - Surfaced by: Approach D, Build Phases (Phase 2)
   - Files: `modules/task-buildpacks-build/`, `modules/task-trivy-scan/`,
     `modules/task-oras-attach/`, `modules/pipeline-build-scan-approve/`
+  - **Open feasibility flag (Codex catch, not yet resolved):** Paketo's
+    builders are amd64-only (T4a); Tekton's build Task runs on OrbStack's
+    **arm64** cluster. Whether that means Rosetta-backed emulation inside
+    the cluster (same mechanism as local `docker run --platform
+    linux/amd64`) or a different arrangement is unverified — a feasibility
+    spike belonging *before* the Task YAML is written, same discipline as
+    the Docker-in-Docker daemon-access question above. "Moving the app's
+    runtime off-cluster doesn't resolve this" — it only removed the
+    *app's* need to run under emulation; the *build* still does.
   - Verify: kubeconform passes on the new YAML, chainsaw passes against the
     OrbStack cluster, full path runs end-to-end
 - [ ] **T8 (P2, human: ~2-3d / CC: ~30min)** — Chains — Install Tekton

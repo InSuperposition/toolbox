@@ -5,26 +5,27 @@
 ### Decide public hosting for cv_frontend
 
 **What:** Choose where the actual public `cv_frontend` site lives for a
-hiring manager to visit — separate from the demo/proof Deployment this
-design adds to a `cv-frontend` namespace on the OrbStack dev cluster.
+hiring manager to visit — separate from the demo/proof deploy T5b adds (a
+standalone `pitchfork`-supervised Docker container on this dev Mac,
+revised from an earlier k8s-namespace plan — see Approach D's "Demo
+consumption" section).
 
-**Why:** That dev cluster is explicitly scoped throughout `docs/designs/
-digest-as-source-of-truth.md` as dev/CI-only, tied to a single Mac staying
-on and OrbStack staying up — not a reasonable uptime story for a public
-site. Candidates worth evaluating: Vercel/Netlify (Remix has first-class
+**Why:** Anything running on this dev Mac — whether the earlier
+k8s-namespace plan or T5b's pitchfork container — is tied to a single
+machine staying on, not a reasonable uptime story for a public site.
+Candidates worth evaluating: Vercel/Netlify (Remix has first-class
 adapters for both), or the eventual `cluster-k0sctl` production cluster
 once it exists.
 
 **Context:** Surfaced by an eng-review outside-voice finding (Codex) that
 nothing in the design actually deploys/runs `cv_frontend` from a verified
-image — the demo namespace (Phase 2) closes that gap for proof purposes
-only, deliberately not for real public hosting. Read the Phase 2 section
-of that design doc for the demo-vs-real-hosting distinction before
-starting this.
+image — T5b closes that gap for proof purposes only, deliberately not for
+real public hosting. Read Approach D's "Demo consumption" section of that
+design doc for the demo-vs-real-hosting distinction before starting this.
 
 **Effort:** S (research + decision) / M (actual setup)
 **Priority:** P2
-**Depends on:** digest-as-source-of-truth Phase 2 (demo namespace) proven
+**Depends on:** digest-as-source-of-truth T5b (demo/proof deploy) proven
 
 
 ### Retrofit vm-orbstack, cluster-k0sctl, secret-openbao to digest-pinning
