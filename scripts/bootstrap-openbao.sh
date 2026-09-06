@@ -26,7 +26,10 @@ echo "==> Starting OpenBao via pitchfork"
 # already-running daemon alone, not restart it every time.
 pitchfork start openbao
 
-export VAULT_ADDR=http://127.0.0.1:8200
+# Honour a pre-set VAULT_ADDR (snapshot.bats points a scratch instance at a
+# spare port so it never disturbs the real :8200 daemon); default otherwise.
+: "${VAULT_ADDR:=http://127.0.0.1:8200}"
+export VAULT_ADDR
 
 if bao status -format=json 2>/dev/null | jq -e '.initialized == true' >/dev/null 2>&1; then
   echo "==> Already initialized -- run scripts/reset-openbao.sh first if you meant to start fresh"

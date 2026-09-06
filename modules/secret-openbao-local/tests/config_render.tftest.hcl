@@ -53,3 +53,14 @@ run "creates_the_raft_data_directory" {
     error_message = "expected a placeholder file under openbao_data_path to force the directory into existence"
   }
 }
+
+run "creates_the_snapshot_directory" {
+  command = apply
+
+  # `bao operator raft snapshot save` (T6) does not create its output dir
+  # either — same declarative placeholder.
+  assert {
+    condition     = local_file.openbao_snapshot_dir_keep.filename == "openbao/snapshots/.gitkeep"
+    error_message = "expected a placeholder under the default openbao_snapshot_path so `mise run openbao-snapshot` works on a fresh checkout"
+  }
+}

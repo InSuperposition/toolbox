@@ -1546,26 +1546,37 @@ fail "bad signature" against the new pubkey. Rotation procedure lives in
     container, no orphan, restart leaves exactly one instance. Proves the
     pipeline mechanism, not `cv_frontend`'s correctness (its Remix v3
     runtime crash, T4a, doesn't block this).
-- [ ] **T6 (P2, human: ~1h / CC: ~10min)** — backup — Periodic `bao
-  operator raft snapshot save` + documented restore procedure (not a raw
-  directory copy — raft's bolt store can be mid-write during a plain file
-  copy; revised after T3 switched from `file` to `raft` storage)
-  - Surfaced by: eng-review critical gap; method revised after the raft switch
-  - **Severity re-rated by the T5 review (Codex P1-7):** losing the raft
-    store stops *future* signing with `approval-key`, but does **not**
-    cryptographically invalidate past approvals — `cosign-approval.pub` is
-    committed in-repo and `verify-approval.sh` verifies against it, not
-    against OpenBao. So T6 is real but not the single point of failure the
-    earlier review implied. Still P2, still needed: a snapshot lets you
-    *resume approving* after a disk loss without minting a new key (which
-    would invalidate the committed pubkey and every consumer pin).
-  - Files: a backup script/cron entry (location TBD at implementation),
-    `environments/local/README.md` (restore procedure)
-  - Verify: restore procedure tested once against a copy; **the unseal
-    material is preserved alongside the snapshot** (a snapshot into a fresh
-    sealed instance is useless without it); snapshot restored into a fresh
-    instance signs successfully against the previously trusted public key,
-    not just "the server starts"
+- [x] **T6 (P2)** — backup — **DONE 2026-09-06** (branch `t6-raft-snapshot`).
+  **On-demand only** — OpenBao community has no snapshot scheduler
+  ([openbao#795](https://github.com/openbao/openbao/issues/795)); a launchd
+  timer or the `raft-snapshot-agent` tool were the alternatives, both
+  rejected as more machinery than a re-rated-down local-dev backup warrants.
+  - **Zero new script, zero new tool.** `bao operator raft snapshot
+    save`/`restore` wrapped as `mise run openbao-snapshot` /
+    `openbao-snapshot-restore` one-liner tasks; the snapshot *directory* is
+    created declaratively by `modules/secret-openbao-local` (a `local_file`
+    `.gitkeep`, same trick as the raft data dir); the restore *procedure*
+    lives in `environments/local/README.md` ("Backup + restore (T6)"), which
+    is the runbook per this repo's "config IS the runbook" rule.
+  - `scripts/reset-openbao.sh` now **preserves `openbao/snapshots/`** (a
+    reset is usually the first step of a restore) — was `rm -rf
+    environments/local/openbao`.
+  - `scripts/bootstrap-openbao.sh` now honours a pre-set `VAULT_ADDR` (was
+    hardcoded) so the test can run a scratch instance on a spare port.
+  - **Verify — `environments/local/tests/snapshot.bats` (3, green):** the
+    module creates the snapshot dir; restore into the running daemon rolls a
+    key rotation back; **`-force` restore into a freshly bootstrapped
+    instance recovers the original `approval-key`** (asserted via `cosign
+    public-key --key openbao://approval-key` == the pre-snapshot key), given
+    the original unseal key + root token. Runs on `127.0.0.1:8399`, so
+    unlike `bootstrap.bats` it does not disturb a running `:8200` daemon.
+  - **Re-rating held (Codex P1-7):** losing the raft store stops *future*
+    signing only — `verify-approval.sh` / `mise run consume` check the
+    committed `cosign-approval.pub`, never OpenBao. The snapshot's job is to
+    resume signing after a disk loss without minting a new key.
+  - **Known cosmetic:** `bao operator raft snapshot restore` prints "Error
+    properly closing policy file: ... file already closed" on success (exit
+    0) — documented in the README.
 ### T7 — Phase 2 (Tekton) — SPLIT + DEFERRED, needs its own planning session
 
 **Status (2026-09-06 /plan-eng-review scope reduction):** T7 as previously
