@@ -1388,9 +1388,14 @@ predicate contents (verdict + subject digest + approvedAt), not a referrer
 annotation — GHCR does not echo the `dev.sigstore.bundle.predicateType`
 annotation a local zot does.
 
-**Follow-up (TODOS.md, P1):** rotate `approval-key` + re-deploy its public
-key — it was provisioned in an AI session whose bootstrap output was
-transcript-visible.
+**Key rotated 2026-09-06 (commit `bcbb862`)** — the first `approval-key`
+was provisioned in an AI session whose bootstrap output was
+transcript-visible, so it was reset + re-bootstrapped and
+`cosign-approval.pub` re-exported. Post-rotation `approve` → `consume`
+round trip re-confirmed against GHCR; pre-rotation attestations correctly
+fail "bad signature" against the new pubkey. Rotation procedure lives in
+`TODOS.md`. (Also fixed in `4710857`: the committed `fnox.toml` was missing
+`value = "VAULT_TOKEN"` on the keychain secret, which `fnox get` needs.)
 
 ---
 
