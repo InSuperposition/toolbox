@@ -20,8 +20,9 @@ set -euo pipefail
 #
 # Interim auth (full multi-member design is a separate planning session —
 # TODOS.md "Auth + multi-member DX"): signing authenticates to OpenBao with
-# the root token from fnox (VAULT_TOKEN); pushing to a non-local registry
-# uses `gh auth token` at call time. Both are per-operator and call-time,
+# the root token in $VAULT_TOKEN (mise [env] reads the 0600 root.token file,
+# ADR 0011); pushing to a non-local registry uses `gh auth token` at call
+# time. Both are per-operator and call-time,
 # no stored registry secret. approvedBy is therefore self-asserted.
 #
 # Exit codes: 0 ok · 1 operator aborted · 2 bad args · 3 OpenBao unavailable

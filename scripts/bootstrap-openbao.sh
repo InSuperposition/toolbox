@@ -3,15 +3,15 @@ set -euo pipefail
 
 # One-time, per-MACHINE OpenBao bootstrap: writes the static-seal key,
 # renders config, registers + starts the machine-global pitchfork daemon,
-# initialises (auto-unseals), provisions Transit, stores the root token in
-# fnox, exports the approval pubkey. Idempotent: safe to re-run.
+# initialises (auto-unseals), provisions Transit, writes the root + recovery
+# keys as 0600 files, exports the approval pubkey. Idempotent: safe to re-run.
 #
-# GitOps role: one-time bootstrap. Creates state that then lives in the OS
-# keychain, the raft store, $STATE_DIR/seal.key, and
+# GitOps role: one-time bootstrap. Creates state that then lives in the raft
+# store, $STATE_DIR/{seal.key,root.token,recovery.key}, and
 # ~/.config/pitchfork/config.toml. Never runs in a reconcile loop. The
 # declarative parts (Transit engine + keys, config render) are `tofu`; this
 # only orchestrates the imperative first-init that has no declarative form
-# (`bao operator init`, keychain/keyfile writes, the pitchfork global-daemon
+# (`bao operator init`, the secret-file writes, the pitchfork global-daemon
 # registration).
 #
 # ONE daemon per developer machine, not one per git worktree (ADR 0010):
@@ -19,11 +19,13 @@ set -euo pipefail
 # daemon would start a second `bao server` and lock-conflict on the shared
 # raft store. Hence a *global* pitchfork daemon.
 #
-# Auto-unseal: a static seal keyed by $STATE_DIR/seal.key (raw 32 bytes,
-# 0600). The daemon unseals itself on every start and reboot -- there is no
-# `bao operator unseal` step anywhere. `bao operator init` yields RECOVERY
-# keys (for `operator rekey` / `generate-root` break-glass only), stored in
-# the keychain via fnox.
+# All secrets are 0600 files next to the raft store (ADR 0011): no keychain,
+# no fnox. `openbao.hcl` reads seal.key via `file://` (so a boot-start daemon
+# unseals before the login keychain would even be relevant); `mise [env]`
+# injects VAULT_TOKEN by `cat`-ing root.token. `bao operator init` also
+# yields a recovery key -- kept as recovery.key for `bao operator
+# generate-root` if root.token is ever lost/corrupt (the one non-destructive
+# recovery; `reset` rotates the Transit key).
 #
 # Test seams (bats): TOOLBOX_OPENBAO_STATE_DIR, TOOLBOX_OPENBAO_DAEMON,
 # TOOLBOX_OPENBAO_LISTEN, TOOLBOX_OPENBAO_SUPERVISOR (pitchfork|none).
@@ -35,6 +37,17 @@ DAEMON="${TOOLBOX_OPENBAO_DAEMON:-openbao}"
 LISTEN="${TOOLBOX_OPENBAO_LISTEN:-127.0.0.1:8200}"
 SUPERVISOR="${TOOLBOX_OPENBAO_SUPERVISOR:-pitchfork}"
 mkdir -p "$STATE_DIR"
+
+# Write $2 into $1 as a 0600 file, atomically. `umask`/`chmod` after the fact
+# is not enough: redirecting into an existing 0644 file keeps 0644 and
+# follows symlinks. mktemp+chmod+mv in the same dir is atomic and safe.
+write_secret_file() {
+  local dst="$1" tmp
+  tmp="$(mktemp "$(dirname "$dst")/.tmp.XXXXXX")"
+  chmod 600 "$tmp"
+  printf '%s' "$2" >"$tmp"
+  mv -f "$tmp" "$dst"
+}
 
 HEALTH="http://${LISTEN}/v1/sys/health?sealedcode=200&uninitcode=200&standbycode=200"
 wait_ready() {
@@ -68,11 +81,12 @@ test -f "$STATE_DIR/openbao.hcl" || {
 }
 
 # Static-seal key: raw 32 bytes, 0600, next to the raft store. `file://` in
-# openbao.hcl, so the boot-start daemon reads it without an unlocked
-# keychain. Generated once; a re-run keeps the existing key (rotating it
+# openbao.hcl. Generated once; a re-run keeps the existing key (rotating it
 # would strand the sealed data).
 if [ ! -s "$STATE_DIR/seal.key" ]; then
-  (umask 077 && openssl rand -out "$STATE_DIR/seal.key" 32)
+  write_secret_file "$STATE_DIR/seal.key" "$(openssl rand 32 | base64)"
+  # base64 so the value round-trips through printf without NULs; openbao's
+  # file:// seal accepts base64.
 fi
 
 if [ "$SUPERVISOR" = "none" ]; then
@@ -104,23 +118,16 @@ if bao status -format=json 2>/dev/null | jq -e '.initialized == true' >/dev/null
 else
   echo "==> Initializing (static seal auto-unseals; single recovery share -- solo dev daemon)"
   init_json=$(bao operator init -recovery-shares=1 -recovery-threshold=1 -format=json)
-  recovery_key=$(echo "$init_json" | jq -r '.recovery_keys_b64[0]')
-  root_token=$(echo "$init_json" | jq -r '.root_token')
-
-  # No `bao operator unseal` -- the static seal already unsealed the daemon
-  # at init. Both secrets go to the OS keychain via fnox.
-  echo "$root_token" | fnox set VAULT_TOKEN --provider keychain
-  echo "$recovery_key" | fnox set BAO_RECOVERY_KEY --provider keychain
-  export VAULT_TOKEN="$root_token"
-
-  echo "==> Root token + recovery key stored via fnox (OS keychain)."
-  echo "==> Future sessions: eval \$(fnox activate zsh)"
+  write_secret_file "$STATE_DIR/root.token" "$(echo "$init_json" | jq -r '.root_token')"
+  write_secret_file "$STATE_DIR/recovery.key" "$(echo "$init_json" | jq -r '.recovery_keys_b64[0]')"
+  echo "==> root.token + recovery.key + seal.key written to $STATE_DIR (0600)."
 fi
 
-# The 2nd apply (Transit engine + keys) authenticates as the root token.
-# On an already-initialised re-run the `else` branch above never ran, so
-# pull it from the keychain here.
-: "${VAULT_TOKEN:=$(fnox get VAULT_TOKEN 2>/dev/null || true)}"
+# Authenticate the rest of the script (2nd tofu apply, pubkey export) as the
+# root token FROM THIS instance's file -- unconditionally, never inheriting a
+# VAULT_TOKEN from the parent env (a scratch bootstrap under `mise run check`
+# would otherwise carry the real daemon's token and 403 against :8399).
+VAULT_TOKEN="$(cat "$STATE_DIR/root.token")"
 export VAULT_TOKEN
 
 echo "==> Provisioning Transit engine + keys"
@@ -143,3 +150,8 @@ cosign public-key --key openbao://approval-key \
 
 bao secrets list
 bao status
+
+echo
+echo "==> Done. VAULT_TOKEN comes from mise [env] (reads root.token). If your"
+echo "    current shell was activated before this bootstrap and shows an empty"
+echo "    VAULT_TOKEN, open a new shell or run 'mise env'."

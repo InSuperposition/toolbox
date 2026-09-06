@@ -11,8 +11,9 @@
 # directly, not through the `bao` CLI, so it never looks at BAO_ADDR /
 # BAO_TOKEN. The provider also has no `unix://` transport (verified), which
 # is why the daemon keeps a TCP listener on 127.0.0.1:8200 rather than a
-# unix socket. `mise.toml` sets VAULT_ADDR; `bootstrap-openbao.sh` sets
-# VAULT_TOKEN from the OS keychain (fnox) for its own `tofu apply`.
+# unix socket. `mise.toml` sets VAULT_ADDR; VAULT_TOKEN is the 0600
+# root.token file (ADR 0011) — mise [env] injects it, and
+# `bootstrap-openbao.sh` reads it directly for its own `tofu apply`.
 
 provider "vault" {
   address = "http://${var.openbao_listener_address}"

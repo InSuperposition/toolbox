@@ -9,7 +9,6 @@ cosign = "3.1.3"
 crossplane = "2.5.0"
 cue = "0.17.1"
 flux2 = "2.9.5"
-fnox = "1.35.0"
 gh = "2.100.0"
 hk = "1.57.0"
 jq = "1.8.2"
@@ -26,12 +25,16 @@ tekton-cli = "0.46.0"
 timoni = "0.34.0"
 trivy = "0.74.0"
 
-# The local OpenBao daemon always listens here (see pitchfork.toml /
-# environments/local/provider.tf). Setting it once means `bao`,
-# `mise run openbao-snapshot`, etc. work in the repo without a per-shell
-# export. VAULT_TOKEN still comes from `fnox` (OS keychain).
+# The local OpenBao daemon (ADR 0010): fixed loopback address; its secrets
+# are 0600 files under $OPENBAO_STATE_DIR (ADR 0011 — no keychain, no fnox).
+# `mise` chains [env] vars and runs a shell for `exec()`, so VAULT_TOKEN is
+# injected into every `mise run` task (and the interactive shell) with no
+# shell hook. A missing root.token yields an empty VAULT_TOKEN, not an error;
+# `openbao-preflight.sh` turns that into a clear "run mise run openbao-bootstrap".
 [env]
 VAULT_ADDR = "http://127.0.0.1:8200"
+OPENBAO_STATE_DIR = "{{ exec(command='echo \"${XDG_STATE_HOME:-$HOME/.local/state}/toolbox/openbao\"') }}"
+VAULT_TOKEN = "{{ exec(command='cat \"$OPENBAO_STATE_DIR/root.token\" 2>/dev/null || true') }}"
 
 # `mise install` is the only bootstrap step (CLAUDE.md § mise) — wire the
 # hk git hooks as part of it so a fresh clone is gated without a separate
@@ -41,14 +44,14 @@ postinstall = "hk install"
 
 [tasks.check]
 description = "Run the full lint/format/test gate — identical to the hk git hooks (CLAUDE.md § hk). shellcheck, pkl, tofu fmt/validate/test, cue fmt, bats."
-run = ["hk check --all", "fnox check"]
+run = "hk check --all"
 
 [tasks.fix]
 description = "Apply the auto-fixable half of `mise run check` (formatters)."
 run = "hk fix --all"
 
 [tasks.openbao-bootstrap]
-description = "One-time PER-MACHINE OpenBao bootstrap (renders config, registers the global pitchfork daemon, init/unseal/apply/fnox) — see environments/local/README.md"
+description = "One-time PER-MACHINE OpenBao bootstrap (render config, register the global pitchfork daemon, init, provision Transit, write the 0600 secret files) — see environments/local/README.md"
 run = "./scripts/bootstrap-openbao.sh"
 
 [tasks.openbao-up]
@@ -56,19 +59,22 @@ description = "Start the machine-global OpenBao daemon (after a reboot, or if it
 run = "pitchfork start global/openbao"
 
 [tasks.openbao-reset]
-description = "Machine-wide: stop + unregister the global OpenBao daemon, wipe its raft store / config / tofu state / keychain token. Snapshots under ~/.local/state/toolbox/openbao/snapshots/ are kept."
+description = "Machine-wide: stop + unregister the global OpenBao daemon (waits for it to exit), wipe its raft store / config / seal.key / root.token / recovery.key / tofu state. snapshots/ (the restore bundle) is kept."
 run = "./scripts/reset-openbao.sh"
 
 [tasks.openbao-snapshot]
-description = "Save a raft snapshot of the local OpenBao to ~/.local/state/toolbox/openbao/snapshots/latest.snap (needs `fnox` activated for VAULT_TOKEN)"
-run = "bao operator raft snapshot save \"${XDG_STATE_HOME:-$HOME/.local/state}/toolbox/openbao/snapshots/latest.snap\""
+description = "Save a COMPLETE restore bundle (raft snapshot + seal.key + root.token) to $OPENBAO_STATE_DIR/snapshots/. Copy that whole directory off-machine for real disaster recovery."
+run = [
+  "bao operator raft snapshot save \"$OPENBAO_STATE_DIR/snapshots/latest.snap\"",
+  "cp -f \"$OPENBAO_STATE_DIR/seal.key\" \"$OPENBAO_STATE_DIR/root.token\" \"$OPENBAO_STATE_DIR/snapshots/\"",
+]
 
 [tasks.openbao-snapshot-restore]
-description = "Restore the local OpenBao from a raft snapshot — args: [-force] <snapshot-file>. Use -force when restoring into a freshly bootstrapped instance. See environments/local/README.md"
+description = "Restore the local OpenBao from a snapshot bundle — args: [-force] <snapshot-file>. The bundle's seal.key + root.token must be in $OPENBAO_STATE_DIR first (see environments/local/README.md § disaster). Use -force into a freshly bootstrapped instance."
 run = "bao operator raft snapshot restore"
 
 [tasks.export-approval-pubkey]
-description = "Re-export deploy/frontend/cosign-approval.pub from openbao://approval-key, then `git add` + commit it (run after a Transit key rotation). Needs OpenBao up + VAULT_TOKEN (fnox activate)."
+description = "Re-export deploy/frontend/cosign-approval.pub from openbao://approval-key, then `git add` + commit it (run after a Transit key rotation). Needs OpenBao up."
 run = "cosign public-key --key openbao://approval-key --outfile deploy/frontend/cosign-approval.pub"
 
 [tasks.approve]
