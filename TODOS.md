@@ -1,5 +1,69 @@
 # TODOS
 
+## Debt
+
+### Scripts-policy audit of the T5 / T5b shell — P1, planning session
+
+**What:** Run `/plan-eng-review` (and `/office-hours` if it grows) on every
+shell file added for T5 / T5b, against CLAUDE.md's Scripts Policy ("Scripts
+are minimal, tested, and the last resort — never the first"; "Declarative
+first: check for an existing tool, then a `mise.toml` task, only then write
+a script").
+
+**Why:** T5 / T5b landed leaning on scripts as the *first* tool, not the
+last. Some were pre-sanctioned by the design doc; several were not, and a
+few are heavier than "minimal". The build is working and tested, but the
+shell surface conflicts with this repo's stated goals and should be pared
+back deliberately, not left to accrete.
+
+**In scope, per file:**
+- `scripts/export-approval-pubkey.sh` — **not in the design**, invented
+  during implementation. Its core job is one command (`cosign public-key
+  --key openbao://approval-key --outfile ...`). The `openbao://` →
+  `hashivault://` → `bao read | jq` fallback chain is unrequested
+  complexity. Candidate: a `mise` task one-liner; decide whether any
+  fallback is actually warranted (it is a design question, not an
+  implementation detail).
+- `deploy/frontend/scripts/consume.sh` — the design said "`mise run consume`
+  writes the new reference, then `pitchfork restart frontend`" (implying a
+  task). It became a 69-line script. The atomic write + real readiness poll
+  justify *some* script; check whether pitchfork's own `ready_port` +
+  `ready_delay` + a thin task covers it, and whether the readiness reporting
+  belongs in the script at all.
+- `deploy/frontend/scripts/verify-approval.sh` — error classification is
+  done by **string-matching `cosign` stderr** (`*"invalid predicate
+  type"*`, `*"accepted signatures do not match threshold"*`, …). Fragile —
+  it depends on cosign's unversioned error text (Map-is-not-Territory).
+  Check whether `cosign` / `cue` expose distinguishable exit codes, or
+  `--output json`, that replace the grep.
+- `deploy/frontend/scripts/openbao-preflight.sh` — 4-way state
+  discrimination. Design-sanctioned in intent; check the implementation is
+  as thin as it can be (is `bao status -format=json` + one authed read the
+  minimum, or is there a `bao` subcommand that answers directly?).
+- `deploy/frontend/run.sh` — design-named; retry/backoff/signal-traps are
+  genuine logic. Lightest-touch review: is the trap/child-process dance the
+  simplest correct shape, or does pitchfork have a supervised-`docker`
+  primitive?
+- `deploy/frontend/tests/helper.bash` — ~190-line bats fixture. Acceptable
+  as test infra, but check for duplication and whether `deploy.bats`'s
+  docker path should be a separate opt-in file.
+- `deploy/frontend/scripts/approve.sh` — design's one sanctioned
+  "real-logic" script. Lightest review: only that it has not absorbed
+  responsibilities that belong elsewhere.
+
+**Also decide:** whether the `TOOLBOX_*` env test-seams
+(`TOOLBOX_APPROVE_KEY`, `TOOLBOX_APPROVAL_PUBKEY`, `TOOLBOX_APPROVED_BY`,
+`TOOLBOX_FRONTEND_VERIFY_ATTEMPTS`, `TOOLBOX_CONSUME_READY_TIMEOUT`) are the
+right seam or a smell.
+
+**Constraint:** T5 / T5b are merged and tested — this is a *reduction*
+pass, behavior-preserving, with the bats matrix as the regression net. Not
+a rewrite.
+
+**Effort:** planning ~1 session; implementation ~0.5–1d
+**Priority:** P1 (do before T7, which adds a lot more YAML/shell)
+**Depends on:** nothing — the merged state is the input.
+
 ## Infrastructure
 
 ### How to rotate the T5 `approval-key` (procedure — done once, 2026-09-06)
