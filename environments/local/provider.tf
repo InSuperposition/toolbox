@@ -1,6 +1,7 @@
-# Points at the local pitchfork-supervised OpenBao process (pitchfork.toml
-# at repo root) — NOT the deferred production `secret-openbao` module. See
-# CLAUDE.md § Tool Boundaries and TODOS.md.
+# Points at the machine-global local OpenBao daemon (one per developer
+# machine, supervised as a pitchfork *global* daemon — ADR 0010) — NOT the
+# deferred production `secret-openbao` module. See CLAUDE.md § Tool
+# Boundaries and TODOS.md.
 #
 # Auth: `token` is left unset here on purpose (Zero Trust — no plaintext
 # secret in repo). The vault provider's SDK falls back to the VAULT_ADDR /
@@ -8,15 +9,10 @@
 # config. Note the env var names stay VAULT_*, not OpenBao's own BAO_* CLI
 # convention — the provider talks to the Vault-API-compatible HTTP API
 # directly, not through the `bao` CLI, so it never looks at BAO_ADDR /
-# BAO_TOKEN. Export both before `tofu apply`:
-#
-#   export VAULT_ADDR=http://127.0.0.1:8200
-#   export VAULT_TOKEN=<token from `bao operator init`, see README.md>
-#
-# That token is the same out-of-band bootstrap secret OpenBao itself
-# requires (CLAUDE.md § Zero Trust: "the bootstrap secret that first
-# unseals/authenticates to OpenBao is necessarily out-of-band") — it is
-# never written to a file in this repo.
+# BAO_TOKEN. The provider also has no `unix://` transport (verified), which
+# is why the daemon keeps a TCP listener on 127.0.0.1:8200 rather than a
+# unix socket. `mise.toml` sets VAULT_ADDR; `bootstrap-openbao.sh` sets
+# VAULT_TOKEN from the OS keychain (fnox) for its own `tofu apply`.
 
 provider "vault" {
   address = var.openbao_addr

@@ -4,11 +4,27 @@
 # pipeline's approval gate uses; vm-orbstack/cluster-k0sctl/secret-openbao
 # join environments/production/ once those modules are built out.
 
+locals {
+  # The local OpenBao is ONE daemon per developer machine, not one per git
+  # worktree/checkout (ADR 0010). Its rendered config, raft store and
+  # snapshots therefore live in the XDG state dir, not under this worktree.
+  # `bootstrap-openbao.sh` keeps tofu state next to them
+  # (`tofu apply -state=<state_dir>/tofu.tfstate`), so any worktree's
+  # bootstrap operates on the same instance.
+  #
+  # A non-default $XDG_STATE_HOME is not honoured here (Terraform cannot
+  # read arbitrary env vars); `~/.local/state` is the XDG default and the
+  # module inputs can still be overridden if a real need appears.
+  openbao_state_dir = pathexpand("~/.local/state/toolbox/openbao")
+}
+
 module "secret_openbao_local" {
   source = "../../modules/secret-openbao-local" # environments/local/ -> environments/ -> repo root -> modules/
 
   transit_keys = [
     { name = "approval-key", type = "ecdsa-p256" },
   ]
-  openbao_config_path = "openbao/openbao.hcl"
+  openbao_config_path   = "${local.openbao_state_dir}/openbao.hcl"
+  openbao_data_path     = "${local.openbao_state_dir}/data"
+  openbao_snapshot_path = "${local.openbao_state_dir}/snapshots"
 }
