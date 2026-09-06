@@ -123,10 +123,10 @@ simplicity (an auth method, not a PKI), existing-stack fit (OpenBao auth
 backends, fnox, `gh`; check whether Cilium/Kyverno play a role at the
 cluster edge later).
 
-**Context:** Surfaced by the 2026-09-06 T5 `/plan-eng-review` (Issues 3+4)
-and Codex P2-9. `modules/secret-openbao-local` already has an empty
-`policies` input ready for the scoped policy. See the design doc's T5
-section ("interim auth") and Resolved Decisions ("Approval trust boundary").
+**Context:** Surfaced by the 2026-09-06 T5 eng review.
+`modules/secret-openbao-local` already has an empty `policies` input ready
+for the scoped policy. See `docs/designs/digest-as-source-of-truth.md`
+§ Trust boundary and `docs/adr/0004-approval-key-openbao-transit-not-acl.md`.
 
 **Effort:** planning ~1 session; implementation ~1-2d human
 **Priority:** P2
@@ -134,14 +134,16 @@ section ("interim auth") and Resolved Decisions ("Approval trust boundary").
 interim auth: `approve.sh` signs with the fnox root `VAULT_TOKEN` and, for a
 non-local registry, `gh auth token | cosign login` into an isolated
 `DOCKER_CONFIG`; `approvedBy` is self-asserted. The `write:packages` scope
-on the `gh` token is currently the operator's to arrange (Codex P2-9) — this
-session designs the real per-member story.
+on the `gh` token is currently the operator's to arrange — this session
+designs the real per-member story.
 
 ### T7 Phase-2 (Tekton) — full planning session before any code
 
 **What:** Run `/office-hours` then `/plan-eng-review` on Phase 2 of
-`docs/designs/digest-as-source-of-truth.md` before implementing T7a/T7b/T7c.
-Phase 2 is split and deferred after T5/T5b; it is NOT implementation-ready.
+`docs/designs/digest-as-source-of-truth.md` (§ Phasing) and
+`docs/adr/0003-tekton-pipelines-on-orbstack-k8s.md` before implementing
+T7a/T7b/T7c. Phase 2 is deferred after T5/T5b; it is NOT
+implementation-ready.
 
 **Why:** The 2026-09-06 `/plan-eng-review` scope-reduction pass found T7 as
 written bundled the cluster, Tekton install, the builder-choice spike, the
@@ -168,41 +170,67 @@ the builder is genuinely undecided.
 
 **Context:** T7a = builder spike (live probe on `orb start k8s`, push to
 GHCR). T7b = wrap `build→scan→oras-attach` as Tekton Tasks + Pipeline +
-kubeconform/chainsaw harness. T7c = GHCR→zot migration. See the design doc's
-"T7 — Phase 2" section and the GSTACK REVIEW REPORT's "T7 REVIEW" entry.
+kubeconform/chainsaw harness. T7c = GHCR→zot migration. See the
+architecture doc § Phasing (Phase 2).
 
 **Effort:** planning ~1-2 sessions; build T7a/T7b/T7c ~3-5d human total
 **Priority:** P2
 **Depends on:** T5 + T5b shipped and proven
 
-### Confirm the distroless build scans clean, then delete `.trivyignore`
+### T8 — Tekton Chains provenance — P2, planning session
 
-**What:** Run `trivy image --severity CRITICAL --exit-code 1` against the
-distroless `cv_frontend` image (pivot D2) with **zero suppressions**. If it
-passes, delete `.trivyignore` entirely and remove this entry. If a genuine
-residual CRITICAL surfaces, author one OpenVEX statement with real
-exploitability evidence + a `last_updated`/re-review date (do **not**
-reinstate the old ignore-file lines).
+**What:** Install Tekton Chains on the Phase-2 cluster; add a second OpenBao
+Transit key (`chains-provenance-key`) with an access policy that denies it
+`transit/sign` on `approval-key`; verify automatic signed SLSA provenance
+per build (`cosign verify-attestation --key <chains-pubkey>`).
 
-**Why:** Both prior `.trivyignore` entries (CVE-2026-56854 =
-`golang.org/x/crypto` in Paketo `npm-install`'s `exec.d` helper;
-CVE-2026-59873 = `node-tar` in Node 24.19.0's bundled npm, pulled by Paketo
-`node-engine`) are **Paketo-toolchain-only**. Dropping buildpacks (pivot,
-2026-09-06) removes the Go helper binary entirely and the bundled npm
-(distroless ships none; `cv_frontend` has no `tar` in `package-lock.json`).
-The CVEs die at the root, not by suppression — but Codex #8 is right that
-this must be *verified* by a clean unsuppressed scan before the file is
-deleted, not assumed.
+**Why:** the third supply-chain leg (how the build happened), signed
+mechanically. `modules/secret-openbao-local` already has an empty `policies`
+input for the scoped policy.
 
-**Context:** See `docs/designs/digest-as-source-of-truth.md` § Pivot (D4)
-and the /plan-eng-review + Codex pass of 2026-09-06. `vexctl`
-(`aqua:openvex/vexctl`) is already pinned and ready for the residual case;
-the full signed-VEX-referrer + consume-side `trivy --vex` enforcement is
-design task T10 (post-Chains), not this entry.
+**First task, real blocker:** Chains runs in a pod on OrbStack's k8s;
+OpenBao listens on `127.0.0.1:8200`. Pods reach the host at
+`host.orb.internal`, but only once OpenBao's listener is widened past
+loopback — which means `tls_disable = true` has to become real TLS at the
+same time.
 
-**Effort:** S (run one scan, delete one file + this entry)
-**Priority:** P1 (part of pivot task T-P0 / T4)
-**Depends on:** T4a / T4 (the distroless build existing to scan)
+**Priority:** P2 · **Depends on:** T7 (Phase 2) shipped.
+
+### T9 — bisect-safety CI gate + `mise run check` — P1
+
+**What:** Wire `hk.pkl` as the git-hook gate (shellcheck, bats,
+lint/format per touched filetype) and expose the identical checks as
+`mise run check` for manual/CI use — one definition, two entry points. Add
+`scripts/check-history.sh` (rebuild-in-isolation per commit in a pushed
+range), invoked CI-side via `mise run check` (async — a full isolated
+rebuild per commit is too slow for a pre-push hook), wired as a required
+GitHub status check.
+
+**Why:** there is currently **no automated lint/test gate at all** — every
+commit is `shellcheck` + `bats` + `tofu test` by hand. This is Phase 4 of
+the design and independent of Phases 1–3.
+
+**Scope note:** the history gate proves *historical buildability* only
+("this commit's suite passed with the tool versions pinned at that
+commit") — it does not re-check today's CVE policy against old commits.
+
+**Priority:** P1 (do before T7 adds more shell/YAML) · **Depends on:**
+nothing.
+
+### T10 — VEX hardening — P3, post-T8
+
+**What:** Promote the scan-clean-first posture to an enforced mechanism:
+`.openvex.json` statement(s) → `vexctl attest` (signed via an OpenBao
+Transit key, same custody as approval/provenance) → attached as an OCI
+referrer → `mise run consume` re-runs `trivy image --vex <referrer>
+--severity CRITICAL --exit-code 1` against the SBOM referrer before
+accepting a digest.
+
+**Why:** an unsigned, consume-unenforced VEX statement buys no present
+enforcement benefit; this is where the benefit lands. `vexctl`
+(`aqua:openvex/vexctl`) is already pinned.
+
+**Priority:** P3 · **Depends on:** T8 (Chains signing infra).
 
 ### Publish a multi-arch image once a real amd64 consumer exists
 
@@ -217,9 +245,9 @@ or cloud runner. Today every consumer in the design is arm64 (dev Mac,
 OrbStack cluster, T5b's Docker-on-Mac deploy), so amd64 is speculative
 build+evidence work against no target.
 
-**Context:** Pivot D3 (`docs/designs/digest-as-source-of-truth.md` § Pivot)
-chose arm64-only deliberately; Codex #2/#10 flagged the index-digest cost
-that makes multi-arch a real T5/T5b scope change, not a one-flag switch.
+**Context:** `docs/adr/0008-arm64-only.md` chose arm64-only deliberately;
+the index-digest cost makes multi-arch a real T5/T5b scope change, not a
+one-flag switch.
 
 **Effort:** M (build flag is trivial; the T5/T5b index-digest handling is
 the real work)
@@ -231,9 +259,8 @@ truth T5/T5b proven on arm64 first
 
 **What:** Choose where the actual public `cv_frontend` site lives for a
 hiring manager to visit — separate from the demo/proof deploy T5b adds (a
-standalone `pitchfork`-supervised Docker container on this dev Mac,
-revised from an earlier k8s-namespace plan — see Approach D's "Demo
-consumption" section).
+standalone `pitchfork`-supervised Docker container on this dev Mac —
+`docs/adr/0009-demo-consumer-is-local-container-not-k8s.md`).
 
 **Why:** Anything running on this dev Mac — whether the earlier
 k8s-namespace plan or T5b's pitchfork container — is tied to a single
@@ -242,11 +269,10 @@ Candidates worth evaluating: Vercel/Netlify (Remix has first-class
 adapters for both), or the eventual `cluster-k0sctl` production cluster
 once it exists.
 
-**Context:** Surfaced by an eng-review outside-voice finding (Codex) that
-nothing in the design actually deploys/runs `cv_frontend` from a verified
-image — T5b closes that gap for proof purposes only, deliberately not for
-real public hosting. Read Approach D's "Demo consumption" section of that
-design doc for the demo-vs-real-hosting distinction before starting this.
+**Context:** T5b deploys/runs `cv_frontend` from a verified image for proof
+purposes only, deliberately not for real public hosting. See
+`docs/adr/0009-demo-consumer-is-local-container-not-k8s.md` for the
+demo-vs-real-hosting distinction.
 
 **Effort:** S (research + decision) / M (actual setup)
 **Priority:** P2
@@ -256,19 +282,17 @@ design doc for the demo-vs-real-hosting distinction before starting this.
 ### Retrofit vm-orbstack, cluster-k0sctl, secret-openbao to digest-pinning
 
 **What:** Pin the three existing OpenTofu modules' git sources by commit SHA
-instead of a mutable tag, matching the digest-as-source-of-truth pattern
-proven in `docs/designs/digest-as-source-of-truth.md`.
+instead of a mutable tag, matching the pattern proven in the
+digest-as-source-of-truth pipeline.
 
 **Why:** Closes the gap this whole design is about — for the modules that
 actually provision production infra, not just the CI pipeline wedge.
 
-**Context:** Explicitly deferred as premise #5 throughout the digest-as-
-source-of-truth design session — the wedge proves the pattern on
-`ci-build-frontend`'s Tekton pipeline first, deliberately not touching
-these three modules. Once Phase 1-2 of that design are proven, apply the
-same `ref=<sha>` convention here. Start by reading how
-`docs/designs/digest-as-source-of-truth.md` (Premises #2) frames git commit
-SHA as the digest-equivalent for git-sourced modules.
+**Context:** Deliberately out of scope for the pipeline wedge — it proves
+the pattern on `deploy/frontend/` first. Once Phase 1-2 are proven, apply
+the same `ref=<sha>` convention here.
+`docs/adr/0001-digest-is-the-trust-boundary.md` frames git commit SHA as
+the digest-equivalent for git-sourced modules.
 
 **Effort:** M
 **Priority:** P2
@@ -286,13 +310,13 @@ this design's zero-trust claim, and resolves one of CLAUDE.md's own
 long-deferred items ("Kyverno enforcement mechanics... design at Kyverno
 module build time").
 
-**Context:** This is `docs/designs/digest-as-source-of-truth.md`'s rejected
-Approach C — explicitly deferred because it coupled three previously-
-independent concerns (the Tekton module set, `cluster-k0sctl`, Kyverno
-mechanics) into one dependency chain and contradicted premise #5. Only
-makes sense once `cluster-k0sctl`'s *production* cluster exists for real
-(not the OrbStack dev cluster Phases 2-3 use) — building it against the
-dev cluster would be enforcing policy on a throwaway environment.
+**Context:** `docs/adr/0003-tekton-pipelines-on-orbstack-k8s.md`'s rejected
+Approach C — deferred because it coupled three previously-independent
+concerns (the Tekton module set, `cluster-k0sctl`, Kyverno mechanics) into
+one dependency chain. Only makes sense once `cluster-k0sctl`'s *production*
+cluster exists (not the OrbStack dev cluster Phases 2-3 use) — building it
+against the dev cluster would be enforcing policy on a throwaway
+environment.
 
 **Effort:** L
 **Priority:** P3
@@ -312,14 +336,11 @@ Platform/SRE hiring-manager reviewer can independently verify who signed
 this, without trusting the repo owner's say-so" — the actual CV-signal
 payoff this whole design was built toward.
 
-**Context:** Explicitly deferred throughout `docs/designs/digest-as-source-
-of-truth.md` ("public-trust signing is explicitly deferred... human-
-friendly tags and Fulcio/keyless cosign signing come later"). The
-mechanical signing (OpenBao Transit, unpublished keys) is intentionally
-built first and proven working before spending effort on public trust
-infrastructure. Start by reading that design doc's Constraints section on
-signing deferral and the Chains section on cosign's keyless mode being a
-documented alternative already.
+**Context:** Deferred throughout the design — `docs/designs/digest-as-source-
+of-truth.md` § Constraints ("public-trust signing is deferred"). The
+mechanical signing (OpenBao Transit, unpublished keys) is built and proven
+first. cosign's keyless mode is a documented alternative for when this
+lands.
 
 **Effort:** M
 **Priority:** P3

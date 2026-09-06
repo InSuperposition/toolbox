@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # pitchfork daemon entrypoint for the local cv_frontend demo deploy
-# (docs/designs/digest-as-source-of-truth.md § T5b). pitchfork runs this
+# (docs/adr/0009-demo-consumer-is-local-container-not-k8s.md). pitchfork runs this
 # with cwd = deploy/frontend (pitchfork.toml `dir`); it is also safe to run
 # directly. NEVER edit pitchfork.toml to point somewhere else — this file
 # is the fixed indirection so a deploy never rewrites pitchfork's own

@@ -2,13 +2,13 @@
 # pushes it to GHCR by digest, scans it, and attaches a CycloneDX SBOM as
 # an OCI 1.1 referrer.
 #
-# Pivot 2026-09-06 (docs/designs/digest-as-source-of-truth.md, "Pivot"):
-# Paketo buildpacks dropped. The build is now `docker buildx build` against
-# deploy/frontend/Dockerfile (a minimal 2-stage distroless build). The
-# trivy scan (zero suppressions -- .trivyignore is gone), the trivy
-# CycloneDX SBOM, and the `oras attach` referrer step are UNCHANGED --
-# buildx's own --sbom/--provenance are deliberately NOT used (they emit
-# SPDX embedded in the image index, not a Referrers-API referrer).
+# The build is `docker buildx build` against deploy/frontend/Dockerfile (a
+# minimal 2-stage distroless build --
+# docs/adr/0007-distroless-dockerfile-not-buildpacks.md). trivy scan (zero
+# suppressions -- no .trivyignore), trivy CycloneDX SBOM, and the `oras
+# attach` referrer steps: buildx's own --sbom/--provenance are deliberately
+# NOT used (they emit SPDX embedded in the image index, not a Referrers-API
+# referrer).
 #
 # Manually triggered (workflow_dispatch) -- this wedge proves the pipeline
 # works; it isn't webhook-driven yet (Pipelines-as-Code is the deferred
@@ -33,9 +33,8 @@ permissions:
 
 jobs:
   build-scan-attach:
-    # Native arm64 runner (pivot D3): distroless is multi-arch, every
-    # consumer in this design is arm64, and native `npm ci` gets the right
-    # esbuild binary with no QEMU.
+    # Native arm64 runner (docs/adr/0008-arm64-only.md): every consumer is
+    # arm64, and native `npm ci` gets the right esbuild binary with no QEMU.
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout toolbox (Dockerfile + mise.toml's pinned tools)
@@ -79,9 +78,9 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # buildx builds, pushes by digest, and writes the digest to a
-      # metadata file (replaces the pre-pivot `report.toml` parsing).
-      # --provenance=false --sbom=false: the SBOM referrer is attached
-      # explicitly below via trivy + oras (pivot D6), not embedded here.
+      # metadata file. --provenance=false --sbom=false: the SBOM referrer is
+      # attached explicitly below via trivy + oras, not embedded in the
+      # image index (see the workflow header).
       - name: Build and push distroless image
         run: |
           docker buildx build \
@@ -105,10 +104,10 @@ jobs:
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       # Full scan report as JSON, attached as an OCI referrer BEFORE the
-      # blocking CRITICAL gate below (T5 review, Codex P1-5). A CRITICAL
-      # finding fails the job -- but a reject-worthy image must still carry
-      # the evidence `mise run approve` reads, so this runs and attaches
-      # first. No --exit-code here: this step never blocks.
+      # blocking CRITICAL gate below. A CRITICAL finding fails the job --
+      # but a reject-worthy image must still carry the evidence `mise run
+      # approve` reads, so this runs and attaches first. No --exit-code
+      # here: this step never blocks.
       - name: Trivy scan report (JSON)
         run: |
           trivy image --format json --output scan.json \
@@ -131,10 +130,9 @@ jobs:
             "$IMAGE@${{ steps.digest.outputs.digest }}" \
             sbom.cdx.json:application/vnd.cyclonedx+json
 
-      # Blocking gate, LAST. Zero suppressions (pivot D4): .trivyignore is
-      # gone -- both prior entries were Paketo-toolchain-only. Runs after the
-      # evidence referrers are attached so a failed scan still leaves a
-      # reviewable trail (T5 review).
+      # Blocking gate, LAST. Zero suppressions -- there is no .trivyignore.
+      # Runs after the evidence referrers are attached so a failed scan
+      # still leaves a reviewable trail.
       - name: Trivy vulnerability scan (blocks on CRITICAL)
         run: |
           trivy image --exit-code 1 --severity CRITICAL \

@@ -4,7 +4,7 @@ set -euo pipefail
 # `mise run consume -- <registry/repo@sha256:...> <sha256:attestation-digest>`
 #
 # The consume-side deploy gate for the local cv_frontend demo
-# (docs/designs/digest-as-source-of-truth.md § T5b): verify a pinned
+# (docs/adr/0009-demo-consumer-is-local-container-not-k8s.md): verify a pinned
 # approval attestation, and only if it holds, make that image the one the
 # pitchfork `frontend` daemon runs — atomically record it, restart the
 # daemon, and report the REAL readiness result (never an assumed success).

@@ -2,7 +2,7 @@
 //
 // The digest-as-source-of-truth pipeline signs a human's approve/reject
 // decision as an in-toto attestation over the built image digest
-// (docs/designs/digest-as-source-of-truth.md § T5). This file is both the
+// (docs/designs/digest-as-source-of-truth.md § Architecture). This file is both the
 // schema that decision is checked against before signing AND the policy the
 // consumer checks a pinned attestation against before running the image.
 //

@@ -1,9 +1,9 @@
 #!/usr/bin/env bats
 
-# T5b — the local pitchfork-supervised demo deploy. run.sh (pitchfork
-# daemon entrypoint) + consume.sh (`mise run consume`).
+# The local pitchfork-supervised demo deploy. run.sh (pitchfork daemon
+# entrypoint) + consume.sh (`mise run consume`).
 #
-# Cases from docs/designs/digest-as-source-of-truth.md § T5b "Verify". The
+# Covers docs/adr/0009-demo-consumer-is-local-container-not-k8s.md. The
 # no-docker cases run always; the container cases skip when docker is
 # unavailable. pitchfork commands run against a SCRATCH pitchfork.toml so a
 # real `frontend` daemon is never touched.

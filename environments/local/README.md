@@ -8,7 +8,7 @@ digest-as-source-of-truth pipeline's approval gate uses
 (`modules/secret-openbao-local`). Named `local` (not just left at repo
 root) so `environments/production/` can slot in later for real
 `secret-openbao`/`cluster-k0sctl` infra with zero rename — see
-`docs/designs/digest-as-source-of-truth.md`'s File Layout for the full
+`docs/designs/digest-as-source-of-truth.md` § File layout for the full
 reasoning.
 
 `pitchfork.toml` itself stays at the **repo root**, not here — pitchfork
