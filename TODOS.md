@@ -92,19 +92,17 @@ The first `approval-key` was rotated on 2026-09-06 (commit `bcbb862`)
 because it was provisioned in an AI session whose bootstrap output was
 transcript-visible. Procedure for any future rotation:
 ```
-mise run openbao-reset            # stops daemon, wipes raft store + fnox VAULT_TOKEN + tfstate
-mise run openbao-bootstrap        # fresh key + NEW one-time unseal key (save it out-of-band);
-                                  #   auto-runs export-approval-pubkey.sh
+mise run openbao-reset            # stops daemon, wipes raft store + 0600 secret files + tfstate
+mise run openbao-bootstrap        # fresh approval-key; regenerates seal.key / root.token /
+                                  #   recovery.key (all 0600); rewrites cosign-approval.pub
 git add deploy/frontend/cosign-approval.pub && git commit
 ```
-`fnox.toml` needs no manual fixup — `fnox set` writes the same
-`{ provider = "keychain", value = "VAULT_TOKEN" }` the committed file
-already has (fixed in `4710857`). Every attestation signed with the old key
-stops verifying against the new `cosign-approval.pub` — re-run `mise run
-approve` for any image whose approval must persist. `.../rotate` on the
-same key would keep old versions verifiable but the *exported* public key
-still changes, so a full reset is simpler while nothing real depends on the
-key.
+No `fnox.toml` / keychain step — the secrets are `0600` files (ADR 0011).
+Every attestation signed with the old key stops verifying against the new
+`cosign-approval.pub` — re-run `mise run approve` for any image whose
+approval must persist. `.../rotate` on the same key would keep old versions
+verifiable but the *exported* public key still changes, so a full reset is
+simpler while nothing real depends on the key.
 
 ### Auth + multi-member DX — planning session before T5 hardens
 
@@ -119,7 +117,7 @@ root token), per-member registry auth (GHCR now, `zot` after T7c), the
 
 **Why:** The design's zero-trust claim is "possession of the private key is
 the access control." In T5's interim form that collapses to "possession of
-the OpenBao root token in one person's OS keychain." Anyone with it can
+the OpenBao root token as a `0600` file on one person's machine." Anyone with it can
 sign any `approvedBy` — there is no cryptographic per-approver identity.
 That's acceptable for a solo proof; it is not acceptable once a second
 person needs to approve, and building `approve.sh`'s auth twice is waste,
@@ -129,7 +127,7 @@ so the shape should be designed before hardening.
 long-lived secret), DX (a new member from clone to first approval in
 minutes, not a runbook), bootstrap (idempotent, works on a fresh machine),
 simplicity (an auth method, not a PKI), existing-stack fit (OpenBao auth
-backends, fnox, `gh`; check whether Cilium/Kyverno play a role at the
+backends, `gh`; check whether Cilium/Kyverno play a role at the
 cluster edge later).
 
 **Context:** Surfaced by the 2026-09-06 T5 eng review.
@@ -140,7 +138,8 @@ for the scoped policy. See `docs/designs/digest-as-source-of-truth.md`
 **Effort:** planning ~1 session; implementation ~1-2d human
 **Priority:** P2
 **Depends on:** ~~T5 shipped~~ — **UNBLOCKED 2026-09-06.** T5 shipped its
-interim auth: `approve.sh` signs with the fnox root `VAULT_TOKEN` and, for a
+interim auth: `approve.sh` signs with the root `VAULT_TOKEN` (the `0600`
+`root.token` file, ADR 0011) and, for a
 non-local registry, `gh auth token | cosign login` into an isolated
 `DOCKER_CONFIG`; `approvedBy` is self-asserted. The `write:packages` scope
 on the `gh` token is currently the operator's to arrange — this session
