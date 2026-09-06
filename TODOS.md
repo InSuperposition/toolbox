@@ -2,64 +2,57 @@
 
 ## Infrastructure
 
-### Remove `.trivyignore` entry for CVE-2026-56854
+### Confirm the distroless build scans clean, then delete `.trivyignore`
 
-**What:** Delete the `CVE-2026-56854 exp:2026-12-04` line from `.trivyignore`
-once `paketo-buildpacks/npm-install` bumps `golang.org/x/crypto` past
-0.54.0, or re-evaluate the risk acceptance if the expiry passes first.
+**What:** Run `trivy image --severity CRITICAL --exit-code 1` against the
+distroless `cv_frontend` image (pivot D2) with **zero suppressions**. If it
+passes, delete `.trivyignore` entirely and remove this entry. If a genuine
+residual CRITICAL surfaces, author one OpenVEX statement with real
+exploitability evidence + a `last_updated`/re-review date (do **not**
+reinstate the old ignore-file lines).
 
-**Why:** T4's live workflow run blocked on this CRITICAL CVE
-(`golang.org/x/crypto/ssh` auth bypass) in `builder-jammy-base`'s
-`npm-install` buildpack's own `exec.d` symlink-setup helper — not
-`cv_frontend`'s or toolbox's code. Confirmed no fix exists yet: still
-pinned at `v0.54.0 // indirect` on `npm-install`'s `main` branch, no
-upstream GitHub issue filed by anyone as of this writing. Accepted as a
-time-boxed risk (the helper never establishes an SSH connection, so the
-auth-bypass vector doesn't apply here) rather than blocking T4
-indefinitely on someone else's unscheduled dependency bump.
+**Why:** Both prior `.trivyignore` entries (CVE-2026-56854 =
+`golang.org/x/crypto` in Paketo `npm-install`'s `exec.d` helper;
+CVE-2026-59873 = `node-tar` in Node 24.19.0's bundled npm, pulled by Paketo
+`node-engine`) are **Paketo-toolchain-only**. Dropping buildpacks (pivot,
+2026-09-06) removes the Go helper binary entirely and the bundled npm
+(distroless ships none; `cv_frontend` has no `tar` in `package-lock.json`).
+The CVEs die at the root, not by suppression — but Codex #8 is right that
+this must be *verified* by a clean unsuppressed scan before the file is
+deleted, not assumed.
 
-**Context:** Researched via `gh search issues` across `paketo-buildpacks`
-org and GitHub-wide — this CVE is hitting many unrelated Go projects
-right now (disclosed ~2026-08-30), several using the same
-trivyignore-with-tracked-removal pattern. Check `paketo-buildpacks/
-npm-install`'s `go.mod` on `main` for the current pinned version before
-removing this entry — don't assume a new builder tag alone fixed it.
+**Context:** See `docs/designs/digest-as-source-of-truth.md` § Pivot (D4)
+and the /plan-eng-review + Codex pass of 2026-09-06. `vexctl`
+(`aqua:openvex/vexctl`) is already pinned and ready for the residual case;
+the full signed-VEX-referrer + consume-side `trivy --vex` enforcement is
+design task T10 (post-Chains), not this entry.
 
-**Effort:** S (check + delete one line, or file an upstream issue if none
-exists by the expiry)
-**Priority:** P2
-**Depends on:** `paketo-buildpacks/npm-install` releasing a fix, or the
-2026-12-04 expiry forcing a re-check
+**Effort:** S (run one scan, delete one file + this entry)
+**Priority:** P1 (part of pivot task T-P0 / T4)
+**Depends on:** T4a / T4 (the distroless build existing to scan)
 
-### Remove `.trivyignore` entry for CVE-2026-59873
+### Publish a multi-arch image once a real amd64 consumer exists
 
-**What:** Delete the `CVE-2026-59873 exp:2026-12-04` line from
-`.trivyignore` once `builder-jammy-base` indexes Node `>=24.20.0`, or
-re-evaluate if the expiry passes first.
+**What:** Extend the `buildx` build from `--platform linux/arm64` to
+`--platform linux/amd64,linux/arm64`, and update T5/T5b to handle the
+resulting **index digest**: scan and runtime-smoke-test *both* child
+manifests, merge those exact outputs mutable-tag-race-safe, then approve
+the final index digest (not one `trivy image INDEX` call).
 
-**Why:** T4's live workflow run also blocked on this CRITICAL CVE
-(`node-tar` DoS via crafted gzip bomb) — but not in `cv_frontend`'s
-dependency tree at all (verified: no `tar` entry anywhere in its
-`package-lock.json`). It's bundled inside Node 24.19.0's own npm
-installation, selected by the `node-engine` buildpack. The fix already
-exists upstream — confirmed live: Node 24.20.0 bundles npm 11.19.0 →
-`tar` 7.5.19 — but `builder-jammy-base`'s own Node version index tops out
-at 24.19.0 (`pack build --env BP_NODE_VERSION=24.20.0` fails outright,
-lists supported versions ending at 24.19.0/26.6.0). Accepted as a
-time-boxed risk (npm is never invoked at runtime by this app) rather than
-blocking T4 on a builder-image rebuild with no committed schedule.
+**Why:** Portability — a hiring manager pulling the image on an amd64 laptop
+or cloud runner. Today every consumer in the design is arm64 (dev Mac,
+OrbStack cluster, T5b's Docker-on-Mac deploy), so amd64 is speculative
+build+evidence work against no target.
 
-**Context:** Same investigation session as the CVE-2026-56854 entry
-above — searched `paketo-buildpacks/node-engine` and GitHub-wide, no
-upstream issue tracks this specific version-index gap. Re-run `pack
-build --env BP_NODE_VERSION=24.20.0` (or whatever the target version is
-by then) against the current builder to check if the index caught up —
-don't assume a new builder tag alone means every version is indexed.
+**Context:** Pivot D3 (`docs/designs/digest-as-source-of-truth.md` § Pivot)
+chose arm64-only deliberately; Codex #2/#10 flagged the index-digest cost
+that makes multi-arch a real T5/T5b scope change, not a one-flag switch.
 
-**Effort:** S (check + delete one line)
-**Priority:** P2
-**Depends on:** `builder-jammy-base` indexing a fixed Node version, or
-the 2026-12-04 expiry forcing a re-check
+**Effort:** M (build flag is trivial; the T5/T5b index-digest handling is
+the real work)
+**Priority:** P3
+**Depends on:** an actual amd64 deploy or demo target; digest-as-source-of-
+truth T5/T5b proven on arm64 first
 
 ### Decide public hosting for cv_frontend
 
