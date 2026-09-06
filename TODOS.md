@@ -2,18 +2,27 @@
 
 ## Debt
 
-### Local OpenBao unseal-key storage — P1, planning session
+### Local OpenBao unseal-key storage — ✅ DONE (ADR 0010 + 0011)
 
-The local dev daemon reseals on every process restart and its unseal key is
-printed-once / hand-copied, so routine operation needs a memorized key. A
-real friction flaw, missed during T6 planning. Direction: store it
-machine-side + auto-unseal (`infra` already does this). Full context and
-open sub-decisions in **CLAUDE.md § Deferred — "Local OpenBao unseal-key
-storage"**. Widen the session to the whole OpenBao/secrets operational
-model (also: `fnox activate` friction, `gh` token expiry, `pitchfork
-daemons remove` rewriting `pitchfork.toml`).
+Resolved on `feat/openbao-machine-global-and-gate`: one machine-global
+pitchfork daemon that auto-unseals from a `0600` `seal.key` file; the root
+token and recovery key are `0600` files too; `mise [env]` injects
+`VAULT_TOKEN`; `fnox` + the keychain are removed from the stack entirely.
+No memorized secret, no recurring manual step. `pitchfork.toml`-rewrite and
+`fnox.toml`-rewrite hazards documented (F7/F8). `gh` token expiry is still
+open — folded into "Auth + multi-member DX".
 
-### Scripts-policy audit of the T5 / T5b shell — P1, planning session
+### Scripts-policy audit of the T5 / T5b shell — mostly ✅ DONE
+
+Landed on `feat/openbao-machine-global-and-gate`: `hk.pkl` + `mise run
+check` gate (was missing entirely); `export-approval-pubkey.sh` deleted →
+one-line mise task; `openbao-preflight.sh` advice trimmed; `bootstrap` /
+`reset` simplified (no `fnox`, no `security`, atomic file writes). Remaining
+(P2, own pass): `consume.sh` readiness poll, `verify-approval.sh` cosign-
+stderr `case`, `run.sh` trap dance, `helper.bash` split. Original scope
+kept below for that pass.
+
+### Scripts-policy audit of the T5 / T5b shell — P2, remaining reduction pass
 
 **What:** Run `/plan-eng-review` (and `/office-hours` if it grows) on every
 shell file added for T5 / T5b, against CLAUDE.md's Scripts Policy ("Scripts

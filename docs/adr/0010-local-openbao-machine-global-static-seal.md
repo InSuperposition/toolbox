@@ -4,10 +4,11 @@ The local dev OpenBao is a single **pitchfork *global* daemon** (one per
 developer machine, `~/.config/pitchfork/config.toml`, `--boot-start`), with
 its raft store / rendered config / snapshots / tofu state under
 `~/.local/state/toolbox/openbao/`. It **auto-unseals on every start** via a
-`seal "static"` stanza keyed by a raw 32-byte `file://` key at
-`<state_dir>/seal.key` (0600). `bao operator init` yields recovery keys
-(break-glass only, stored via fnox); there is no `bao operator unseal` step
-anywhere in normal operation.
+`seal "static"` stanza keyed by a 32-byte `file://` key at
+`<state_dir>/seal.key` (0600). `bao operator init` yields a recovery key
+(break-glass only) — the root token and recovery key are also `0600` files
+in `<state_dir>` (ADR 0011). There is no `bao operator unseal` step anywhere
+in normal operation.
 
 Why machine-global, not per-worktree: `pitchfork` namespaces project
 daemons by directory, so a daemon in the repo's `pitchfork.toml` starts a
@@ -18,14 +19,14 @@ provider has no `unix://` transport (verified) and `environments/local`
 needs it to provision Transit. One daemon per machine removes the collision
 category rather than guarding against it.
 
-Why static seal with a `file://` key on disk, not `env://` + `fnox exec` or
-a hand-copied Shamir key: the daemon `--boot-start`s, possibly before the
-login keychain unlocks, so it must read the key from a file. `seal.key`
-sits beside `vault.db`, which already holds everything the key protects —
-no additional exposure. Routine restart and machine reboot are now
-zero-step. The one remaining manual case is the disaster `-force` snapshot
-restore, which needs the snapshot's *own* `seal.key` + root token kept with
-it (`environments/local/README.md`).
+Why a `file://` key on disk, not a hand-copied Shamir key: the daemon
+`--boot-start`s, possibly before the login keychain unlocks, so it must read
+the key from a file. `seal.key` sits beside `vault.db`, which already holds
+everything the key protects — no additional exposure. Routine restart and
+machine reboot are now zero-step. The one remaining manual case is the
+disaster `-force` snapshot restore, which needs the snapshot's *own*
+`seal.key` + `root.token` — `mise run openbao-snapshot` writes them together
+as a bundle (ADR 0011, `environments/local/README.md`).
 
 Why static seal, not Transit auto-unseal: Transit needs a second OpenBao
 instance (the unsealer), which itself needs unsealing or runs in dev mode.

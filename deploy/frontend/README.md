@@ -123,8 +123,9 @@ design — per-member OpenBao identity, per-member registry auth, a clean
 
 Interim, `approve.sh`:
 
-- authenticates to OpenBao with the **root token** from fnox
-  (`VAULT_TOKEN`). Anyone holding it can sign any `approvedBy` value —
+- authenticates to OpenBao with the **root token** in `$VAULT_TOKEN`
+  (`mise [env]` reads the `0600` `root.token` file, ADR 0011). Anyone
+  holding it can sign any `approvedBy` value —
   there is no per-approver cryptographic identity yet, so `approvedBy` is
   self-asserted audit text.
 - pushes the attestation to GHCR with a **call-time `gh auth token`**. That

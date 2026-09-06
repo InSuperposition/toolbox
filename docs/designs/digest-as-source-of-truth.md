@@ -41,9 +41,10 @@ work lives in [`../../TODOS.md`](../../TODOS.md).
 - `deploy/frontend/Dockerfile` is the one hand-authored Dockerfile — a
   named carve-out to "no code in configuration files" (two `RUN` lines, no
   shell logic; see CLAUDE.md).
-- Interim auth only: `approve.sh` authenticates to OpenBao with the fnox
-  root token and pushes with a call-time `gh` token. Per-member
-  cryptographic identity is a separate planning task (`TODOS.md`).
+- Interim auth only: `approve.sh` authenticates to OpenBao with the root
+  token in `$VAULT_TOKEN` (a `0600` file, ADR 0011) and pushes with a
+  call-time `gh` token. Per-member cryptographic identity is a separate
+  planning task (`TODOS.md`).
 - Public-trust signing (Fulcio/keyless, a published key) is deferred — the
   cosign key is mechanically required, carries no public-trust claim.
 
