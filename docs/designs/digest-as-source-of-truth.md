@@ -303,23 +303,34 @@ gate a real trust boundary rather than an unenforced formality.
   and no ServiceAccount/RBAC/accessControl scaffolding needed at all.
   **Corrected (outside-voice finding):** `cosign verify-attestation` by
   default only proves the *signature* is valid — it does **not** enforce
-  predicate field values. A `verdict: rejected` record would pass that bare
-  check just as validly as `verdict: approved`. Fix, kept declarative per
-  this session's own "GitOps declarative first" direction: `cosign
-  verify-attestation --policy verdict-approved.cue` — a committed CUE
-  policy file asserting `predicate.verdict == "approved"` — not a script
-  parsing JSON after the fact. `mise run consume` becomes this one
-  `--policy`-bearing invocation, still no separate file/logic needed.
-  **Conflict resolution (outside-voice finding, researched):** multiple
-  approval-typed referrers can accumulate on one digest (approve, then
-  later reject, or vice versa) — resolved by taking the referrer with the
-  latest `approvedAt` as authoritative, modeled on GitHub's own PR review
-  state machine (a reviewer's most recent submitted review supersedes
-  their prior one, not a separate revocation record). Accepted limitation,
-  same one Sigstore's own short-lived-cert design exists to avoid at a
-  different layer: this can't detect a registry withholding a newer record
-  from a query — solving that needs a full transparency log, genuine
-  over-engineering at this scale.
+  predicate field values. Fix: `cosign verify-attestation --policy
+  verdict-approved.cue` — a committed CUE policy. **T5-review refinement
+  (Codex P1-3):** cosign hands the policy the *entire in-toto statement*,
+  not the bare predicate, and `approve.sh` also `cue vet`s its
+  reject-or-approve predicate before signing — so `verdict-approved.cue`
+  carries two definitions: a permissive `#Predicate` (both verdicts, for
+  the sign-side `cue vet`) and a root-statement constraint requiring
+  `verdict == "approved"` (for the consume-side `--policy`).
+  **Selection model (T5 review, 2026-09-06 — supersedes the earlier
+  "latest `approvedAt` wins" rule):** `approve.sh` prints the approval
+  attestation's own digest; the consumer verifies *that specific
+  attestation, pinned by digest*, against the committed
+  `cosign-approval.pub`. No "scan all referrers," no `approvedAt`
+  comparison, no wrapper. A typo/mistaken reject is an unselected record;
+  a re-approval is selectable. This is the approval record pinned by
+  digest like everything else in this design. **Accepted limitations
+  (Codex P0-1/P0-2, stated not solved):** only *validly-signed* records
+  count (a forged/bad-sig reject is ignored — a feature); and registry
+  discovery can't prove completeness — a registry admin who deletes
+  referrers can change what a *non-pinned* consumer sees, which is exactly
+  why the consumer pins the attestation digest rather than trusting a
+  query. `approvedAt` is self-asserted (no trusted timestamp) — audit
+  metadata only, never a trust input.
+  **cosign 3.1.3 flag reality (Codex P1-4, verified against source):** the
+  "no public trust" posture is NOT the default. `approve.sh` MUST pass
+  `--use-signing-config=false --tlog-upload=false` (both — `--tlog-upload=false`
+  alone conflicts with the default signing-config mode); `verify-approval.sh`
+  MUST pass `--insecure-ignore-tlog`.
   **Human-side registry auth (named, not left implicit):** `approve.sh`
   itself still needs to pull SBOM/provenance evidence from and push the
   approval referrer to `zot` — via the repo owner's own personal
@@ -607,7 +618,11 @@ belongs after D is proven, not instead of it.
   Pipelines+Chains already installed, plus readiness checks before
   asserting and cleanup after (teardown the test PipelineRun/TaskRuns).
 
-## Resolved Decisions (no open questions remain)
+## Resolved Decisions
+
+> The pivot (§ Pivot) and the T5 review deferred two areas to their own
+> planning sessions — the T7 Phase-2 architecture and the multi-member
+> Auth + DX design (both in TODOS.md). Everything else below is settled.
 
 - **hk bisect-safety mechanism:** a commit-range rebuild-in-isolation check,
   run **CI-side (async)**, not as a blocking local pre-push hook (a full
@@ -615,9 +630,19 @@ belongs after D is proven, not instead of it.
   Still declared in `hk.pkl` — the CI-side variant is invoked via `mise run
   check` (this repo's existing one-definition/two-entry-points pattern),
   not a second, separately-declared check.
-- **Approval-record schema:** a real JSON Schema now (see Constraints),
-  not deferred to "a second consumer exists" — matches this repo's own
-  "schemas required for core functionality" standard.
+- **Approval-record schema:** ~~a real JSON Schema~~ **T5 review
+  (2026-09-06): a single `verdict-approved.cue`** with two internal
+  definitions — a permissive `#Predicate` for the sign-side `cue vet`, a
+  root-statement constraint for the consume-side `--policy`. CUE is a
+  schema language (satisfies "schemas required"); one file, no JSON-Schema
+  duplication. `cue` joins `mise.toml` as a pinned tool.
+- **Approval selection model (T5 review, 2026-09-06):** explicit
+  approved-attestation digest pin — `approve.sh` prints the attestation
+  digest, the consumer verifies that one against the committed
+  `cosign-approval.pub`. **Supersedes** the earlier "latest `approvedAt`
+  wins" rule AND the mid-review "reject is terminal" idea (Codex P0-2/P1-6:
+  neither is real permanence, and permanence conflates evidence-review with
+  content-ban). See Constraints § Selection model.
 - **File layout:** resolved — see File Layout section above.
 - **zot/trivy tool-boundary overlap:** verified and resolved. zot ships its
   own CVE-scanning extension that also wraps Trivy (separate `trivy-db`
@@ -650,10 +675,17 @@ belongs after D is proven, not instead of it.
   consumer (TODOS.md).
 - **SBOM:** added as a third referrer — see Approach D.
 - **Ephemeral debug container:** explicitly deferred to a future session.
-- **Approval trust boundary:** a dedicated cosign keypair (not registry ACL,
-  not Kubernetes RBAC — both verified insufficient for this, see
-  Constraints), held only by the repo owner. Possession of that private key
-  is the access control.
+- **Approval trust boundary:** a dedicated cosign keypair backed by OpenBao
+  Transit (`approval-key`, non-exportable), not registry ACL / k8s RBAC.
+  **T5-review honesty note (Codex P2-9):** in T5's *interim* auth, "the
+  private key" really means "the OpenBao root token in the OS keychain" —
+  anyone with it can sign any `approvedBy`. Per-member cryptographic
+  identity is the "Auth + DX planning session" TODO, not T5.
+- **Consume does not touch OpenBao (T5 review, Codex P1-7):**
+  `verify-approval.sh` verifies against the committed
+  `deploy/frontend/cosign-approval.pub`, exported once at bootstrap. Only
+  `approve.sh` needs OpenBao up + unsealed. Past approvals stay verifiable
+  after a raft-store loss (re-rates T6 down from "single point of failure").
 
 ## Distribution Plan
 
@@ -1092,14 +1124,23 @@ GitHub Actions (public repo, unmetered)          Local (repo owner's machine)
                 │                        approval referrer attached (signed)
                 ▼                                                  │
     ┌────────────────────────────────────────────────────────────┘
-    │ mise run consume -- <digest>
-    │   cosign verify-attestation --key cosign-approval.pub
-    │   check verdict == "approved"
-    │     ├── valid signature + approved ──> accept, run the image
-    │     ├── valid signature + rejected ──> reject (accountable: reason visible)
-    │     ├── invalid/missing signature ───> reject (same as no referrer)
-    │     └── tag-only reference ──────────> irrelevant, digest is what's checked
+    │ mise run consume -- <image-ref> <approval-attestation-digest>
+    │   verify-approval.sh: cosign verify-attestation
+    │     --key cosign-approval.pub  (committed; NO OpenBao call)
+    │     --type <URI>  --policy verdict-approved.cue  --insecure-ignore-tlog
+    │   verifies THE PINNED attestation, not "scan all referrers"
+    │     ├── valid signature + approved ──> exit 0, run the image
+    │     ├── valid signature + rejected ──> exit 1 "verdict rejected"
+    │     ├── invalid/missing signature ───> exit 1 "no approval" / "bad signature"
+    │     ├── wrong subject / wrong type ──> exit 1 (named)
+    │     └── tag-only reference ──────────> exit 1 (full registry/repo@sha256: required)
     └────────────────────────────────────────────────────────────────────────
+
+  NOTE (T5 review): the earlier "latest approvedAt wins" / "reject is
+  terminal" ideas are BOTH superseded by pinning the approved attestation
+  by digest. approve.sh signs every decision (approve AND reject) and
+  passes --use-signing-config=false --tlog-upload=false (cosign 3.1.3
+  uploads to the public tlog otherwise).
 ```
 
 ## Failure modes
@@ -1111,21 +1152,17 @@ GitHub Actions (public repo, unmetered)          Local (repo owner's machine)
 | **Distroless: no shell** (pivot) | a later script/test assumes `docker exec … sh` in the image | T4b bats asserts no shell | N/A — design uses HTTP readiness, not `docker exec` | Clear if it happens (exec fails immediately) |
 | trivy scan | CRITICAL finding (now **zero suppressions**, D4) | Yes (Success Criteria) | Yes — blocks before attach | Clear (CI job fails with reason) |
 | GHCR push | `GITHUB_TOKEN` permissions misconfigured (missing `packages: write`) | No test (documented instead) | Push fails loudly with a permissions error | Clear — CI job fails, not silent |
-| `mise run approve` | OpenBao process not running | **Gap** — not yet specified | Not yet specified | **Should be**: clear connection-refused error, not silent |
-| `mise run consume` | Missing/invalid approval signature | Yes (Success Criteria) | Yes — reject | Clear (explicit rejection reason) |
-| `mise run consume` | Explicit `verdict: rejected` | Yes (added this review) | Yes — reject | Clear (`reason` field visible) |
-| OpenBao Transit | Key rotated | Yes (added this review) | N/A — old version retained | N/A |
-| OpenBao Transit | Storage directory lost | **Was a gap, now resolved** — periodic backup (this review) | Restore procedure (documented) | Would be silent until next sign/verify without the backup |
+| `mise run approve` | OpenBao unreachable / sealed / unauthorized | **RESOLVED (T5 review)** — `openbao-preflight.sh` distinguishes all four, exit 3 | Named per case + the right fix (`pitchfork start openbao` / `bao operator unseal` / re-bootstrap) | Clear, actionable |
+| `mise run approve` | operator hits Ctrl-C / EOF at the prompt | Yes (T5 bats) | **No signed record written** — abort clean | Clear (nothing happens) |
+| `mise run approve` | `cosign attest` signs but the registry push fails | Yes (T5 bats — read-back check) | Fail loudly, non-zero; no false "approved" | Clear (push error surfaced) |
+| `mise run consume` / T5b launch | selected attestation missing / bad sig / wrong subject / verdict rejected | Yes (T5 bats matrix) | `verify-approval.sh` exit 1, **distinct stderr per case** | Clear (names which) |
+| T5b launch re-verify | GHCR transient failure | Yes (T5b bats) | Bounded retry + backoff → visible stopped state, never a hang | Clear (stopped, with reason) |
+| `verify-approval.sh` | OpenBao down | N/A — **consume never touches OpenBao** (verifies vs committed pubkey, Codex P1-7) | N/A | N/A |
+| OpenBao Transit | raft store lost | Yes (T6, restore + unseal-material test) | Past approvals still verify (pubkey in-repo); T6 restores *signing* ability | Silent only for *new* approvals until restored |
 | `hk` history gate | Broken intermediate commit in a pushed range | Yes (Success Criteria) | Yes — CI fails the range | Clear |
 
-**One flagged-but-unresolved gap:** `mise run approve` failing because the
-local OpenBao process isn't running has no specified error handling yet —
-this is small (a connection-refused error from `bao`/cosign itself is
-probably already clear enough) but wasn't explicitly designed. Not blocking
-Phase 1 (the failure is loud, not silent), but worth a one-line check when
-`approve.sh`... this repo's Scripts Policy still applies... is written:
-confirm the underlying error message names what's wrong, don't let it print
-a generic exit code.
+**0 critical gaps** after the T5 review — the one prior flagged gap
+(`mise run approve` with OpenBao down) is resolved by `openbao-preflight.sh`.
 
 ## Worktree parallelization strategy
 
@@ -1278,58 +1315,149 @@ finding above. Run with Claude Code or Codex; checkbox as you ship.
     [run 33982413276](https://github.com/InSuperposition/toolbox/actions/runs/33982413276)
     confirms the Tiny attempt's removal — same green result, zero
     `Resolving plan` lines.
-- [ ] **T5 (P1, human: ~1-2h / CC: ~15min)** — approve/consume — `mise run
-  approve -- <digest>` (schema.json with verdict+reason, `cosign attest`
-  via OpenBao) and `mise run consume -- <digest>` (one-line `cosign
-  verify-attestation --policy verdict-approved.cue`)
-  - Surfaced by: File Layout, script-minimization pass, Test gap 2
-  - Files: `deploy/frontend/scripts/approve.sh`, `deploy/frontend/
-    scripts/verify-approval.sh` (shared verification logic — also called
-    by T5b's launch-time reverify, retires the earlier "`consume.sh` is
-    not a file" framing now that it's genuinely shared), `mise.toml`
-    (consume task), `deploy/frontend/cosign-approval.pub`
-  - **Open pre-req (Codex catch, not yet resolved):** the "latest
-    `approvedAt` wins" conflict-resolution rule (Constraints) has no
-    named mechanism actually selecting the newest record among multiple
-    referrers — checking `--policy` says "approved," not "the *latest*
-    record is approved." Verify this for real before T5b depends on it.
-  - Verify: bats tests pass (tag-irrelevant, no-approval-rejected,
-    invalid-signature-rejected, explicit-rejection-accountable,
-    provenance/SBOM-without-approval-rejected, approve-then-reject
-    picks up the latest verdict correctly)
+### T5 — approve/consume (planned 2026-09-06 /plan-eng-review + Codex)
+
+**Mechanism (corrected against a live cosign 3.1.3 probe + Codex source review):**
+
+- **Selection model: explicit approved-attestation digest pin** (supersedes
+  the earlier "reject is terminal" / "latest `approvedAt` wins" idea — see
+  Resolved Decisions). `approve.sh` prints the approval attestation's own
+  digest; the consumer verifies *that specific attestation*, not "scan all
+  referrers and hope." A mistaken/typo reject is just an unselected record;
+  a later re-approval is selectable. `approvedAt` stays as an audit field,
+  never a selection key. Consistent with this design's own thesis — the
+  approval record is pinned by digest like everything else.
+- **`deploy/frontend/scripts/approve.sh`** (`mise run approve -- <image-ref>`):
+  1. Preflight OpenBao — distinguish **unreachable / sealed / unauthorized /
+     missing-key** (not just `bao status`; `bao status` doesn't prove Transit
+     auth). Named error + the *correct* fix per case (`pitchfork start
+     openbao` vs `bao operator unseal` vs re-bootstrap). Exit 3.
+  2. Fetch evidence: `oras discover` + pull the CycloneDX SBOM **and** the
+     `scan.json` scan-report referrer (see T4 amendment below), show the
+     human the actual findings.
+  3. Prompt approve/reject + a free-text reason. **EOF / Ctrl-C / empty must
+     NOT become a signed `rejected` record** — abort with no attestation.
+  4. Build the in-toto predicate in memory (schemaVersion, digest, verdict,
+     reason, approvedBy, approvedAt, scanReportRef = the `scan.json`
+     referrer's digest). `cue vet` it against `#Predicate` in
+     `verdict-approved.cue` (permissive — accepts both verdicts) before
+     signing.
+  5. `cosign attest --predicate - --type <stable-URI-predicate-type>
+     --key openbao://approval-key --use-signing-config=false
+     --tlog-upload=false <registry/repo@digest>`. **Both flags required** —
+     cosign 3.1.3 defaults `--use-signing-config` and `--tlog-upload` to
+     true; omitting a config selects the TUF config which uploads to the
+     public tlog (Codex P1-4, verified). ALWAYS signs — approve *or*
+     reject — never silent.
+  6. Read the uploaded attestation back (`cosign download attestation` /
+     `oras discover`); if the push failed, fail loudly — an in-memory-only
+     predicate + failed upload leaves no durable record.
+  7. Print the approval attestation digest for the operator to record.
+  - Interim auth (full multi-member design is TODO'd — see "Auth + DX
+    planning session"): signs via the fnox root token (`VAULT_TOKEN`);
+    pushes to GHCR via `gh auth token` at call time (per-member, no stored
+    secret). Both marked **interim** in code + `deploy/frontend/README.md`.
+    Verify the `gh` token actually has `write:packages` + SSO before
+    relying on it (Codex P2-9).
+- **`deploy/frontend/scripts/verify-approval.sh <image-ref>
+  <approval-attestation-digest>`** — the shared seam (callers: `mise run
+  consume`, T5b's `run.sh` launch re-verify, T10's VEX check). **Does NOT
+  touch OpenBao** (Codex P1-7): verifies the pinned attestation against the
+  committed **`deploy/frontend/cosign-approval.pub`** (exported once from
+  `openbao://approval-key` at bootstrap, committed) with `cosign
+  verify-attestation --key cosign-approval.pub --type <same-URI>
+  --policy verdict-approved.cue --insecure-ignore-tlog <ref>`. Exit 0
+  (approved + valid sig) / exit 1 with a **distinct stderr line per
+  failure**: no approval / bad signature / verdict rejected / wrong subject
+  / wrong type. Losing the OpenBao raft store stops *future* signing but
+  does **not** invalidate past approvals — the public key survives in-repo.
+- **`deploy/frontend/verdict-approved.cue`** — one file, two definitions
+  (Codex P1-3): `#Predicate` accepts `verdict: "approved" | "rejected"`
+  (approve-side `cue vet` target); a separate root-statement constraint
+  requires `predicate.verdict == "approved"` (consume-side `--policy`
+  target — cosign passes the *entire in-toto statement* to the policy, not
+  the bare predicate).
+- **`mise.toml`** — add `cue` and `gh` as pinned tools (Codex P2-10);
+  `approve` + `consume` tasks (thin wrappers over the two scripts).
+- **T4 workflow amendment (this branch, Codex P1-5):** add a
+  `trivy image --format json --output scan.json` step that runs regardless
+  of the CRITICAL gate's outcome, and `oras attach` `scan.json` as a
+  referrer **before** the blocking `--exit-code 1` gate — so a
+  reject-worthy image still has evidence. Preserve the failed CI conclusion.
+  - Files: `deploy/frontend/scripts/approve.sh`,
+    `deploy/frontend/scripts/verify-approval.sh`,
+    `deploy/frontend/scripts/openbao-preflight.sh` (tiny shared helper),
+    `deploy/frontend/verdict-approved.cue`,
+    `deploy/frontend/cosign-approval.pub`, `mise.toml`,
+    `.github/workflows/build-cv-frontend.yml` (scan.json referrer),
+    `scripts/bootstrap-openbao.sh` (export + commit the pubkey),
+    `deploy/frontend/README.md`, `deploy/frontend/tests/approve.bats`,
+    `deploy/frontend/tests/verify-approval.bats`
+  - Verify: **prove the exact round trip once** (cosign 3.1.3 +
+    `openbao://` Transit ecdsa-p256 + stdin predicate + no tlog + verify
+    against the committed pubkey) — Codex flagged it "supported by the code
+    but unproven." Then the bats matrix: approve-only accepts; reject-only
+    rejected; approve+validly-signed-reject on the same digest → the
+    approved attestation still verifies when selected by digest (selection
+    model, not "any reject poisons"); bad-signature reject alongside a good
+    approval → still accepts (only validly-signed records count, Codex
+    P0-1); wrong subject / wrong predicate type → rejected; missing evidence
+    referrer → clear error, no partial attest; OpenBao sealed → exit 3 with
+    the unseal hint; EOF at the prompt → no attestation written; tag-only
+    ref → rejected (full `registry/repo@sha256:` required).
 - [ ] **T5b (P1, human: ~1h / CC: ~20min)** — local deploy — pitchfork
   daemon + state-file consume mechanism, replaces the earlier "locked"
   k8s-namespace demo consumption (Approach D, revised this session)
   - Surfaced by: this session's deploy-target discussion +
     `/plan-eng-review` D1-D6 (Codex outside-voice)
-  - Depends on: T5 (approve/consume must exist for real; its open
-    pre-req above must be verified working)
+  - Depends on: T5 (approve/consume proven, including the once-only round-trip)
   - Files: `pitchfork.toml` (new `[daemons.frontend]` entry,
     `run=./run.sh`, `dir=deploy/frontend`, `ready_port=44100`),
-    `deploy/frontend/run.sh`, `deploy/frontend/scripts/
-    verify-approval.sh` (shared with T5, see above), `deploy/frontend/
-    tests/deploy.bats`, `.gitignore` (`current-image.txt`)
-  - Verify: `tests/deploy.bats` — approved image serves (readiness
-    checked on port 44100, not assumed), rejected image leaves the
-    existing deployment untouched, restart preserves the current
-    verified state, failed activation reports failure. Live: `pitchfork
-    stop frontend` actually stops the container, no orphaned process,
-    restart leaves exactly one instance running (pitchfork-Docker
-    lifecycle isn't proven by the OpenBao daemon precedent alone).
-    Proves the pipeline mechanism, not `cv_frontend`'s own correctness —
-    its current Remix v3 runtime crash (T4a) doesn't block this task.
+    `deploy/frontend/run.sh`, `deploy/frontend/scripts/verify-approval.sh`
+    (shared with T5), `deploy/frontend/tests/deploy.bats`, `.gitignore`
+    (`current-image.txt`)
+  - **State file `current-image.txt` records BOTH** the full
+    `registry/repo@sha256:…` image ref **and** the approval-attestation
+    digest (T5's selection model — `verify-approval.sh` needs both). Atomic
+    write (temp + rename).
+  - **Launch re-verify (Codex P1-8):** `run.sh` calls `verify-approval.sh`
+    before `docker run` — **bounded retries + backoff** on transient GHCR
+    failure (the attestation referrer is still a registry pull even with a
+    local pubkey), then a **visible stopped state**, never an unbounded
+    loop. Must work on a **cold, non-interactive** pitchfork start with no
+    inherited shell credentials. Known gap, named not solved here:
+    launch-time verification does **not** stop an already-running container
+    if its image is rejected *after* launch — that needs a separate watch,
+    deferred.
+  - Verify: `tests/deploy.bats` — approved image serves (readiness checked
+    on port 44100, not assumed); an image whose selected attestation fails
+    verify leaves the existing deployment untouched; restart preserves the
+    verified state; GHCR-unreachable at launch → bounded retry then a clear
+    stopped state, not a hang; cold `pitchfork start` with a scrubbed env
+    still verifies. Live: `pitchfork stop frontend` actually stops the
+    container, no orphan, restart leaves exactly one instance. Proves the
+    pipeline mechanism, not `cv_frontend`'s correctness (its Remix v3
+    runtime crash, T4a, doesn't block this).
 - [ ] **T6 (P2, human: ~1h / CC: ~10min)** — backup — Periodic `bao
   operator raft snapshot save` + documented restore procedure (not a raw
   directory copy — raft's bolt store can be mid-write during a plain file
   copy; revised after T3 switched from `file` to `raft` storage)
-  - Surfaced by: eng-review critical gap (this review); method revised in
-    a follow-up eng-review pass after the raft switch
+  - Surfaced by: eng-review critical gap; method revised after the raft switch
+  - **Severity re-rated by the T5 review (Codex P1-7):** losing the raft
+    store stops *future* signing with `approval-key`, but does **not**
+    cryptographically invalidate past approvals — `cosign-approval.pub` is
+    committed in-repo and `verify-approval.sh` verifies against it, not
+    against OpenBao. So T6 is real but not the single point of failure the
+    earlier review implied. Still P2, still needed: a snapshot lets you
+    *resume approving* after a disk loss without minting a new key (which
+    would invalidate the committed pubkey and every consumer pin).
   - Files: a backup script/cron entry (location TBD at implementation),
-    `environments/local/README.md` (restore procedure — moved from
-    `deploy/frontend/README.md` when OpenBao relocated)
-  - Verify: restore procedure tested once against a copy; snapshot
-    restored into a fresh instance signs successfully against the
-    previously trusted public key, not just "the server starts"
+    `environments/local/README.md` (restore procedure)
+  - Verify: restore procedure tested once against a copy; **the unseal
+    material is preserved alongside the snapshot** (a snapshot into a fresh
+    sealed instance is useless without it); snapshot restored into a fresh
+    instance signs successfully against the previously trusted public key,
+    not just "the server starts"
 ### T7 — Phase 2 (Tekton) — SPLIT + DEFERRED, needs its own planning session
 
 **Status (2026-09-06 /plan-eng-review scope reduction):** T7 as previously
@@ -1505,7 +1633,7 @@ steer). `buildah` is a third option. The T7a spike decides.
 |--------|---------|-----|------|--------|----------|
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | not run |
 | Codex Review | `/codex review` | Independent 2nd opinion | 2 | issues_found (all folded) | 10 (orig) + 10 (pivot) |
-| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 3 | CLEAR | orig: 19; pivot 2026-09-06: 4 arch + 1 code-quality + 10 outside-voice, all resolved; **T7 pass 2026-09-06: SCOPE REDUCTION — T7 split into T7a/T7b/T7c, deferred after T5/T5b, each needs its own planning session** |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 4 | CLEAR | orig: 19; pivot: 4 arch + 1 CQ + 10 outside-voice; T7 pass: SCOPE REDUCTION (split T7a/b/c, deferred); **T5 pass 2026-09-06: 4 arch + 2 CQ + 10 Codex, 2 cross-model tensions resolved, 0 critical gaps** |
 | Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | not run (no UI in this design) |
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | not run |
 
@@ -1554,18 +1682,51 @@ no mechanism unless a residual appears (D4); Node 26 → kept, gated on a
 tested SHA (D5). Codex's factual corrections (buildx SBOM format, kaniko
 archived) verified against primary docs before folding.
 
-**VERDICT:** ENG CLEARED (pivot). **Implemented + verified 2026-09-06 on
-branch `pivot-distroless-node`:** T-P0 (cleanup), T4b (Dockerfile), T4a
-(build+runtime smoke test — image serves 200s as nonroot, no shell, clean
-CRITICAL scan, no `IMPORT_OUTSIDE_FILE_MAP` recurrence), **T4 (workflow —
-CI-green, run 34020750235, single arm64 manifest, SBOM referrer attached)**.
-T7 SCOPE-REDUCED (split T7a/T7b/T7c, deferred after T5/T5b). **Next: T5
-(approve/consume).**
+**T5 REVIEW (2026-09-06) — approve/consume, PLANNED (ready to build).**
+4 architecture + 2 code-quality issues + Codex (10 findings, source-verified
+against cosign 3.1.3). Key outcomes:
+- **Selection model = explicit approved-attestation digest pin.** Supersedes
+  both "latest `approvedAt` wins" and a mid-review "reject is terminal"
+  idea — Codex showed neither is real permanence and permanence conflates
+  evidence-review with content-ban. `approve.sh` prints the attestation
+  digest; the consumer verifies that one.
+- **Consume never touches OpenBao** — `verify-approval.sh` verifies against
+  the committed `cosign-approval.pub`. Only `approve.sh` needs OpenBao.
+  Re-rates T6 down from "single point of failure."
+- **cosign 3.1.3 flag reality:** `approve.sh` MUST pass
+  `--use-signing-config=false --tlog-upload=false` (v3 uploads to the public
+  tlog otherwise — this review's Step 0 was wrong); verify needs
+  `--insecure-ignore-tlog`.
+- **One `verdict-approved.cue`, two definitions** — permissive `#Predicate`
+  for sign-side `cue vet`, root-statement constraint for consume `--policy`.
+- **T4 workflow amended in the T5 branch** — attach `scan.json` as a referrer
+  *before* the blocking gate so a reject-worthy image still has evidence.
+- **Interim auth** (root token + `gh auth token`), full multi-member auth +
+  bootstrap DX is its own planning session — TODOS.md.
+- `cue` + `gh` join `mise.toml`. `openbao-preflight.sh` distinguishes
+  unreachable/sealed/unauthorized/missing-key. EOF at the prompt never
+  produces a signed record. 0 critical gaps.
+
+**CODEX (T5 pass):** 2 P0 + 6 P1 + 2 P2, all folded or resolved by explicit
+decision. P0s (aggregation rule is "all *validly-signed* records"; registry
+discovery can't prove completeness) → resolved by the digest-pin selection
+model. Factual corrections (tlog default, KMS-verify credentials, `--replace`
+still exists deprecated) verified against cosign v3.1.3 source before folding.
+
+**CROSS-MODEL (T5):** 2 tensions, both resolved by explicit decision —
+reject-terminal → digest-pin selection (Codex); scan-evidence gap → amend
+T4 in the T5 branch (Codex). No unresolved cross-model disagreement.
+
+**VERDICT:** ENG CLEARED. **Pivot implemented + verified** (T-P0, T4b, T4a,
+T4 CI-green, run 34020750235). **T7 scope-reduced + deferred.** **T5 planned,
+ready to build.** **Next: implement T5** (start with the once-only cosign +
+`openbao://` + no-tlog round-trip proof), then T5b.
 
 **UNRESOLVED DECISIONS:**
 - T7a builder choice — BuildKit-k8s-driver (leading) vs a kaniko fork vs
-  buildah — a live spike in T7a's own planning session, deferred after
-  T5/T5b.
+  buildah — a live spike in T7a's planning session, deferred after T5/T5b.
 - T7 Phase-2 architecture as a whole (registry, scaling/KEDA, cluster,
-  Kyverno fit) — needs a dedicated `/office-hours` + `/plan-eng-review`,
-  not yet run.
+  Kyverno fit) — dedicated `/office-hours` + `/plan-eng-review`, not run.
+- Multi-member Auth + DX (per-identity OpenBao + registry auth, bootstrap) —
+  dedicated planning session (TODOS.md), gated on T5 shipping its interim
+  auth first.

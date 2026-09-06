@@ -2,6 +2,41 @@
 
 ## Infrastructure
 
+### Auth + multi-member DX — planning session before T5 hardens
+
+**What:** Run `/office-hours` then `/plan-eng-review` on the auth story for
+the approval pipeline. T5 ships an *interim* auth (OpenBao root token for
+signing, `gh auth token` for GHCR push) that works for a solo operator.
+The full design covers: per-member OpenBao identity (an auth method +
+per-member scoped policies so `transit/sign` on `approval-key` isn't the
+root token), per-member registry auth (GHCR now, `zot` after T7c), the
+`approval` Transit policy (which T8/Chains also needs), and a clean
+`git clone → mise run approve` bootstrap for a new team member.
+
+**Why:** The design's zero-trust claim is "possession of the private key is
+the access control." In T5's interim form that collapses to "possession of
+the OpenBao root token in one person's OS keychain." Anyone with it can
+sign any `approvedBy` — there is no cryptographic per-approver identity.
+That's acceptable for a solo proof; it is not acceptable once a second
+person needs to approve, and building `approve.sh`'s auth twice is waste,
+so the shape should be designed before hardening.
+
+**Design lenses:** security (per-identity least privilege, no shared
+long-lived secret), DX (a new member from clone to first approval in
+minutes, not a runbook), bootstrap (idempotent, works on a fresh machine),
+simplicity (an auth method, not a PKI), existing-stack fit (OpenBao auth
+backends, fnox, `gh`; check whether Cilium/Kyverno play a role at the
+cluster edge later).
+
+**Context:** Surfaced by the 2026-09-06 T5 `/plan-eng-review` (Issues 3+4)
+and Codex P2-9. `modules/secret-openbao-local` already has an empty
+`policies` input ready for the scoped policy. See the design doc's T5
+section ("interim auth") and Resolved Decisions ("Approval trust boundary").
+
+**Effort:** planning ~1 session; implementation ~1-2d human
+**Priority:** P2
+**Depends on:** T5 shipped (interim auth proves the pipeline shape first)
+
 ### T7 Phase-2 (Tekton) — full planning session before any code
 
 **What:** Run `/office-hours` then `/plan-eng-review` on Phase 2 of
