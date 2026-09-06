@@ -2,6 +2,17 @@
 
 ## Debt
 
+### Local OpenBao unseal-key storage — P1, planning session
+
+The local dev daemon reseals on every process restart and its unseal key is
+printed-once / hand-copied, so routine operation needs a memorized key. A
+real friction flaw, missed during T6 planning. Direction: store it
+machine-side + auto-unseal (`infra` already does this). Full context and
+open sub-decisions in **CLAUDE.md § Deferred — "Local OpenBao unseal-key
+storage"**. Widen the session to the whole OpenBao/secrets operational
+model (also: `fnox activate` friction, `gh` token expiry, `pitchfork
+daemons remove` rewriting `pitchfork.toml`).
+
 ### Scripts-policy audit of the T5 / T5b shell — P1, planning session
 
 **What:** Run `/plan-eng-review` (and `/office-hours` if it grows) on every

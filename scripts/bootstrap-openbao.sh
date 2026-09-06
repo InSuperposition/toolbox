@@ -5,9 +5,11 @@ set -euo pipefail
 # unseals, provisions Transit, stores the root token in fnox. Replaces a
 # manual multi-step sequence. Idempotent: safe to re-run once initialized.
 #
-# The unseal key is printed once and NEVER stored by this script or fnox
-# -- keeping it out-of-band is the point (CLAUDE.md Zero Trust section).
-# Only the root token (fnox's actual steady-state job) gets automated.
+# The root token is stored in fnox (steady-state). The unseal key is
+# currently printed once and NOT stored -- which means a memorized key on
+# every daemon restart. That is a KNOWN friction flaw under review, not a
+# deliberate security property for this local dev daemon (CLAUDE.md
+# § Deferred -- "Local OpenBao unseal-key storage").
 
 cd "$(dirname "$0")/.."
 
