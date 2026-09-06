@@ -104,12 +104,21 @@ jobs:
           esac
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
-      # Zero suppressions (pivot D4): .trivyignore is gone. Both prior
-      # entries were Paketo-toolchain-only and die with the toolchain.
-      - name: Trivy vulnerability scan (blocks on CRITICAL)
+      # Full scan report as JSON, attached as an OCI referrer BEFORE the
+      # blocking CRITICAL gate below (T5 review, Codex P1-5). A CRITICAL
+      # finding fails the job -- but a reject-worthy image must still carry
+      # the evidence `mise run approve` reads, so this runs and attaches
+      # first. No --exit-code here: this step never blocks.
+      - name: Trivy scan report (JSON)
         run: |
-          trivy image --exit-code 1 --severity CRITICAL \
+          trivy image --format json --output scan.json \
             "$IMAGE@${{ steps.digest.outputs.digest }}"
+
+      - name: Attach scan report as an OCI referrer
+        run: |
+          oras attach --artifact-type application/vnd.trivy.report+json \
+            "$IMAGE@${{ steps.digest.outputs.digest }}" \
+            scan.json:application/vnd.trivy.report+json
 
       - name: Trivy SBOM (CycloneDX)
         run: |
@@ -121,3 +130,12 @@ jobs:
           oras attach --artifact-type application/vnd.cyclonedx+json \
             "$IMAGE@${{ steps.digest.outputs.digest }}" \
             sbom.cdx.json:application/vnd.cyclonedx+json
+
+      # Blocking gate, LAST. Zero suppressions (pivot D4): .trivyignore is
+      # gone -- both prior entries were Paketo-toolchain-only. Runs after the
+      # evidence referrers are attached so a failed scan still leaves a
+      # reviewable trail (T5 review).
+      - name: Trivy vulnerability scan (blocks on CRITICAL)
+        run: |
+          trivy image --exit-code 1 --severity CRITICAL \
+            "$IMAGE@${{ steps.digest.outputs.digest }}"

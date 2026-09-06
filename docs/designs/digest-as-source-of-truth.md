@@ -1315,7 +1315,72 @@ finding above. Run with Claude Code or Codex; checkbox as you ship.
     [run 33982413276](https://github.com/InSuperposition/toolbox/actions/runs/33982413276)
     confirms the Tiny attempt's removal — same green result, zero
     `Resolving plan` lines.
-### T5 — approve/consume (planned 2026-09-06 /plan-eng-review + Codex)
+### T5 — approve/consume — DONE 2026-09-06 (branch `pivot-distroless-node`)
+
+**Shipped:** `deploy/frontend/scripts/approve.sh`,
+`deploy/frontend/scripts/verify-approval.sh`,
+`deploy/frontend/scripts/openbao-preflight.sh`,
+`deploy/frontend/verdict-approved.cue`,
+`scripts/export-approval-pubkey.sh` (+ `mise run export-approval-pubkey`,
+wired into `scripts/bootstrap-openbao.sh` — non-fatal), `mise.toml` (`cue`
+`0.17.1` + `gh` `2.100.0` pinned; `approve` / `consume` /
+`export-approval-pubkey` tasks), the T4 workflow `scan.json` referrer
+amendment, `deploy/frontend/README.md`, `deploy/frontend/tests/{approve,
+verify-approval}.bats` + `tests/helper.bash`.
+`deploy/frontend/cosign-approval.pub` is written and committed by the
+OpenBao bootstrap, not by hand.
+
+**Round-trip proof (the combo Codex flagged "supported but unproven") —
+PASSED 2026-09-06.** Against a real OpenBao Transit `ecdsa-p256`
+`approval-key` + a local `zot` + the real T4 image
+(`ghcr.io/insuperposition/cv-frontend@sha256:28147ba0…`):
+- `cosign public-key --key openbao://approval-key` → valid PEM.
+  `hashivault://approval-key` resolves to the same key (alias, kept as the
+  export fallback).
+- `cosign attest --predicate <file> --type <URI> --key
+  openbao://approval-key --use-signing-config=false --tlog-upload=false
+  <ref>` → attestation attached as an
+  `application/vnd.dev.sigstore.bundle.v0.3+json` referrer, nothing on any
+  public tlog. (`--tlog-upload=false` IS still accepted on `cosign attest`
+  3.1.3 — deprecated, warns, works; `--use-signing-config=false` is the
+  load-bearing one.)
+- `verify-approval.sh <ref> <attestation-digest>` → exit 0. Digest-pinned:
+  it fetches ONLY that attestation manifest → its bundle layer → `cosign
+  verify-blob-attestation --bundle <b> --key cosign-approval.pub --type
+  <URI> --check-claims --digest <img-hex> --digestAlg sha256
+  --insecure-ignore-tlog` (signature + subject + predicate-type) → then
+  `cue vet <statement> -d '#ApprovedStatement'` (verdict == approved).
+  `cosign verify-attestation --policy` is deliberately NOT used on the
+  consume path: verified against source, it fails if ANY attestation of the
+  type fails the policy, which would let a signed reject next to a good
+  approval poison the image — the digest pin is what makes the selection
+  model real.
+
+**bats matrix (local zot + a throwaway cosign key via the
+`TOOLBOX_APPROVE_KEY` seam — no OpenBao needed for the tests):** approve
+signs+reads-back+prints the digest; reject still writes a signed record;
+selection model (approval verifies with a signed reject beside it); wrong
+subject / bad signature / unknown-attestation / tag-only / non-sha256 /
+missing-pubkey all rejected with distinct messages; OpenBao unreachable →
+exit 3; missing evidence → exit 4; EOF / empty verdict / empty reason →
+exit 1, no attestation. `openbao-preflight.sh` happy path + `approve.sh`
+real `openbao://` path proven live against dev OpenBao.
+
+**Interim auth as-built:** `approve.sh` signs with the fnox `VAULT_TOKEN`
+(root); for a non-local registry it does `gh auth token | cosign login`
+into an isolated `DOCKER_CONFIG` (the `write:packages` scope is the
+operator's to arrange — README says how). A `127.0.0.1:*` / `localhost:*`
+reference is treated as a plain-http no-auth local dev registry (the bats
+path). `approvedBy` self-asserted. Full multi-member auth is still the
+TODOS.md planning session, now unblocked.
+
+**Remaining:** final confirmation of the raft-mode `mise run
+openbao-bootstrap` → `mise run approve` → `mise run consume` round trip on
+the real machine (each piece is proven: `bootstrap.bats` covers raft
+bootstrap; the proof above covers `openbao://` cosign; `export-approval-
+pubkey.sh` has `openbao://` → `hashivault://` → `bao read` fallbacks).
+
+---
 
 **Mechanism (corrected against a live cosign 3.1.3 probe + Codex source review):**
 
@@ -1718,9 +1783,12 @@ reject-terminal → digest-pin selection (Codex); scan-evidence gap → amend
 T4 in the T5 branch (Codex). No unresolved cross-model disagreement.
 
 **VERDICT:** ENG CLEARED. **Pivot implemented + verified** (T-P0, T4b, T4a,
-T4 CI-green, run 34020750235). **T7 scope-reduced + deferred.** **T5 planned,
-ready to build.** **Next: implement T5** (start with the once-only cosign +
-`openbao://` + no-tlog round-trip proof), then T5b.
+T4 CI-green, run 34020750235). **T7 scope-reduced + deferred.** **T5 DONE
+2026-09-06** — approve/consume scripts + CUE gate + T4 `scan.json` referrer
++ bats matrix, `openbao://` attest→verify round-trip proven live (see the
+T5 section). **T4-scanref folded into T5.** **Next: T5b** (pitchfork daemon
++ `current-image.txt` + launch re-verify), then the T5 raft-mode
+bootstrap→approve→consume confirmation on the real machine.
 
 **UNRESOLVED DECISIONS:**
 - T7a builder choice — BuildKit-k8s-driver (leading) vs a kaniko fork vs

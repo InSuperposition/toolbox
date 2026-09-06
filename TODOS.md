@@ -35,7 +35,12 @@ section ("interim auth") and Resolved Decisions ("Approval trust boundary").
 
 **Effort:** planning ~1 session; implementation ~1-2d human
 **Priority:** P2
-**Depends on:** T5 shipped (interim auth proves the pipeline shape first)
+**Depends on:** ~~T5 shipped~~ — **UNBLOCKED 2026-09-06.** T5 shipped its
+interim auth: `approve.sh` signs with the fnox root `VAULT_TOKEN` and, for a
+non-local registry, `gh auth token | cosign login` into an isolated
+`DOCKER_CONFIG`; `approvedBy` is self-asserted. The `write:packages` scope
+on the `gh` token is currently the operator's to arrange (Codex P2-9) — this
+session designs the real per-member story.
 
 ### T7 Phase-2 (Tekton) — full planning session before any code
 
