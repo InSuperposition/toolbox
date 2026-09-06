@@ -9,7 +9,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 pitchfork stop openbao 2>/dev/null || true
-rm -rf environments/local/openbao
+# Wipe the raft store and the rendered config, but KEEP
+# environments/local/openbao/snapshots/ — a reset is usually the prelude to
+# restoring from one (T6). `tofu apply` recreates data/ + openbao.hcl.
+rm -rf environments/local/openbao/data environments/local/openbao/openbao.hcl
 fnox remove VAULT_TOKEN 2>/dev/null || true
 
 # Also clear Terraform's own state, not just the data directory -- without

@@ -26,13 +26,28 @@ tekton-cli = "0.46.0"
 timoni = "0.34.0"
 trivy = "0.74.0"
 
+# The local OpenBao daemon always listens here (see pitchfork.toml /
+# environments/local/provider.tf). Setting it once means `bao`,
+# `mise run openbao-snapshot`, etc. work in the repo without a per-shell
+# export. VAULT_TOKEN still comes from `fnox` (OS keychain).
+[env]
+VAULT_ADDR = "http://127.0.0.1:8200"
+
 [tasks.openbao-bootstrap]
 description = "One-time OpenBao bootstrap (init/unseal/apply/fnox) — see environments/local/README.md"
 run = "./scripts/bootstrap-openbao.sh"
 
 [tasks.openbao-reset]
-description = "Wipe local OpenBao's data + stored root token together"
+description = "Wipe local OpenBao's data + stored root token together (raft snapshots under environments/local/openbao/snapshots/ are kept)"
 run = "./scripts/reset-openbao.sh"
+
+[tasks.openbao-snapshot]
+description = "Save a raft snapshot of the local OpenBao to environments/local/openbao/snapshots/latest.snap (needs `fnox` activated for VAULT_TOKEN)"
+run = "bao operator raft snapshot save environments/local/openbao/snapshots/latest.snap"
+
+[tasks.openbao-snapshot-restore]
+description = "Restore the local OpenBao from a raft snapshot — args: [-force] <snapshot-file>. Use -force when restoring into a freshly bootstrapped instance. See environments/local/README.md"
+run = "bao operator raft snapshot restore"
 
 [tasks.export-approval-pubkey]
 description = "Re-export deploy/frontend/cosign-approval.pub from openbao://approval-key (run after a key rotation)"

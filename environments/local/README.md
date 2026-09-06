@@ -49,10 +49,74 @@ pitchfork status openbao                       # daemon running
 mise run openbao-reset
 ```
 
-Wipes `openbao/data/` and the fnox-held root token together — never do
-these separately; a stale root token surviving a data wipe produces a
-confusing auth failure on the next `tofu apply` instead of a clean
-"needs bootstrap" state.
+Wipes `openbao/data/` + the rendered `openbao.hcl` + the fnox-held root
+token together — never do these separately; a stale root token surviving a
+data wipe produces a confusing auth failure on the next `tofu apply`
+instead of a clean "needs bootstrap" state. **`openbao/snapshots/` is
+kept** — a reset is usually the first step of restoring from one.
+
+## Backup + restore (T6)
+
+OpenBao's community edition has no built-in snapshot scheduler
+([openbao#795](https://github.com/openbao/openbao/issues/795)), so backup
+here is **on demand** — run it before anything risky (a key rotation, an
+OS upgrade, `mise run openbao-reset`):
+
+```
+mise run openbao-snapshot
+```
+
+Writes `environments/local/openbao/snapshots/latest.snap` (a real
+`bao operator raft snapshot save` — never a raw copy of `openbao/data/`,
+which can grab raft's bolt store mid-write). The file is git-ignored;
+**copy it somewhere durable yourself** if you want more than the last one.
+
+Losing `openbao/data/` does **not** invalidate past approvals —
+`verify-approval.sh` / `mise run consume` check against the committed
+`deploy/frontend/cosign-approval.pub`, not OpenBao. A snapshot lets you
+resume *signing* without minting a new `approval-key` (which would
+invalidate that committed key and every consumer pin).
+
+### Restore into the running daemon (roll back)
+
+Daemon up and unsealed, want to undo a recent change:
+
+```
+mise run openbao-snapshot-restore -- environments/local/openbao/snapshots/latest.snap
+```
+
+### Restore after losing the data directory (disaster)
+
+You need **three** things kept together — the snapshot is useless without
+the other two:
+
+1. `latest.snap`
+2. the **unseal key** from the bootstrap that created it
+3. the **root token** from that same bootstrap
+
+`bao operator raft snapshot restore` replaces *all* data, including the
+seal config and the token store — so after a restore the instance is
+sealed with the original seal and only the original root token is valid.
+This is why the unseal key must live *with* the snapshots, not just
+"somewhere".
+
+```
+mise run openbao-reset          # keeps snapshots/
+mise run openbao-bootstrap      # fresh instance — its new unseal key + token are throwaway
+mise run openbao-snapshot-restore -- -force environments/local/openbao/snapshots/latest.snap
+bao operator unseal <ORIGINAL unseal key>
+echo "<ORIGINAL root token>" | fnox set VAULT_TOKEN --provider keychain
+```
+
+`-force` is required: the snapshot's cluster ID / seal config won't match
+the fresh instance's. `snapshot.bats` exercises this exact path.
+
+`bao operator raft snapshot restore` prints `Error properly closing policy
+file: ... file already closed` on success — it is **cosmetic** (the command
+still exits 0), not a failure.
+
+If a save or restore times out on a larger store, prefix with
+`VAULT_CLIENT_TIMEOUT=120s`.
 
 ## Manual bootstrap (what the script above actually does)
 
@@ -89,9 +153,8 @@ Useful for debugging, or if `mise run openbao-bootstrap` fails partway:
 
 ## Notes
 
-- **Backup** (T6 in `docs/designs/digest-as-source-of-truth.md`, not yet
-  built) uses `bao operator raft snapshot save`/`restore` — not a raw
-  directory copy, which can grab raft's bolt store mid-write.
+- **Backup** — see "Backup + restore (T6)" above. On-demand
+  `mise run openbao-snapshot`; no scheduler (OpenBao community has none).
 - **Not the production `secret-openbao` module.** That module is deferred
   until a real k0s cluster exists (see TODOS.md); `modules/
   secret-openbao-local` is what this reference deployment actually runs
