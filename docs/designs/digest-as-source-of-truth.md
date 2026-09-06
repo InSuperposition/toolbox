@@ -1374,11 +1374,23 @@ reference is treated as a plain-http no-auth local dev registry (the bats
 path). `approvedBy` self-asserted. Full multi-member auth is still the
 TODOS.md planning session, now unblocked.
 
-**Remaining:** final confirmation of the raft-mode `mise run
-openbao-bootstrap` → `mise run approve` → `mise run consume` round trip on
-the real machine (each piece is proven: `bootstrap.bats` covers raft
-bootstrap; the proof above covers `openbao://` cosign; `export-approval-
-pubkey.sh` has `openbao://` → `hashivault://` → `bao read` fallbacks).
+**Raft-mode end-to-end — CONFIRMED 2026-09-06 against real GHCR.**
+`mise run openbao-bootstrap` (raft, 1 Shamir share) → `export-approval-
+pubkey.sh` wrote `deploy/frontend/cosign-approval.pub` via the `openbao://`
+path (no fallback) → `mise run approve -- ghcr.io/insuperposition/
+cv-frontend@sha256:28147ba0…` signed with the real Transit ecdsa-p256 key,
+evidence shown (105-component SBOM, LOW=8 MEDIUM=13, 0 CRITICAL) → `mise
+run consume -- <ref> <attestation-digest>` → exit 0, verified against the
+committed pubkey with no OpenBao call; a bogus digest → exit 1 "not found".
+The `gh` token needed `write:packages` added (`gh auth refresh -s
+write:packages`). `approve.sh`'s read-back matches the new attestation by
+predicate contents (verdict + subject digest + approvedAt), not a referrer
+annotation — GHCR does not echo the `dev.sigstore.bundle.predicateType`
+annotation a local zot does.
+
+**Follow-up (TODOS.md, P1):** rotate `approval-key` + re-deploy its public
+key — it was provisioned in an AI session whose bootstrap output was
+transcript-visible.
 
 ---
 
