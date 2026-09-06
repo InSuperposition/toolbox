@@ -57,13 +57,13 @@ step and re-opens T4a.
 | **D4** | **Scan-clean-first; no suppression mechanism in Phase 1 unless a real residual appears.** Phase 1 scan gate = `trivy image --severity CRITICAL --exit-code 1`, **zero exceptions**. If a genuine residual CRITICAL surfaces, author one OpenVEX statement *with real exploitability evidence* + a `last_updated`/re-review date (replaces `.trivyignore` expiry discipline). `vexctl` (`aqua:openvex/vexctl` `0.4.4`) is **pinned and ready** but not yet wired. | Codex #8/#9: a justification enum is an assertion, not analysis; unsigned + consume-unenforced VEX "buys no present enforcement benefit." Full VEX-as-referrer + consume-side `trivy --vex` + signed attestation = the post-Chains hardening TODO. |
 | **D5** | **T4a re-scoped to a runtime smoke test** (was build-only). Must build the distroless image against a specific, recorded `cv_frontend` commit SHA (post-`engines`-bump) **and** run it: HTTP routes serve, assets compile, under the intended non-root user + filesystem perms. The widened `engines` range alone is **not** acceptance. | Codex #5/#7: the recorded `IMPORT_OUTSIDE_FILE_MAP` crash already proves "green build ≠ usable image." |
 | **D6** | **Evidence path unchanged.** `buildx`/kaniko only *builds, pushes, and reports the digest*. SBOM stays `trivy image --format cyclonedx` → `oras attach` as an OCI 1.1 referrer, exactly as T4 does today. **`buildx --sbom`/`--provenance` are NOT used** (they emit SPDX in-index, not a Referrers-API referrer). | Codex #1: corrects this review's own earlier claim that buildx replaces `oras attach`. |
-| **D7** | **Phase 2 builder: pin a maintained kaniko fork** (`osscontainertools/kaniko` — Google's original is archived) **or** evaluate the BuildKit Kubernetes driver to avoid a second builder. Daemonless ≠ free: pod privileges, registry auth, and Dockerfile compatibility are a Phase-2 spike, same discipline as the prior buildpacks-daemon flag. | Codex #3/#4: kaniko's platform flag sets metadata only, not build arch; kaniko gives no SBOM (Chains gives provenance, not SBOM — D6's `trivy`+`oras` path carries SBOM in both phases). |
+| **D7** | **Phase 2 builder: undecided — a T7a spike, not a pick.** Leading candidate = the **BuildKit Kubernetes driver** (`docker buildx create --driver=kubernetes --driver-opt=rootless=true`), which keeps ONE build engine across Phase 1 + 2. Alternatives: a maintained kaniko fork (`chainguard-forks/kaniko` or `osscontainertools/kaniko` — Google's is archived) or `buildah`. **T7 is now split (T7a/T7b/T7c) and deferred after T5/T5b, each needing its own planning session** — see the T7 section below. | Codex #3/#4: kaniko's platform flag sets metadata only, not build arch; kaniko gives no SBOM (D6's `trivy`+`oras` path carries SBOM in both phases regardless of builder). Owner (2026-09-06): "not sure where kaniko came from" — correct, it was never in the original design. |
 
 ### Task delta (full task list updated below in Implementation Tasks)
 
 - **T4** — rewrite build step: `docker buildx build --platform linux/arm64 --push --metadata-file` (digest readback from the metadata file, not `report.toml`); keep the `trivy` scan + `trivy` CycloneDX + `oras attach` steps verbatim; drop the GHCR `docker login` only if buildx uses the same `GITHUB_TOKEN` path (it does). Runner: `ubuntu-24.04-arm`.
 - **T4a** — re-run against the distroless build, **as a runtime smoke test** (D5).
-- **T7** — `modules/task-buildpacks-build/` → `modules/task-kaniko-build/`; drop the amd64-only line (arm64 throughout); fold in D7's builder-choice spike; the "amd64 image on arm64 cluster" open flag is **closed** (no longer amd64).
+- **T7** — **split into T7a (builder spike) / T7b (pipeline) / T7c (zot migration), deferred after T5/T5b, each needs its own /office-hours + /plan-eng-review** (2026-09-06 scope reduction). `modules/task-buildpacks-build/` → `modules/task-<builder>-build/` (builder TBD by T7a — NOT necessarily kaniko). amd64-only line dropped (arm64 throughout); "amd64 image on arm64 cluster" flag **closed** (no longer amd64).
 - **New T4b** — author the Dockerfile + `.dockerignore` in a `cv_frontend`-adjacent location (or `deploy/frontend/`), CLAUDE.md carve-out.
 - **New Tnn (P3, post-T8)** — harden VEX: `.openvex.json` as a signed cosign attestation + consume-side `trivy --vex` enforcement in `mise run consume`.
 - `.trivyignore` deleted (after D4's clean scan); its two TODOS.md entries removed; `buildpacks` removed from `mise.toml` — all in the pivot commit.
@@ -820,12 +820,19 @@ are folded in below, each with its reasoning — not just the conclusion.
     beyond a local OpenBao process, and 0 new scripts beyond the two that
     warrant one.
 
-- **Phase 2** (Tekton Pipelines + `zot`): wrap Phase 1's automated steps
-  (build, scan+SBOM-attach) as `modules/task-*` Tasks + `modules/pipeline-
-  build-scan-approve`, running on `orb start k8s`. Migrate the registry
-  from GHCR to `zot` here — both speak OCI 1.1 Referrers, so this is a
-  config change, not a rewrite. `approve.sh`/`mise run consume` unchanged —
-  this phase automates what Phase 1 already proved correct.
+- **Phase 2** (Tekton) — **SPLIT + DEFERRED after T5/T5b (2026-09-06 scope
+  reduction).** Now T7a (builder spike — BuildKit-k8s-driver vs kaniko-fork
+  vs buildah, live probe on `orb start k8s`, push to GHCR), T7b (wrap
+  `build → scan → oras-attach` as Tasks + `pipeline-build-scan-approve` +
+  the kubeconform/chainsaw harness, still GHCR), T7c (GHCR→zot migration).
+  Each needs its own `/office-hours` + `/plan-eng-review` — not
+  implementation-ready. Design lenses named by the owner for that session:
+  security, BuildKit-remote, scaling, simplicity, negative space,
+  innovation; check fit against the existing pinned stack (Kyverno, Cilium,
+  Flux, OpenBao) first. The pre-pivot Phase-2 text below is kept for the
+  daemon-feasibility reasoning it captured, but the buildpacks-daemon
+  framing is superseded — the question is now "which in-cluster Dockerfile
+  builder," resolved by T7a.
   **Real feasibility risk flagged (outside-voice finding), belongs to this
   phase specifically, not Phase 1 (GitHub Actions runners have Docker
   natively):** `pack build` inside a Tekton Task pod does not automatically
@@ -1028,7 +1035,8 @@ procedure — not a new tool, `bao` already ships the snapshot command.
 - **A 2-stage build (deps in a builder image, artifacts copied to a
   distroless runtime) is the industry-standard Node containerization
   pattern** — reused, not invented. So is `gcr.io/distroless/nodejs*` as
-  the runtime and kaniko as the daemonless Tekton builder.
+  the runtime. The in-cluster Phase-2 builder is undecided (T7a spike —
+  BuildKit-k8s-driver leading, kaniko-fork / buildah alternatives).
 - CLAUDE.md's Tool Boundaries table already states "OpenTofu owns...the
   OpenBao secret engine" — this design is the *first* real exercise of that
   already-declared boundary, not a new architectural claim.
@@ -1127,7 +1135,9 @@ a generic exit code.
 | Phase 1 build/scan (GHA workflow) | `.github/workflows/`, `deploy/frontend/` | Phase 0 |
 | Phase 1 approve/consume (OpenBao + cosign) | `deploy/frontend/scripts/`, `environments/local/`, `modules/secret-openbao-local/` | Phase 0 |
 | Phase 4 (hk bisect-safety) | `hk.pkl`, CI config | — (independent of everything) |
-| Phase 2 (Tekton Tasks/Pipeline) | `modules/task-*`, `modules/pipeline-*` | Phase 1 proven |
+| T5 approve/consume | `deploy/frontend/scripts/`, `mise.toml` | Phase 1 proven |
+| T5b demo deploy | `pitchfork.toml`, `deploy/frontend/` | T5 |
+| Phase 2 = T7a→T7b→T7c (Tekton) — **own planning session each** | `modules/task-*`, `modules/pipeline-*`, cluster | **T5 + T5b done** |
 | Phase 3 (Chains) | Tekton install, OpenBao (2nd Transit key) | Phase 2 |
 
 **Lanes:**
@@ -1320,31 +1330,60 @@ finding above. Run with Claude Code or Codex; checkbox as you ship.
   - Verify: restore procedure tested once against a copy; snapshot
     restored into a fresh instance signs successfully against the
     previously trusted public key, not just "the server starts"
-- [ ] **T7 (P2, human: ~3-5d / CC: ~1-2h)** — Tekton — `modules/task-*`,
-  `modules/pipeline-build-scan-approve`, `orb start k8s`, migrate registry
-  GHCR→`zot`. Hosts Tekton Pipelines/Chains only — the app's own deploy
-  target moved to T5b's pitchfork mechanism (Approach D, revised this
-  session), not a k8s namespace; scope here is unaffected by that beyond
-  no longer needing a Deployment/namespace piece.
-  - Surfaced by: Approach D, Build Phases (Phase 2); revised by 2026-09-06
-    pivot D7
-  - Files: `modules/task-kaniko-build/` (was `task-buildpacks-build/`),
-    `modules/task-trivy-scan/`, `modules/task-oras-attach/`,
-    `modules/pipeline-build-scan-approve/`
-  - **amd64-on-arm64 flag CLOSED by the pivot** — the build is now
-    `linux/arm64` only (pivot D3), native on OrbStack's arm64 cluster, no
-    emulation.
-  - **New open flag (pivot D7 / Codex #3/#4):** pick the Dockerfile builder.
-    Google's kaniko is archived — pin a maintained fork
-    (`osscontainertools/kaniko`, by digest) **or** use the BuildKit
-    Kubernetes driver (keeps one builder across Phase 1 + 2). Daemonless is
-    not free: pod privileges, in-cluster registry auth to `zot`, and
-    Dockerfile-feature compatibility are a spike *before* the Task YAML.
-    Kaniko emits no SBOM — the D6 `trivy --format cyclonedx` + `oras attach`
-    path carries SBOM in both phases (Chains adds provenance, not SBOM).
-  - Verify: kubeconform passes on the new YAML, chainsaw passes against the
-    OrbStack cluster, full path runs end-to-end, image is a single arm64
-    manifest
+### T7 — Phase 2 (Tekton) — SPLIT + DEFERRED, needs its own planning session
+
+**Status (2026-09-06 /plan-eng-review scope reduction):** T7 as previously
+written bundled the cluster bring-up, Tekton install, the builder-choice
+spike, the full 3-Task pipeline, the kubeconform/chainsaw harness, AND the
+GHCR→zot migration into one task — 8+ files, 3+ new runtime services,
+violating this design's own "one new moving part per phase" (Gall's Law)
+rule. Split into T7a/T7b/T7c below. **Resequenced AFTER T5 + T5b** — the
+design's own stopping-rule section already states Phase 1 proves the wedge;
+the approval gate (T5) and demo deploy (T5b) are the real unbuilt value.
+
+**Each sub-task gets its own `/office-hours` + `/plan-eng-review` before
+coding** — this is not a design that's ready to implement. Design lenses the
+owner named for that session: **security, BuildKit-remote, scaling
+(evaluate KEDA for scale-to-zero on the BuildKit builder — and Tekton
+controllers, `zot`, any other idle-most-of-the-time service), simplicity,
+negative space, innovation** — keep the stack as simple as possible while
+secure and fully-featured; check fit against the **existing pinned stack
+(Kyverno, Cilium, Flux, OpenBao)** before adding anything. Tracked:
+TODOS.md ("T7 Phase-2 planning session").
+
+**`kaniko` is NOT a decision** — it entered as one unvetted candidate in the
+pivot's D7 (the original T7 said `task-buildpacks-build`; dropping buildpacks
+left the in-cluster build needing *a* builder). Google archived kaniko
+June 2025; the maintained forks are `chainguard-forks/kaniko` (v1.25.x,
+conservative, original team) and `osscontainertools/kaniko` (v1.27.x). The
+**BuildKit Kubernetes driver** (`docker buildx create --driver=kubernetes
+--driver-opt=rootless=true`) is the leading candidate — it keeps ONE build
+engine across Phase 1 and Phase 2 (matches the owner's "BuildKit-remote"
+steer). `buildah` is a third option. The T7a spike decides.
+
+- [ ] **T7a (P2, needs planning session)** — builder spike — On `orb start
+  k8s`, prove ONE Dockerfile-build Task against `deploy/frontend/Dockerfile`
+  pushing to **GHCR** (no zot yet). Compare BuildKit-k8s-driver (rootless)
+  vs a kaniko fork vs buildah on: pod privilege model, registry auth,
+  `--platform linux/arm64` correctness, `# syntax=docker/dockerfile:1`
+  feature support, build cache. Resolves the daemonless-feasibility question
+  with a live probe, not a guess.
+  - Surfaced by: pivot D7; Codex #3/#4 (kaniko archived, platform flag ≠
+    build arch, kaniko has no SBOM)
+  - Amd64-on-arm64 flag **CLOSED** by pivot D3 — build is arm64-only,
+    native on the arm64 cluster.
+- [ ] **T7b (P2, needs planning session)** — pipeline — Wrap the proven
+  Phase-1 steps (`build → trivy scan → trivy CycloneDX → oras attach`) as
+  `modules/task-<builder>-build`, `modules/task-trivy-scan`,
+  `modules/task-oras-attach` + `modules/pipeline-build-scan-approve`, still
+  on GHCR. Build the kubeconform CRD-schema harness + chainsaw test harness
+  (this design's first k8s-manifest-bearing modules).
+  - Verify: kubeconform passes; chainsaw passes on the OrbStack cluster;
+    full path runs end-to-end; image is a single arm64 manifest
+- [ ] **T7c (P2, needs planning session)** — registry migration — Deploy
+  `zot` on the cluster (config `deploy/frontend/zot-config.json`), repoint
+  the pipeline GHCR→zot. Both speak OCI 1.1 Referrers so `approve.sh` /
+  `mise run consume` are unchanged. Its own "one moving part."
 - [ ] **T8 (P2, human: ~2-3d / CC: ~30min)** — Chains — Install Tekton
   Chains, second OpenBao Transit key (`chains-provenance-key`) + a scoped
   access policy denying it `approval-key`, verify automatic provenance
@@ -1466,19 +1505,36 @@ finding above. Run with Claude Code or Codex; checkbox as you ship.
 |--------|---------|-----|------|--------|----------|
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | not run |
 | Codex Review | `/codex review` | Independent 2nd opinion | 2 | issues_found (all folded) | 10 (orig) + 10 (pivot) |
-| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 2 | CLEAR | orig: 19; **pivot 2026-09-06: 4 architecture + 1 code-quality + 10 outside-voice, all resolved** |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 3 | CLEAR | orig: 19; pivot 2026-09-06: 4 arch + 1 code-quality + 10 outside-voice, all resolved; **T7 pass 2026-09-06: SCOPE REDUCTION — T7 split into T7a/T7b/T7c, deferred after T5/T5b, each needs its own planning session** |
 | Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | not run (no UI in this design) |
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | not run |
 
 **PIVOT REVIEW (2026-09-06) — buildpacks → distroless Node 26:** 7 decisions
 (D1–D7, see § Pivot). Feasibility confirmed: distroless Node 26 image exists
-+ multi-arch + Node 26 Active-LTS 2026-10-28; kaniko is the daemonless Tekton
-Dockerfile builder (resolves T7's daemon flag). Both `.trivyignore` CVEs are
-Paketo-toolchain-only and die at the root (verify via clean unsuppressed scan
-— T-P0). arm64-only chosen (D3, reverses the pre-pivot amd64 constraint —
-that was a Paketo limitation). T4/T4a re-opened; T4b (Dockerfile) + T10
-(post-Chains VEX hardening) + T-P0 (pivot cleanup) added. Evidence path
-unchanged (D6): `trivy` CycloneDX + `oras attach`, NOT `buildx --sbom`.
++ multi-arch + Node 26 Active-LTS 2026-10-28; a daemonless in-cluster
+Dockerfile build is standard (resolves T7's daemon flag; builder TBD). Both
+`.trivyignore` CVEs are Paketo-toolchain-only and die at the root (verified
+via clean unsuppressed scan — T-P0/T4a). arm64-only chosen (D3, reverses the
+pre-pivot amd64 constraint — that was a Paketo limitation). T4/T4a re-opened;
+T4b (Dockerfile) + T10 (post-Chains VEX hardening) + T-P0 (pivot cleanup)
+added. Evidence path unchanged (D6): `trivy` CycloneDX + `oras attach`, NOT
+`buildx --sbom`.
+
+**T7 REVIEW (2026-09-06) — scope reduction, no 4-section deep-dive (owner's
+call: "we will need a full planning session for T7").** Step 0 complexity
+check triggered — T7 bundled cluster + Tekton install + builder spike +
+3-Task pipeline + kubeconform/chainsaw harness + GHCR→zot migration into one
+task (8+ files, 3+ new services), violating this design's own "one moving
+part per phase" rule. Outcome: **T7 → T7a (builder spike) / T7b (pipeline +
+test harness) / T7c (zot migration); resequenced AFTER T5 + T5b; each needs
+its own `/office-hours` + `/plan-eng-review`.** `kaniko` demoted from a D7
+"decision" to one unvetted candidate — it was never in the original design
+(owner: "not sure where kaniko came from" — correct). BuildKit-k8s-driver
+(rootless) is the leading candidate; buildah a third. Design lenses recorded
+for the planning session: security, BuildKit-remote, scaling (KEDA
+scale-to-zero for the builder / Tekton / zot), simplicity, negative space,
+innovation, existing-stack fit (Kyverno/Cilium/Flux/OpenBao). Tracked:
+TODOS.md.
 
 **CODEX (pivot pass):** 3 blockers + 6 high + 1 medium. Blockers: (1) `buildx
 --sbom` = SPDX in-index, not a Referrers-API referrer — corrected this
@@ -1503,9 +1559,13 @@ branch `pivot-distroless-node`:** T-P0 (cleanup), T4b (Dockerfile), T4a
 (build+runtime smoke test — image serves 200s as nonroot, no shell, clean
 CRITICAL scan, no `IMPORT_OUTSIDE_FILE_MAP` recurrence), **T4 (workflow —
 CI-green, run 34020750235, single arm64 manifest, SBOM referrer attached)**.
-Next: T7 (Phase 2 Tekton) gets its own `/plan-eng-review` before coding;
-then resume T5.
+T7 SCOPE-REDUCED (split T7a/T7b/T7c, deferred after T5/T5b). **Next: T5
+(approve/consume).**
 
 **UNRESOLVED DECISIONS:**
-- T7 builder choice (D7) — maintained kaniko fork vs BuildKit k8s driver —
-  a Phase-2 spike, to be resolved in T7's dedicated `/plan-eng-review`.
+- T7a builder choice — BuildKit-k8s-driver (leading) vs a kaniko fork vs
+  buildah — a live spike in T7a's own planning session, deferred after
+  T5/T5b.
+- T7 Phase-2 architecture as a whole (registry, scaling/KEDA, cluster,
+  Kyverno fit) — needs a dedicated `/office-hours` + `/plan-eng-review`,
+  not yet run.

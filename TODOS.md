@@ -2,6 +2,44 @@
 
 ## Infrastructure
 
+### T7 Phase-2 (Tekton) — full planning session before any code
+
+**What:** Run `/office-hours` then `/plan-eng-review` on Phase 2 of
+`docs/designs/digest-as-source-of-truth.md` before implementing T7a/T7b/T7c.
+Phase 2 is split and deferred after T5/T5b; it is NOT implementation-ready.
+
+**Why:** The 2026-09-06 `/plan-eng-review` scope-reduction pass found T7 as
+written bundled the cluster, Tekton install, the builder-choice spike, the
+full pipeline, the test harness, and the GHCR→zot migration into one task
+(8+ files, 3+ new services) — too much for one design pass. `kaniko` was
+carried in as an unvetted candidate (it was never in the original design);
+the builder is genuinely undecided.
+
+**Design lenses to apply in that session (owner-specified):**
+- **Security** — rootless build, pod privilege model, supply-chain posture.
+- **BuildKit-remote** — leading builder candidate; one engine across Phase 1
+  (`docker buildx`) and Phase 2 (`docker buildx create --driver=kubernetes
+  --driver-opt=rootless=true`). Alternatives: `chainguard-forks/kaniko` /
+  `osscontainertools/kaniko`, `buildah`.
+- **Scaling** — evaluate **KEDA** for scale-to-zero on the BuildKit builder,
+  and on Tekton controllers, `zot`, and any other idle-most-of-the-time
+  service.
+- **Simplicity + negative space** — keep the stack as small as possible;
+  every added component must justify itself against what's NOT added.
+- **Innovation** — combine proven pieces in a simpler way where possible.
+- **Existing-stack fit** — check Kyverno, Cilium, Flux, OpenBao first before
+  adding anything new. Cross-ref the "Kyverno ImageValidatingPolicy" TODO
+  below — admission-time enforcement may belong in this same design.
+
+**Context:** T7a = builder spike (live probe on `orb start k8s`, push to
+GHCR). T7b = wrap `build→scan→oras-attach` as Tekton Tasks + Pipeline +
+kubeconform/chainsaw harness. T7c = GHCR→zot migration. See the design doc's
+"T7 — Phase 2" section and the GSTACK REVIEW REPORT's "T7 REVIEW" entry.
+
+**Effort:** planning ~1-2 sessions; build T7a/T7b/T7c ~3-5d human total
+**Priority:** P2
+**Depends on:** T5 + T5b shipped and proven
+
 ### Confirm the distroless build scans clean, then delete `.trivyignore`
 
 **What:** Run `trivy image --severity CRITICAL --exit-code 1` against the
