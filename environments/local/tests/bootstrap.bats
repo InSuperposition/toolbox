@@ -52,7 +52,9 @@ teardown() {
   pkill -f "bao server -config=$TOOLBOX_OPENBAO_STATE_DIR" 2>/dev/null || true
   pitchfork stop "global/$TOOLBOX_OPENBAO_DAEMON" 2>/dev/null || true
   pitchfork daemons remove --global "$TOOLBOX_OPENBAO_DAEMON" 2>/dev/null || true
+  pitchfork clean 2>/dev/null || true
   security delete-generic-password -s toolbox-openbao-bats-test -a VAULT_TOKEN >/dev/null 2>&1 || true
+  security delete-generic-password -s toolbox-openbao-bats-test -a BAO_RECOVERY_KEY >/dev/null 2>&1 || true
   cd /
   rm -rf "$SCRATCH"
 }
@@ -63,9 +65,15 @@ teardown() {
   [ -d "$TOOLBOX_OPENBAO_STATE_DIR/data" ]
 }
 
-@test "full bootstrap: init, unseal, apply, verify raft + transit" {
-  ./scripts/bootstrap-openbao.sh
+@test "full bootstrap: init, auto-unseal, apply, verify raft + transit" {
+  run ./scripts/bootstrap-openbao.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"UNSEAL KEY"* ]]                    # static seal — no unseal ceremony
+  [[ "$output" != *"Initializing (single Shamir"* ]]   # not the old Shamir path
 
+  # Auto-unsealed at init, no `bao operator unseal` call.
+  run bash -c "bao status -format=json | jq -e '.sealed == false and .initialized == true and .type == \"static\"'"
+  [ "$status" -eq 0 ]
   run bao status
   [[ "$output" == *"raft"* ]]
 
@@ -73,6 +81,21 @@ teardown() {
   VAULT_TOKEN="$(fnox get VAULT_TOKEN)"
   run bao secrets list
   [[ "$output" == *"transit/"* ]]
+}
+
+@test "the daemon auto-unseals on restart with no manual step" {
+  ./scripts/bootstrap-openbao.sh
+  kill "$(cat "$TOOLBOX_OPENBAO_STATE_DIR/bao.pid")"
+  # restart the same way the script's SUPERVISOR=none path does
+  bao server -config="$TOOLBOX_OPENBAO_STATE_DIR/openbao.hcl" \
+    >"$TOOLBOX_OPENBAO_STATE_DIR/bao.log" 2>&1 &
+  echo $! >"$TOOLBOX_OPENBAO_STATE_DIR/bao.pid"
+  for _ in $(seq 1 50); do
+    curl -sf -o /dev/null "$VAULT_ADDR/v1/sys/health" && break
+    sleep 0.2
+  done
+  run bash -c "bao status -format=json | jq -e '.sealed == false'"
+  [ "$status" -eq 0 ]
 }
 
 @test "re-running the bootstrap script after init is a clean no-op, not a re-init attempt" {

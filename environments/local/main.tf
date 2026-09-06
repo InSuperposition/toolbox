@@ -28,4 +28,9 @@ module "secret_openbao_local" {
   openbao_data_path     = "${local.openbao_state_dir}/data"
   openbao_snapshot_path = "${local.openbao_state_dir}/snapshots"
   listener_address      = var.openbao_listener_address
+
+  # Auto-unseal via a static seal key in the OS keychain (ADR 0010). The
+  # id is a stable label; the key itself is env://BAO_STATIC_SEAL_KEY,
+  # injected by `fnox exec` in bootstrap-openbao.sh.
+  static_seal_key_id = "toolbox-local"
 }

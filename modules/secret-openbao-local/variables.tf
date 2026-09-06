@@ -34,6 +34,12 @@ variable "node_id" {
   default     = "openbao-local-1"
 }
 
+variable "static_seal_key_id" {
+  description = "When set, render a `seal \"static\"` stanza (key from env://BAO_STATIC_SEAL_KEY) so the daemon auto-unseals on every start, plus the ephemeral cluster listener static seal requires. Empty = no seal block (Shamir, manual unseal). This is a stable *identifier* for the key, not the key itself. ADR 0010."
+  type        = string
+  default     = ""
+}
+
 variable "listener_address" {
   description = "Loopback address:port the OpenBao server listens on."
   type        = string

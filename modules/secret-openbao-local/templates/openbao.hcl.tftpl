@@ -17,7 +17,30 @@ storage "raft" {
 listener "tcp" {
   address     = "${listener_address}"
   tls_disable = true
+%{ if static_seal_key_id != "" ~}
+
+  # Static-seal auto-unseal needs raft clustering active to fetch the
+  # stored root key (without this, init fails "unseal with stored key
+  # failed: cluster addresses not found"). :0 = a kernel-assigned
+  # ephemeral port, never advertised, never connected to (single node, no
+  # peers) — so two instances on one machine cannot collide on it.
+  cluster_address = "127.0.0.1:0"
+%{ endif ~}
 }
 
-api_addr     = "http://${listener_address}"
+api_addr = "http://${listener_address}"
+%{ if static_seal_key_id != "" ~}
+cluster_addr = "https://127.0.0.1:0"
+
+# Auto-unseal: the 32-byte AES key is a raw 0600 file next to the raft
+# store, written by scripts/bootstrap-openbao.sh. `file://` (not `env://`)
+# so a boot-start daemon can read it before the login keychain unlocks.
+# The daemon unseals itself on every start — no `bao operator unseal`,
+# ever. ADR 0010.
+seal "static" {
+  current_key_id = "${static_seal_key_id}"
+  current_key    = "file://${seal_key_path}"
+}
+%{ else ~}
 cluster_addr = "https://${cluster_address}"
+%{ endif ~}

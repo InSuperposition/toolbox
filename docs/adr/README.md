@@ -17,5 +17,6 @@ superseded.
 | [0007](0007-distroless-dockerfile-not-buildpacks.md) | Distroless Node image from a hand-authored Dockerfile (supersedes Paketo buildpacks) |
 | [0008](0008-arm64-only.md) | `linux/arm64` only (supersedes the amd64 constraint) |
 | [0009](0009-demo-consumer-is-local-container-not-k8s.md) | The demo consumer is a local pitchfork container, not a k8s Deployment |
+| [0010](0010-local-openbao-machine-global-static-seal.md) | Local OpenBao is one machine-global pitchfork daemon that auto-unseals from a static `file://` seal key |
 
 Architecture: `docs/designs/`. Open work: `TODOS.md`.

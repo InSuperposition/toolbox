@@ -1,27 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# One-time, per-MACHINE OpenBao bootstrap: renders config, registers +
-# starts the machine-global pitchfork daemon, inits + unseals, provisions
-# Transit, stores the root token in fnox, exports the approval pubkey.
-# Idempotent: safe to re-run once initialised.
+# One-time, per-MACHINE OpenBao bootstrap: writes the static-seal key,
+# renders config, registers + starts the machine-global pitchfork daemon,
+# initialises (auto-unseals), provisions Transit, stores the root token in
+# fnox, exports the approval pubkey. Idempotent: safe to re-run.
 #
 # GitOps role: one-time bootstrap. Creates state that then lives in the OS
-# keychain, the raft store, and ~/.config/pitchfork/config.toml. Never runs
-# in a reconcile loop. The declarative parts (Transit engine + keys, config
-# render) are `tofu`; this only orchestrates the imperative first-init that
-# has no declarative form (`bao operator init`, keychain writes, the
-# pitchfork global-daemon registration).
+# keychain, the raft store, $STATE_DIR/seal.key, and
+# ~/.config/pitchfork/config.toml. Never runs in a reconcile loop. The
+# declarative parts (Transit engine + keys, config render) are `tofu`; this
+# only orchestrates the imperative first-init that has no declarative form
+# (`bao operator init`, keychain/keyfile writes, the pitchfork global-daemon
+# registration).
 #
 # ONE daemon per developer machine, not one per git worktree (ADR 0010):
 # pitchfork namespaces project daemons by directory, so a per-worktree
 # daemon would start a second `bao server` and lock-conflict on the shared
 # raft store. Hence a *global* pitchfork daemon.
 #
-# The root token is stored via fnox (OS keychain, steady-state). The unseal
-# key is currently printed once and NOT stored -- a known friction flaw,
-# fixed by the static-seal auto-unseal change (Phase 3, CLAUDE.md
-# § Deferred / TODOS.md).
+# Auto-unseal: a static seal keyed by $STATE_DIR/seal.key (raw 32 bytes,
+# 0600). The daemon unseals itself on every start and reboot -- there is no
+# `bao operator unseal` step anywhere. `bao operator init` yields RECOVERY
+# keys (for `operator rekey` / `generate-root` break-glass only), stored in
+# the keychain via fnox.
 #
 # Test seams (bats): TOOLBOX_OPENBAO_STATE_DIR, TOOLBOX_OPENBAO_DAEMON,
 # TOOLBOX_OPENBAO_LISTEN, TOOLBOX_OPENBAO_SUPERVISOR (pitchfork|none).
@@ -65,6 +67,14 @@ test -f "$STATE_DIR/openbao.hcl" || {
   exit 1
 }
 
+# Static-seal key: raw 32 bytes, 0600, next to the raft store. `file://` in
+# openbao.hcl, so the boot-start daemon reads it without an unlocked
+# keychain. Generated once; a re-run keeps the existing key (rotating it
+# would strand the sealed data).
+if [ ! -s "$STATE_DIR/seal.key" ]; then
+  (umask 077 && openssl rand -out "$STATE_DIR/seal.key" 32)
+fi
+
 if [ "$SUPERVISOR" = "none" ]; then
   # Test path: a plain tracked background process, no pitchfork. Keeps the
   # real ~/.config/pitchfork/config.toml pristine during bats runs.
@@ -76,9 +86,8 @@ if [ "$SUPERVISOR" = "none" ]; then
 else
   echo "==> Registering + starting the machine-global pitchfork daemon 'global/$DAEMON'"
   if ! pitchfork daemons --global 2>/dev/null | grep -qE "(^|/)${DAEMON}([[:space:]]|$)"; then
-    # Ready = the health endpoint answers, sealed or not. A `bao status`
-    # readiness check would hang: a freshly-started Shamir instance is
-    # sealed until this script unseals it, a step after `pitchfork start`.
+    # Ready = the health endpoint answers (sealedcode/uninitcode 200 covers
+    # the brief window between process start and static-seal auto-unseal).
     pitchfork daemons add --global "$DAEMON" \
       --run "bao server -config=$STATE_DIR/openbao.hcl" \
       --dir "$STATE_DIR" \
@@ -93,18 +102,19 @@ fi
 if bao status -format=json 2>/dev/null | jq -e '.initialized == true' >/dev/null 2>&1; then
   echo "==> Already initialized -- run scripts/reset-openbao.sh first to start fresh"
 else
-  echo "==> Initializing (single Shamir share -- solo dev daemon, not a production ceremony)"
-  init_json=$(bao operator init -key-shares=1 -key-threshold=1 -format=json)
-  unseal_key=$(echo "$init_json" | jq -r '.unseal_keys_b64[0]')
+  echo "==> Initializing (static seal auto-unseals; single recovery share -- solo dev daemon)"
+  init_json=$(bao operator init -recovery-shares=1 -recovery-threshold=1 -format=json)
+  recovery_key=$(echo "$init_json" | jq -r '.recovery_keys_b64[0]')
   root_token=$(echo "$init_json" | jq -r '.root_token')
 
-  bao operator unseal "$unseal_key" >/dev/null
+  # No `bao operator unseal` -- the static seal already unsealed the daemon
+  # at init. Both secrets go to the OS keychain via fnox.
   echo "$root_token" | fnox set VAULT_TOKEN --provider keychain
+  echo "$recovery_key" | fnox set BAO_RECOVERY_KEY --provider keychain
   export VAULT_TOKEN="$root_token"
 
-  echo "==> UNSEAL KEY -- store this out-of-band NOW (a password manager, not this repo):"
-  echo "    $unseal_key"
-  echo "==> Root token stored via fnox. Future sessions: eval \$(fnox activate zsh)"
+  echo "==> Root token + recovery key stored via fnox (OS keychain)."
+  echo "==> Future sessions: eval \$(fnox activate zsh)"
 fi
 
 # The 2nd apply (Transit engine + keys) authenticates as the root token.
