@@ -36,7 +36,7 @@ set -e
 
 if [ -z "$status_json" ]; then
 	die "cannot reach OpenBao at $VAULT_ADDR" \
-		"pitchfork start openbao   (then: mise run openbao-bootstrap if never initialised)"
+		"mise run openbao-up   (then: mise run openbao-bootstrap if never initialised)"
 fi
 
 # --- sealed? ---

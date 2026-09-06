@@ -48,16 +48,20 @@ description = "Apply the auto-fixable half of `mise run check` (formatters)."
 run = "hk fix --all"
 
 [tasks.openbao-bootstrap]
-description = "One-time OpenBao bootstrap (init/unseal/apply/fnox) — see environments/local/README.md"
+description = "One-time PER-MACHINE OpenBao bootstrap (renders config, registers the global pitchfork daemon, init/unseal/apply/fnox) — see environments/local/README.md"
 run = "./scripts/bootstrap-openbao.sh"
 
+[tasks.openbao-up]
+description = "Start the machine-global OpenBao daemon (after a reboot, or if it was stopped). No-op if already running."
+run = "pitchfork start global/openbao"
+
 [tasks.openbao-reset]
-description = "Wipe local OpenBao's data + stored root token together (raft snapshots under environments/local/openbao/snapshots/ are kept)"
+description = "Machine-wide: stop + unregister the global OpenBao daemon, wipe its raft store / config / tofu state / keychain token. Snapshots under ~/.local/state/toolbox/openbao/snapshots/ are kept."
 run = "./scripts/reset-openbao.sh"
 
 [tasks.openbao-snapshot]
-description = "Save a raft snapshot of the local OpenBao to environments/local/openbao/snapshots/latest.snap (needs `fnox` activated for VAULT_TOKEN)"
-run = "bao operator raft snapshot save environments/local/openbao/snapshots/latest.snap"
+description = "Save a raft snapshot of the local OpenBao to ~/.local/state/toolbox/openbao/snapshots/latest.snap (needs `fnox` activated for VAULT_TOKEN)"
+run = "bao operator raft snapshot save \"${XDG_STATE_HOME:-$HOME/.local/state}/toolbox/openbao/snapshots/latest.snap\""
 
 [tasks.openbao-snapshot-restore]
 description = "Restore the local OpenBao from a raft snapshot — args: [-force] <snapshot-file>. Use -force when restoring into a freshly bootstrapped instance. See environments/local/README.md"

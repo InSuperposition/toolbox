@@ -12,10 +12,10 @@ locals {
   # (`tofu apply -state=<state_dir>/tofu.tfstate`), so any worktree's
   # bootstrap operates on the same instance.
   #
-  # A non-default $XDG_STATE_HOME is not honoured here (Terraform cannot
-  # read arbitrary env vars); `~/.local/state` is the XDG default and the
-  # module inputs can still be overridden if a real need appears.
-  openbao_state_dir = pathexpand("~/.local/state/toolbox/openbao")
+  # var.openbao_state_dir is a test seam (bats). Unset -> ~/.local/state/
+  # toolbox/openbao (the XDG default; a non-default $XDG_STATE_HOME is not
+  # honoured -- Terraform cannot read arbitrary env vars).
+  openbao_state_dir = coalesce(var.openbao_state_dir, pathexpand("~/.local/state/toolbox/openbao"))
 }
 
 module "secret_openbao_local" {
@@ -27,4 +27,5 @@ module "secret_openbao_local" {
   openbao_config_path   = "${local.openbao_state_dir}/openbao.hcl"
   openbao_data_path     = "${local.openbao_state_dir}/data"
   openbao_snapshot_path = "${local.openbao_state_dir}/snapshots"
+  listener_address      = var.openbao_listener_address
 }

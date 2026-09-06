@@ -1,20 +1,16 @@
 #!/usr/bin/env bats
 
 # T6 — raft snapshot save/restore for the local OpenBao. Integration test
-# against a disposable scratch copy (never the real environments/local/ or
-# the real keychain), same pattern as bootstrap.bats.
-#
-# The scratch instance runs on a spare port (127.0.0.1:8399), so it does
-# NOT disturb the real :8200 daemon — unlike bootstrap.bats, this suite is
-# safe to run with your OpenBao up.
+# against a disposable scratch copy (scratch state dir, uniquely-named
+# global daemon, spare port), same pattern as bootstrap.bats — never the
+# real `openbao` daemon, ~/.local/state/toolbox/openbao/ or the real
+# keychain.
 #
 # Proves the two documented restore paths in environments/local/README.md:
-#   1. restore into the running daemon rolls back a change
+#   1. restore into the running daemon rolls a change back
 #   2. `-force` restore into a freshly bootstrapped instance recovers the
 #      original approval-key (verified by cosign against openbao://) —
 #      given the original unseal key + root token
-
-SNAP="environments/local/openbao/snapshots/latest.snap"
 
 setup() {
   SCRATCH="$(mktemp -d)"
@@ -22,39 +18,20 @@ setup() {
 
   mkdir -p "$SCRATCH/environments"
   cp -r "$REPO_ROOT/environments/local" "$SCRATCH/environments/local"
-  # a real bootstrap leaves runtime state in environments/local/ — scratch
-  # must start pristine or `tofu apply` operates on state for resources that
-  # don't exist in the fresh scratch OpenBao.
-  rm -rf "$SCRATCH/environments/local/openbao" \
-    "$SCRATCH/environments/local/.terraform" \
+  rm -rf "$SCRATCH/environments/local/.terraform" \
     "$SCRATCH/environments/local/.terraform.lock.hcl" \
     "$SCRATCH/environments/local/tests"
-  rm -f "$SCRATCH"/environments/local/terraform.tfstate*
   cp -r "$REPO_ROOT/modules" "$SCRATCH/modules"
   cp -r "$REPO_ROOT/scripts" "$SCRATCH/scripts"
 
-  # Spare port — the real daemon owns :8200/:8201. The module renders
-  # openbao.hcl (listener + api_addr) from these, and bootstrap-openbao.sh
-  # honours a pre-set VAULT_ADDR.
-  cat > "$SCRATCH/environments/local/main.tf" <<'EOF'
-module "secret_openbao_local" {
-  source              = "../../modules/secret-openbao-local"
-  transit_keys        = [{ name = "approval-key", type = "ecdsa-p256" }]
-  openbao_config_path = "openbao/openbao.hcl"
-  listener_address    = "127.0.0.1:8399"
-  cluster_address     = "127.0.0.1:8398"
-}
-EOF
-  # point the vault provider at the scratch port too (auto-loaded)
-  echo 'openbao_addr = "http://127.0.0.1:8399"' > "$SCRATCH/environments/local/terraform.tfvars"
-  cat > "$SCRATCH/pitchfork.toml" <<'EOF'
-[daemons.openbao]
-run = "bao server -config=openbao/openbao.hcl"
-dir = "environments/local"
-retry = 0
-ready_delay = 2
-ready_port = 8399
-EOF
+  export TOOLBOX_OPENBAO_STATE_DIR="$SCRATCH/state"
+  export TOOLBOX_OPENBAO_DAEMON="openbao-bats-snap-$$"
+  export TOOLBOX_OPENBAO_LISTEN="127.0.0.1:8398"
+  export TOOLBOX_OPENBAO_KEYCHAIN_SERVICE="toolbox-openbao-bats-test"
+  export TOOLBOX_OPENBAO_SUPERVISOR="none"
+  export TOOLBOX_OPENBAO_RESET_YES=1
+  export VAULT_ADDR="http://127.0.0.1:8398"
+  SNAP="$TOOLBOX_OPENBAO_STATE_DIR/snapshots/latest.snap"
 
   cat > "$SCRATCH/fnox.toml" <<'EOF'
 [providers.keychain]
@@ -65,19 +42,19 @@ service = "toolbox-openbao-bats-test"
 VAULT_TOKEN = { provider = "keychain", value = "VAULT_TOKEN" }
 EOF
 
-  export VAULT_ADDR=http://127.0.0.1:8399
   cd "$SCRATCH" || return 1
 }
 
 teardown() {
-  pitchfork stop openbao 2>/dev/null || true
-  pitchfork daemons remove openbao 2>/dev/null || true
-  fnox remove VAULT_TOKEN 2>/dev/null || true
+  [ -f "$TOOLBOX_OPENBAO_STATE_DIR/bao.pid" ] &&
+    kill "$(cat "$TOOLBOX_OPENBAO_STATE_DIR/bao.pid")" 2>/dev/null || true
+  pkill -f "bao server -config=$TOOLBOX_OPENBAO_STATE_DIR" 2>/dev/null || true
+  security delete-generic-password -s toolbox-openbao-bats-test -a VAULT_TOKEN >/dev/null 2>&1 || true
   cd /
   rm -rf "$SCRATCH"
 }
 
-# bootstrap + echo "<unseal-key> <root-token>" (both captured from output / fnox)
+# bootstrap + echo "<unseal-key> <root-token>"
 _bootstrap() {
   local out unseal token
   out="$(./scripts/bootstrap-openbao.sh 2>&1)"
@@ -96,7 +73,7 @@ _pubkey() { cosign public-key --key openbao://approval-key 2>/dev/null; }
 
 @test "the module creates the snapshot directory so the save works on a fresh checkout" {
   _bootstrap >/dev/null
-  [ -d environments/local/openbao/snapshots ]
+  [ -d "$TOOLBOX_OPENBAO_STATE_DIR/snapshots" ]
   VAULT_TOKEN="$(fnox get VAULT_TOKEN)"
   export VAULT_TOKEN
   run bao operator raft snapshot save "$SNAP"
@@ -114,13 +91,13 @@ _pubkey() { cosign public-key --key openbao://approval-key 2>/dev/null; }
 
   bao write -f transit/keys/approval-key/rotate >/dev/null
   rotated="$(_pubkey)"
-  [ "$rotated" != "$before" ]   # sanity: rotation moved the exported key
+  [ "$rotated" != "$before" ]
 
   run bao operator raft snapshot restore -force "$SNAP"
   [ "$status" -eq 0 ]
   _unseal_if_needed "$unseal"
 
-  [ "$(_pubkey)" = "$before" ]  # rolled back to the snapshot's key version
+  [ "$(_pubkey)" = "$before" ]
 }
 
 @test "-force restore into a fresh instance recovers the original approval-key" {
@@ -132,16 +109,16 @@ _pubkey() { cosign public-key --key openbao://approval-key 2>/dev/null; }
 
   run ./scripts/reset-openbao.sh
   [ "$status" -eq 0 ]
-  [ -f "$SNAP" ] || [ -d environments/local/openbao/snapshots ]   # reset kept snapshots/
+  [ -d "$TOOLBOX_OPENBAO_STATE_DIR/snapshots" ]   # reset kept snapshots/
 
   read -r _ fresh_token < <(_bootstrap)
   export VAULT_TOKEN="$fresh_token"
-  [ "$(_pubkey)" != "$before" ]   # genuinely a different instance/key now
+  [ "$(_pubkey)" != "$before" ]
 
   run bao operator raft snapshot restore -force "$BATS_TEST_TMPDIR/saved.snap"
   [ "$status" -eq 0 ]
-  _unseal_if_needed "$unseal"          # ORIGINAL unseal key
-  export VAULT_TOKEN="$token"          # ORIGINAL root token
+  _unseal_if_needed "$unseal"
+  export VAULT_TOKEN="$token"
 
-  [ "$(_pubkey)" = "$before" ]         # original key is back and readable via openbao://
+  [ "$(_pubkey)" = "$before" ]
 }

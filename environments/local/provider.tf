@@ -15,5 +15,5 @@
 # VAULT_TOKEN from the OS keychain (fnox) for its own `tofu apply`.
 
 provider "vault" {
-  address = var.openbao_addr
+  address = "http://${var.openbao_listener_address}"
 }
