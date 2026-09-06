@@ -7,4 +7,8 @@ type = "keychain"
 service = "toolbox-openbao"
 
 [secrets]
-VAULT_TOKEN = { provider = "keychain" }
+# `value` names the keychain item's account (`acct`) under the `service`
+# above — fnox 1.35's keychain provider needs it to resolve the entry, and
+# `mise run openbao-bootstrap`'s `fnox set` writes exactly this. Without it
+# `fnox get VAULT_TOKEN` returns "not found".
+VAULT_TOKEN = { provider = "keychain", value = "VAULT_TOKEN" }

@@ -48,5 +48,19 @@ fi
 echo "==> Provisioning Transit engine + keys"
 (cd environments/local && tofu apply -auto-approve)
 
+# Export the approval key's PUBLIC half into the repo. verify-approval.sh /
+# `mise run consume` verify a pinned approval attestation against THIS file
+# and never call OpenBao (Codex P1-7) -- so a raft-store loss stops future
+# signing but leaves every past approval verifiable. Re-run this bootstrap
+# (or re-export) and re-commit the file after any Transit key rotation, or
+# consume verifies new signatures against a stale key.
+echo "==> Exporting approval public key -> deploy/frontend/cosign-approval.pub"
+: "${VAULT_TOKEN:=$(fnox get VAULT_TOKEN 2>/dev/null || true)}"
+export VAULT_TOKEN
+./scripts/export-approval-pubkey.sh || {
+  echo "    WARNING: pubkey export failed -- OpenBao itself is fine." >&2
+  echo "    Re-run: mise run export-approval-pubkey   (before mise run consume)" >&2
+}
+
 bao secrets list
 bao status

@@ -1,13 +1,22 @@
-# Builds cv_frontend at a pinned commit SHA, pushes it to GHCR by digest,
-# scans it, and attaches a CycloneDX SBOM as an OCI 1.1 referrer.
+# Builds cv_frontend at a pinned commit SHA as a distroless Node image,
+# pushes it to GHCR by digest, scans it, and attaches a CycloneDX SBOM as
+# an OCI 1.1 referrer.
+#
+# Pivot 2026-09-06 (docs/designs/digest-as-source-of-truth.md, "Pivot"):
+# Paketo buildpacks dropped. The build is now `docker buildx build` against
+# deploy/frontend/Dockerfile (a minimal 2-stage distroless build). The
+# trivy scan (zero suppressions -- .trivyignore is gone), the trivy
+# CycloneDX SBOM, and the `oras attach` referrer step are UNCHANGED --
+# buildx's own --sbom/--provenance are deliberately NOT used (they emit
+# SPDX embedded in the image index, not a Referrers-API referrer).
 #
 # Manually triggered (workflow_dispatch) -- this wedge proves the pipeline
 # works; it isn't webhook-driven yet (Pipelines-as-Code is the deferred
 # future mechanism for that, see CLAUDE.md).
 #
 # Every third-party action is pinned by commit SHA, not a tag -- this
-# repo's own digest-over-tag thesis applied to its own CI, not just the
-# artifacts it builds (see docs/designs/digest-as-source-of-truth.md).
+# repo's own digest-over-tag thesis applied to its own CI, not just what it
+# builds (see docs/designs/digest-as-source-of-truth.md).
 
 name: Build cv_frontend
 
@@ -24,9 +33,12 @@ permissions:
 
 jobs:
   build-scan-attach:
-    runs-on: ubuntu-latest
+    # Native arm64 runner (pivot D3): distroless is multi-arch, every
+    # consumer in this design is arm64, and native `npm ci` gets the right
+    # esbuild binary with no QEMU.
+    runs-on: ubuntu-24.04-arm
     steps:
-      - name: Checkout toolbox (mise.toml's pinned tool versions)
+      - name: Checkout toolbox (Dockerfile + mise.toml's pinned tools)
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v7.0.1
 
       # GitHub Actions has no toLower() expression function (verified
@@ -43,7 +55,7 @@ jobs:
           ref: ${{ inputs.cv_frontend_sha }}
           path: cv_frontend
 
-      - name: Install pinned tools (buildpacks, oras, trivy)
+      - name: Install pinned tools (oras, trivy)
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
           install: true
@@ -56,36 +68,57 @@ jobs:
           key: trivy-db-${{ github.run_id }}
           restore-keys: trivy-db-
 
-      - name: Log in to GHCR
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
-      # No Tiny-stack attempt: verified twice (T4a's local dry run, and
-      # this workflow's own live logs -- 510 lines of Java/Go buildpack
-      # detection churn per run, every run) that builder-jammy-tiny ships
-      # no Node.js buildpack at all. Not a maybe, a permanent certainty
-      # for this stack -- keeping a doomed attempt "in case Tiny becomes
-      # viable" was dead weight once the uncertainty it hedged against
-      # was actually resolved, not still open.
-      - name: Build with buildpacks (Base stack -- Tiny doesn't support Node.js)
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # buildx builds, pushes by digest, and writes the digest to a
+      # metadata file (replaces the pre-pivot `report.toml` parsing).
+      # --provenance=false --sbom=false: the SBOM referrer is attached
+      # explicitly below via trivy + oras (pivot D6), not embedded here.
+      - name: Build and push distroless image
         run: |
-          pack build "$IMAGE:${{ inputs.cv_frontend_sha }}" \
-            --path cv_frontend \
-            --builder paketobuildpacks/builder-jammy-base \
-            --pull-policy if-not-present \
-            --publish \
-            --report-output-dir .
+          docker buildx build \
+            --file deploy/frontend/Dockerfile \
+            --platform linux/arm64 \
+            --tag "$IMAGE:${{ inputs.cv_frontend_sha }}" \
+            --provenance=false \
+            --sbom=false \
+            --metadata-file meta.json \
+            --push \
+            cv_frontend
 
       - name: Extract the pushed image's digest
         id: digest
         run: |
-          digest=$(grep -E '^\s*digest\s*=' report.toml | sed -E 's/.*"(sha256:[a-f0-9]+)".*/\1/')
-          test -n "$digest" || { echo "no digest found in report.toml" >&2; exit 1; }
+          digest=$(jq -r '.["containerimage.digest"]' meta.json)
+          case "$digest" in
+            sha256:*) ;;
+            *) echo "no sha256 digest in meta.json" >&2; exit 1 ;;
+          esac
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
-      - name: Trivy vulnerability scan (blocks on CRITICAL)
+      # Full scan report as JSON, attached as an OCI referrer BEFORE the
+      # blocking CRITICAL gate below (T5 review, Codex P1-5). A CRITICAL
+      # finding fails the job -- but a reject-worthy image must still carry
+      # the evidence `mise run approve` reads, so this runs and attaches
+      # first. No --exit-code here: this step never blocks.
+      - name: Trivy scan report (JSON)
         run: |
-          trivy image --exit-code 1 --severity CRITICAL \
+          trivy image --format json --output scan.json \
             "$IMAGE@${{ steps.digest.outputs.digest }}"
+
+      - name: Attach scan report as an OCI referrer
+        run: |
+          oras attach --artifact-type application/vnd.trivy.report+json \
+            "$IMAGE@${{ steps.digest.outputs.digest }}" \
+            scan.json:application/vnd.trivy.report+json
 
       - name: Trivy SBOM (CycloneDX)
         run: |
@@ -97,3 +130,12 @@ jobs:
           oras attach --artifact-type application/vnd.cyclonedx+json \
             "$IMAGE@${{ steps.digest.outputs.digest }}" \
             sbom.cdx.json:application/vnd.cyclonedx+json
+
+      # Blocking gate, LAST. Zero suppressions (pivot D4): .trivyignore is
+      # gone -- both prior entries were Paketo-toolchain-only. Runs after the
+      # evidence referrers are attached so a failed scan still leaves a
+      # reviewable trail (T5 review).
+      - name: Trivy vulnerability scan (blocks on CRITICAL)
+        run: |
+          trivy image --exit-code 1 --severity CRITICAL \
+            "$IMAGE@${{ steps.digest.outputs.digest }}"

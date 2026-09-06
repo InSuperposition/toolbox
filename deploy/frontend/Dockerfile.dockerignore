@@ -1,0 +1,15 @@
+# BuildKit reads `<dockerfile>.dockerignore` before `<context>/.dockerignore`.
+# The build context is a cv_frontend checkout. In CI the checkout is clean;
+# this matters for local T4a builds against a working copy that already has
+# node_modules/ -- a stale host node_modules/ made `npm ci` pick the wrong
+# (macOS/arm64) esbuild binary in T4a's earlier pack-build dry run.
+node_modules
+.git
+.agents
+tmp
+db
+**/*.test.ts
+hmr.ts
+README.md
+AGENTS.md
+.DS_Store

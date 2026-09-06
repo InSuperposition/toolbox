@@ -24,6 +24,16 @@ design, not an afterthought.
 
 - No code inside configuration files (YAML/TOML/HCL/CUE/Pkl/CI pipelines).
   A script is its own file, lintable and testable on its own.
+  - **Named carve-out (2026-09-06):** `deploy/frontend/Dockerfile` is the one
+    hand-authored Dockerfile in this repo. It packages the external
+    consumer `cv_frontend` as a distroless Node image after Paketo
+    buildpacks were dropped (see `docs/designs/digest-as-source-of-truth.md`
+    § Pivot). It is a minimal two-stage build — two `RUN` lines, no shell
+    logic — which is the industry-standard declarative form, not the "RUN
+    soup" this rule targets. Both base images are pinned by digest. Any
+    real build logic (evidence-gathering, the approval decision) still
+    lives in its own tested script per the Scripts Policy, never in the
+    Dockerfile.
 - No cyclic calls between `mise` tasks and scripts — one direction only.
 - One primary test tool per layer (§9) — acknowledged partial overlap is
   fine, redundant full coverage by two tools for the same concern is not.
@@ -63,7 +73,8 @@ each row links to.
 | **pitchfork** | Local dev daemon supervision only (directory-scoped autostart/autostop). | Repo-policy choice — pitchfork itself can run production daemons; we simply don't use it that way here. |
 | **hk** | Sole git-hook gate — concurrent, file-locked, three-way-merge stash-safe. | Config in `hk.pkl`. |
 | **mise** | Bootstrap + task runner. | Call graph is one direction only: `mise run check` → `hk check` → individual linters/formatters. `hk.pkl` never calls back into a mise task. |
-| **CI build/scan/approve pipeline** | Digest-pinned build → scan+SBOM → cosign-signed approval gate for app repos consumed by this stack (e.g. `cv_frontend`). | Reusable pieces live in `modules/task-buildpacks-build`, `modules/task-trivy-scan`, `modules/task-oras-attach`, `modules/pipeline-build-scan-approve` (Tekton Tasks/Pipeline, parameterized — not app-specific); a per-consumer instance lives in `deploy/<consumer>/` (e.g. `deploy/frontend/`). Design: `docs/designs/digest-as-source-of-truth.md`. Replaces the earlier placeholder `ci-build-frontend` module name/directory. |
+| **CI build/scan/approve pipeline** | Digest-pinned build → scan+SBOM → cosign-signed approval gate for app repos consumed by this stack (e.g. `cv_frontend`). | Build is a **distroless Node image** from `deploy/frontend/Dockerfile` (`docker buildx` in Phase-1 CI, kaniko or the BuildKit k8s driver in Phase-2 Tekton — pivot 2026-09-06 dropped Paketo buildpacks, see `docs/designs/digest-as-source-of-truth.md` § Pivot). Reusable pieces: `modules/task-kaniko-build`, `modules/task-trivy-scan`, `modules/task-oras-attach`, `modules/pipeline-build-scan-approve` (Tekton Tasks/Pipeline, parameterized — not app-specific); a per-consumer instance lives in `deploy/<consumer>/` (e.g. `deploy/frontend/`). Replaces the earlier placeholder `ci-build-frontend` module name/directory. |
+| ~~**buildpacks**~~ | **Removed 2026-09-06.** Was the image build tool; the pivot replaced it with a hand-authored distroless Dockerfile (carve-out above). No longer pinned in `mise.toml`. | — |
 | **chainsaw / kubeconform** | Primary test tools for k8s manifests — not strictly exclusive. | See Testing Strategy (§9). |
 
 ## GitOps Flow
@@ -106,7 +117,8 @@ a variant of it — one provisions a real cluster secret store (deferred),
 the other a disposable local dev daemon consumed by the root composition
 today (see `modules/secret-openbao-local/README.md`).
 
-**Resolved exception:** `modules/task-buildpacks-build`,
+**Resolved exception:** `modules/task-kaniko-build` (was
+`task-buildpacks-build` before the 2026-09-06 pivot),
 `modules/task-trivy-scan`, `modules/task-oras-attach`,
 `modules/pipeline-build-scan-approve` are Tekton Task/Pipeline YAML, not
 OpenTofu — they mirror [tektoncd/catalog](https://github.com/tektoncd/catalog)'s
@@ -176,10 +188,12 @@ Config files reference scripts by path — never embed them.
 ## CI Build/Scan/Approve Pipeline
 
 Designed and phased in `docs/designs/digest-as-source-of-truth.md`
-(supersedes the earlier `ci-build-frontend` placeholder): buildpacks build
+(supersedes the earlier `ci-build-frontend` placeholder): distroless
+Dockerfile build (buildpacks dropped in the 2026-09-06 pivot, § Pivot)
 → trivy scan+SBOM → cosign-signed approval gate, backed by OpenBao Transit
-for key custody. Phase 1 runs as GitHub Actions + GHCR (no cluster); Phase
-2+ moves to Tekton Pipelines/Chains + `zot` on OrbStack's built-in k8s.
+for key custody. Phase 1 runs as GitHub Actions + GHCR (no cluster), on a
+native `linux/arm64` runner; Phase 2+ moves to Tekton Pipelines/Chains +
+`zot` on OrbStack's built-in k8s.
 [Pipelines-as-Code](https://pipelinesascode.com/) (not raw Tekton
 Triggers/EventListener) remains the already-researched *webhook-triggering*
 mechanism for if/when this pipeline moves from on-demand to
