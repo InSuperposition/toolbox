@@ -106,6 +106,30 @@ each row links to.
   scope/exceptions/webhook-failure mode are not yet defined — design at
   Kyverno module build time, not asserted here as done.
 
+## Operational Lifecycle Trace (planning gate)
+
+Before any plan that introduces or touches a **secret** or a **long-lived
+process** is considered done, trace and write down its full lifecycle —
+this is a planning step, not post-implementation verification:
+
+| Stage | Question |
+|---|---|
+| **Bootstrap** | Created by what, stored where, who/what holds it. |
+| **Process restart** (crash / `pitchfork restart` / manual) | What state is lost? What manual step gets back to working? |
+| **Machine reboot** | Comes back automatically, or a human runs something? |
+| **Disaster** (disk loss / corrupted store / lost secret) | Recovery path, what must have been kept elsewhere, blast radius. |
+
+For each stage name **who holds what** and **every recurring manual step**.
+
+A recurring manual step, or a memorized secret with no machine-side
+storage, is a **flaw to fix in the plan** — not a feature to document —
+*unless* there is a stated threat-model reason (production, multi-operator,
+a deferred module with a different lifecycle). The
+"§ Deferred — Local OpenBao unseal-key storage" entry exists because this
+trace was skipped for T3/T6: the daemon reseals on every restart and the
+unseal key was left human-held, which reads as "memorize a key, re-enter
+it after every reboot".
+
 ## Module Structure & Naming
 
 Naming: `modules/<type>-<tool>` — existing: `vm-orbstack`, `cluster-k0sctl`,
@@ -268,6 +292,8 @@ For any change touching this repo:
 - Module changes carry a `tests/*.tftest.hcl`.
 - k8s manifest changes carry a kubeconform + chainsaw test.
 - New scripts carry a bats test.
+- Changes introducing or touching a secret or a long-lived process carry a
+  completed **Operational Lifecycle Trace** (§ above) in the plan or PR.
 
 ## Skill routing
 
