@@ -2,6 +2,35 @@
 
 ## Infrastructure
 
+### Rotate the T5 `approval-key` and re-deploy its public key — P1, do soon
+
+**What:** Generate a fresh `openbao://approval-key`, re-export
+`deploy/frontend/cosign-approval.pub`, re-sign any approval that must stay
+valid, commit.
+
+**Why:** The current `approval-key` (raft, created 2026-09-06) was
+provisioned during an AI-driven session in which the `bao operator init`
+output (root token flow) and the one-time unseal key were visible in the
+session transcript. Rotate before this key gates anything real.
+
+**How:**
+```
+mise run openbao-reset            # wipes raft store + fnox VAULT_TOKEN
+mise run openbao-bootstrap        # fresh key + NEW one-time unseal key (save it out-of-band)
+mise run export-approval-pubkey   # rewrites deploy/frontend/cosign-approval.pub
+git add deploy/frontend/cosign-approval.pub && git commit
+```
+Every attestation signed with the old key stops verifying against the new
+`cosign-approval.pub` — re-run `mise run approve` for any image whose
+approval must persist (only the two spike approvals on
+`ghcr.io/insuperposition/cv-frontend@sha256:28147ba0…` exist today; both
+are throwaway). A `.../rotate` on the same key keeps old versions
+verifiable but the *exported* public key still changes — full reset is
+cleaner here since nothing real depends on the old key yet.
+
+**Priority:** P1
+**Depends on:** nothing — do it before T5b or any real consumer.
+
 ### Auth + multi-member DX — planning session before T5 hardens
 
 **What:** Run `/office-hours` then `/plan-eng-review` on the auth story for
