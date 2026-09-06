@@ -33,6 +33,20 @@ trivy = "0.74.0"
 [env]
 VAULT_ADDR = "http://127.0.0.1:8200"
 
+# `mise install` is the only bootstrap step (CLAUDE.md § mise) — wire the
+# hk git hooks as part of it so a fresh clone is gated without a separate
+# manual `hk install`.
+[hooks]
+postinstall = "hk install"
+
+[tasks.check]
+description = "Run the full lint/format/test gate — identical to the hk git hooks (CLAUDE.md § hk). shellcheck, pkl, tofu fmt/validate/test, cue fmt, bats."
+run = ["hk check --all", "fnox check"]
+
+[tasks.fix]
+description = "Apply the auto-fixable half of `mise run check` (formatters)."
+run = "hk fix --all"
+
 [tasks.openbao-bootstrap]
 description = "One-time OpenBao bootstrap (init/unseal/apply/fnox) — see environments/local/README.md"
 run = "./scripts/bootstrap-openbao.sh"
