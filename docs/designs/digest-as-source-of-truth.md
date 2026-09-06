@@ -1399,16 +1399,26 @@ finding above. Run with Claude Code or Codex; checkbox as you ship.
     (`XDG_CACHE_HOME=/tmp`); no runtime cache errors.
   - Verify: **done** — `docker buildx build --platform linux/arm64`
     succeeds; `docker exec IMG id` fails (no shell); runs as uid 65532.
-- [ ] **T4 (P1)** — GitHub Actions — **workflow rewritten 2026-09-06**
-  (`.github/workflows/build-cv-frontend.yml`): `ubuntu-24.04-arm` runner,
+- [x] **T4 (P1)** — GitHub Actions — **DONE, CI-green 2026-09-06.**
+  `.github/workflows/build-cv-frontend.yml`: `ubuntu-24.04-arm` runner,
   `docker/setup-buildx-action` + `docker/login-action` (both SHA-pinned),
   `docker buildx build -f deploy/frontend/Dockerfile --platform linux/arm64
   --provenance=false --sbom=false --metadata-file meta.json --push`, digest
   via `jq -r '.["containerimage.digest"]' meta.json`, then the unchanged
-  trivy CRITICAL gate + trivy CycloneDX + `oras attach`. **Still `[ ]`:**
-  needs a live `workflow_dispatch` run against `cv_frontend@db174d9` to
-  confirm green in CI (the build mechanism itself is proven — T4a ran the
-  exact Dockerfile + buildx command locally).
+  trivy CRITICAL gate + trivy CycloneDX + `oras attach`.
+  - **Verified live:**
+    [run 34020750235](https://github.com/InSuperposition/toolbox/actions/runs/34020750235),
+    `conclusion: success`, 1m11s, against
+    `cv_frontend@db174d91041c4adffdbcf1b2d4554991eca627fc`. Pushed digest
+    `sha256:28147ba0cc4a78c72a62f1667e08455ef0b0cc7b8058dcafc7553f074cbb2281`
+    is a **single OCI manifest** (not an index — arm64-only per D3, so
+    T5/T5b need no index handling). Trivy CRITICAL gate passed with **zero
+    suppressions**. CycloneDX SBOM referrer attached and discoverable via
+    `oras discover`
+    (`sha256:b15a97d5d0db0a369ce79b1a3311fd3adeec90b4aa724a5aa20838d88ed193ba`).
+  - GHCR push auth (`docker/login-action` + `GITHUB_TOKEN`) and `oras
+    attach` against GHCR both work on the arm64 runner, unchanged from the
+    pre-pivot green run.
 - [ ] **T10 (P3, post-T8, human: ~1d / CC: ~30min)** — VEX hardening —
   Promote D4's scan-clean-first posture to a full enforced mechanism once
   Chains' signing infra exists: `.openvex.json` statement(s) →
@@ -1488,19 +1498,14 @@ no mechanism unless a residual appears (D4); Node 26 → kept, gated on a
 tested SHA (D5). Codex's factual corrections (buildx SBOM format, kaniko
 archived) verified against primary docs before folding.
 
-**VERDICT:** ENG CLEARED (pivot). **Implemented 2026-09-06 on branch
-`pivot-distroless-node`:** T-P0 (cleanup) + T4b (Dockerfile) + T4a
-(build+runtime smoke test, verified — image serves 200s as nonroot, no
-shell, clean CRITICAL scan, no `IMPORT_OUTSIDE_FILE_MAP` recurrence) done;
-T4 (workflow) rewritten, pending one live `workflow_dispatch` run to
-confirm CI-green. Next: resume T5. CEO + Design reviews still not applicable
-(no UI; the pivot narrows scope).
+**VERDICT:** ENG CLEARED (pivot). **Implemented + verified 2026-09-06 on
+branch `pivot-distroless-node`:** T-P0 (cleanup), T4b (Dockerfile), T4a
+(build+runtime smoke test — image serves 200s as nonroot, no shell, clean
+CRITICAL scan, no `IMPORT_OUTSIDE_FILE_MAP` recurrence), **T4 (workflow —
+CI-green, run 34020750235, single arm64 manifest, SBOM referrer attached)**.
+Next: T7 (Phase 2 Tekton) gets its own `/plan-eng-review` before coding;
+then resume T5.
 
 **UNRESOLVED DECISIONS:**
-- T4 CI-green not yet confirmed — needs a manual `workflow_dispatch` of
-  `.github/workflows/build-cv-frontend.yml` against
-  `cv_frontend@db174d9` (build mechanism proven locally in T4a; the
-  unknowns are GHCR push auth on the arm64 runner and `oras attach`
-  against GHCR, both unchanged from the pre-pivot green run).
 - T7 builder choice (D7) — maintained kaniko fork vs BuildKit k8s driver —
-  a Phase-2 spike, not decided.
+  a Phase-2 spike, to be resolved in T7's dedicated `/plan-eng-review`.
