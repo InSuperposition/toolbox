@@ -43,5 +43,9 @@ description = "Review build evidence and sign an approve/reject decision for an 
 run = "./deploy/frontend/scripts/approve.sh"
 
 [tasks.consume]
-description = "Verify a pinned approval attestation for an image digest — args: <registry/repo@sha256:...> <sha256:attestation-digest>"
+description = "Verify a pinned approval attestation and deploy that image to the local pitchfork frontend daemon — args: <registry/repo@sha256:...> <sha256:attestation-digest>"
+run = "./deploy/frontend/scripts/consume.sh"
+
+[tasks.verify-approval]
+description = "Just verify a pinned approval attestation, no deploy — args: <registry/repo@sha256:...> <sha256:attestation-digest>"
 run = "./deploy/frontend/scripts/verify-approval.sh"

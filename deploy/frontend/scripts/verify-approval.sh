@@ -20,9 +20,13 @@ set -euo pipefail
 # irrelevant — only the pinned attestation is looked at.
 #
 # Exit 0  — valid, signed by the approval key, verdict "approved".
-# Exit 1  — with a distinct stderr line: not found / bad signature / wrong
-#           subject / wrong predicate type / verdict rejected / bad schema.
+# Exit 1  — TERMINAL verification failure, distinct stderr line: bad
+#           signature / wrong subject / wrong predicate type / verdict
+#           rejected / bad schema. Re-running will not change the answer.
 # Exit 2  — bad arguments / missing public key.
+# Exit 3  — RETRYABLE: the attestation or its bundle blob could not be
+#           pulled (not found yet / registry unreachable / rate-limited).
+#           T5b's run.sh retries this with backoff; a human re-runs it.
 
 TYPE="https://insuperposition.github.io/toolbox/attestations/approval/v1"
 BUNDLE_ARTIFACT_TYPE="application/vnd.dev.sigstore.bundle.v0.3+json"
@@ -32,6 +36,7 @@ POLICY="$SCRIPT_DIR/../verdict-approved.cue"
 PUBKEY="${TOOLBOX_APPROVAL_PUBKEY:-$SCRIPT_DIR/../cosign-approval.pub}"
 
 fail() { echo "verify-approval: $1" >&2; exit 1; }
+retryable() { echo "verify-approval: $1" >&2; exit 3; }
 
 if [ $# -ne 2 ]; then
 	echo "usage: verify-approval.sh <registry/repo@sha256:<image>> <sha256:<attestation-digest>>" >&2
@@ -57,9 +62,11 @@ esac
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
-# --- 1. Pull the pinned attestation (by its own digest) ---
+# --- 1. Pull the pinned attestation (by its own digest). A fetch failure
+#        here is retryable — the digest may be right but the registry is
+#        unreachable / the referrer not propagated yet. ---
 if ! att_manifest="$(oras manifest fetch "${ORAS_HTTP[@]}" "${REPO}@${ATT_DIGEST}" 2>"$WORKDIR/err")"; then
-	fail "attestation $ATT_DIGEST not found on $REPO"
+	retryable "could not fetch attestation $ATT_DIGEST from $REPO: $(head -1 "$WORKDIR/err")"
 fi
 
 art_type="$(printf '%s' "$att_manifest" | jq -r '.artifactType // .config.artifactType // empty')"
@@ -67,7 +74,9 @@ art_type="$(printf '%s' "$att_manifest" | jq -r '.artifactType // .config.artifa
 	|| fail "$ATT_DIGEST is not a cosign attestation (artifactType: ${art_type:-none})"
 
 layer_digest="$(printf '%s' "$att_manifest" | jq -r '.layers[0].digest')"
-oras blob fetch "${ORAS_HTTP[@]}" --output "$WORKDIR/bundle.json" "${REPO}@${layer_digest}"
+if ! oras blob fetch "${ORAS_HTTP[@]}" --output "$WORKDIR/bundle.json" "${REPO}@${layer_digest}" 2>"$WORKDIR/err"; then
+	retryable "could not fetch attestation bundle blob from $REPO: $(head -1 "$WORKDIR/err")"
+fi
 
 # --- 2. Signature + subject + predicate-type, in one cosign call ---
 if ! cosign verify-blob-attestation \

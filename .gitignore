@@ -5,3 +5,6 @@
 /environments/local/openbao/
 modules/*/tests/tmp/
 *.tfstate*
+# per-machine record of the approved image the local frontend daemon runs
+# (written by `mise run consume`) — never committed
+/deploy/frontend/current-image.txt
