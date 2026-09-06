@@ -68,7 +68,7 @@ each row links to.
 | **Crossplane** | *Negative space* — pinned, not active. | Would sit at the self-service in-cluster provisioning layer (rival to OpenTofu, not to Timoni) if a concrete need appears. None does yet. |
 | **Kyverno** | Admission policy. | Enforcement mechanics (scope, exceptions, webhook-failure mode) not yet defined — design at Kyverno module build time, not asserted here as a slogan. |
 | **Cilium** | Network policy, default-deny between workloads, explicit allow only. | Bootstrap allow-list (DNS, API server, git/OCI pulls, OpenBao) needed before default-deny can reconcile anything — defined at Cilium module build time. |
-| **OpenBao** | Secret store of record — for anything created *after* OpenBao exists and is unsealed. | The bootstrap secret that first unseals/authenticates to OpenBao is necessarily out-of-band (human-held). |
+| **OpenBao** | Secret store of record — for anything created *after* OpenBao exists and is unsealed. | The *root token* that first authenticates to OpenBao is machine-held (fnox → OS keychain, shipped in T3). The *unseal key* is currently human-held — **under review**: for the single-operator local dev daemon (which reseals on every process restart) a memorized/hand-copied key is friction with little threat-model benefit (the machine is the trust boundary; the root token already lives on it; the sibling `infra` repo stores its unseal key). Storing it machine-side + auto-unseal is a planning task (§ Deferred). The out-of-band requirement is real for the *deferred production* `secret-openbao` module, not asserted for the local one. |
 | **fnox** | Local dev secret access layer, once OpenBao exists. Backend = OpenBao. | Never an independent store of record. fnox→OpenBao is the steady-state direction, not the bootstrap path. |
 | **pitchfork** | Local dev daemon supervision only (directory-scoped autostart/autostop). | Repo-policy choice — pitchfork itself can run production daemons; we simply don't use it that way here. |
 | **hk** | Sole git-hook gate — concurrent, file-locked, three-way-merge stash-safe. | Config in `hk.pkl`. |
@@ -94,8 +94,12 @@ each row links to.
 ## Zero Trust
 
 - **Secrets** — no plaintext secret in repo or state. OpenBao is the source
-  of truth once it exists; the bootstrap secret that first reaches OpenBao
-  is necessarily out-of-band (§ Tool Boundaries).
+  of truth once it exists. The first secret that authenticates to it (the
+  root token) is machine-held (fnox → OS keychain). Whether the *unseal
+  key* is human-held or machine-held for the **local dev** daemon is under
+  review — see § Tool Boundaries (OpenBao) and § Deferred. "Out-of-band by
+  necessity" holds for the deferred production `secret-openbao` module, not
+  automatically for the local one.
 - **Network** — Cilium default-deny between workloads, explicit allow only.
   Bootstrap allow-list needs are defined at Cilium module build time.
 - **Admission** — Kyverno policy intended on every manifest. Enforcement
@@ -174,9 +178,17 @@ tool limitation.
 
 OpenBao is the backend/source of truth. fnox is configured (`fnox.toml`) to
 read from it, injecting secrets into the local shell/mise environment for
-dev use. fnox is a client, never a store of record. The initial secret that
-unseals/authenticates OpenBao itself is out-of-band by necessity — fnox→
-OpenBao is the steady-state direction, not the bootstrap path.
+dev use. fnox is a client, never a store of record. fnox→OpenBao is the
+steady-state direction, not the bootstrap path.
+
+**Bootstrap secrets (local dev daemon):** the root token is stored via fnox
+(OS keychain) by `scripts/bootstrap-openbao.sh` — steady-state, not a
+manual `export`. The unseal key is currently *not* stored (printed once,
+hand-copied), which means a memorized key on every daemon restart — a known
+friction flaw, tracked in § Deferred. Do not add a design that assumes the
+operator has the unseal key to hand for routine operations; the disaster
+`-force` snapshot restore is the one legitimate exception (it needs the
+snapshot's *own* original unseal key, kept with the snapshot).
 
 ## Scripts Policy
 
@@ -221,6 +233,17 @@ Stated explicitly rather than guessed:
   write-back setup). Flux Operator replaces the *ongoing* config path only.
 - **pitchfork in production** — not used here; dev-only by policy.
 - **fnox as a store of record** — not used; OpenBao only.
+- **Local OpenBao unseal-key storage** — T3 shipped the root token
+  machine-held (fnox) but the unseal key printed-once-and-hand-copied, so
+  every daemon restart needs a memorized key. A real friction flaw (missed
+  during T6 planning). Direction: store it machine-side + auto-unseal (the
+  `infra` repo already does this) — for a single-operator local box the
+  machine is the trust boundary and the root token is already on it, so
+  separate custody buys ~nothing. Needs a planning session: CLAUDE.md
+  wording carve-out, storage mechanism (fnox vs a raw `security` item),
+  and the interaction with the disaster `-force` snapshot restore (which
+  legitimately still needs the snapshot's own original unseal key). The
+  production `secret-openbao` module keeps the out-of-band requirement.
 - **Kyverno/Cilium enforcement mechanics** — scope, exceptions,
   webhook-failure mode, and default-deny bootstrap allow-list are undefined
   until those modules are built.

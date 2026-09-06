@@ -29,11 +29,16 @@ Transit engine + keys, and stores the root token via `fnox` (OS keychain)
 so future sessions don't need a manual `export VAULT_TOKEN=...` —
 `eval "$(fnox activate zsh)"` (or bash) picks it up automatically.
 
-**The printed unseal key is the one thing this script never stores
-anywhere** — copy it to a password manager immediately. Keeping it
-out-of-band is the actual security property (CLAUDE.md § Zero Trust); if
-it lived in the same keychain as the root token, compromising one machine
-would compromise both bootstrap secrets at once.
+**The printed unseal key is not stored anywhere by this script** — copy it
+somewhere safe. You need it on every daemon restart (raft persists the
+encrypted data, not the unseal state) and for a disaster `-force` snapshot
+restore.
+
+> ⚠️ Needing a hand-copied key on every restart is a **known friction
+> flaw**, not a deliberate property for this single-operator local daemon —
+> the machine is already the trust boundary and the root token lives in its
+> keychain. Fix (machine-side storage + auto-unseal) is a planning task:
+> CLAUDE.md § Deferred, "Local OpenBao unseal-key storage".
 
 Verify:
 ```
