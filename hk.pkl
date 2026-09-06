@@ -1,0 +1,84 @@
+/// hk is the ONLY git-hook gate for this repo (CLAUDE.md § hk).
+///
+/// One definition, two entry points:
+///   - git hooks  : `hk install` wires pre-commit / pre-push
+///   - manual / CI : `mise run check` -> `hk check` (identical steps)
+///
+/// Call graph is one direction only: `mise run check` -> `hk check`.
+/// hk.pkl NEVER calls back into a mise task (no cycle, CLAUDE.md § mise).
+///
+/// Layering:
+///   pre-commit  fast + side-effect-free : shellcheck, shfmt-check, pkl, tofu fmt, cue fmt
+///   pre-push    + offline validation    : tofu validate
+///   check       + the full test matrix  : tofu test, bats
+///                (bats spins real OpenBao/docker daemons - too heavy for a
+///                 file-triggered hook, so it lives in `check` only)
+amends "package://github.com/jdx/hk/releases/download/v1.57.0/hk@1.57.0#/Config.pkl"
+import "package://github.com/jdx/hk/releases/download/v1.57.0/hk@1.57.0#/Builtins.pkl"
+
+/// Fast, deterministic, no daemons. Safe on every commit.
+local fast = new Mapping<String, Step> {
+  ["shellcheck"] = Builtins.shellcheck
+  ["pkl"] {
+    // `hk validate` type-checks hk.pkl against its schema without needing a
+    // standalone `pkl` CLI. hk.pkl is the only .pkl in the repo.
+    glob = List("**/*.pkl")
+    check = "hk validate"
+  }
+  ["tofu-fmt"] {
+    glob = List("**/*.tf", "**/*.tftest.hcl")
+    check = "tofu fmt -check -recursive {{workspace}}"
+    fix = "tofu fmt -recursive {{workspace}}"
+    workspace_indicator = "versions.tf"
+  }
+  ["cue-fmt"] {
+    glob = List("**/*.cue")
+    check = "cue fmt --check {{files}}"
+    fix = "cue fmt {{files}}"
+  }
+}
+
+/// Offline correctness. pre-push and check.
+local validate = new Mapping<String, Step> {
+  ["tofu-validate"] {
+    glob = List("**/*.tf")
+    check = "tofu -chdir={{workspace}} validate"
+    workspace_indicator = "versions.tf"
+  }
+}
+
+/// The full matrix. `hk check` / `mise run check` only - starts real daemons.
+local heavy = new Mapping<String, Step> {
+  ["tofu-test"] {
+    glob = List("modules/**/*.tf", "modules/**/*.tftest.hcl")
+    check = "tofu -chdir={{workspace}} test"
+    workspace_indicator = "versions.tf"
+  }
+  ["bats"] {
+    // *.bash (helper.bash) is a fixture, not a suite - excluded
+    glob = List("**/tests/*.bats")
+    check = "bats {{files}}"
+  }
+}
+
+hooks {
+  ["pre-commit"] {
+    fix = true
+    stash = "git"
+    steps = fast
+  }
+  ["pre-push"] {
+    steps = (fast) { ["_validate"] = validate }
+  }
+  ["check"] {
+    steps = new Mapping<String, Step> {
+      ...fast
+      ...validate
+      ...heavy
+    }
+  }
+  ["fix"] {
+    fix = true
+    steps = fast
+  }
+}
