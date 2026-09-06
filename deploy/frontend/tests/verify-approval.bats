@@ -63,10 +63,10 @@ sign() { # <verdict> -> echoes the attestation digest
 	[[ "$output" == *"bad signature"* ]]
 }
 
-@test "unknown attestation digest is refused with 'not found'" {
+@test "unknown attestation digest is retryable (exit 3), not a terminal failure" {
 	run "$SCRIPTS/verify-approval.sh" "$IMAGE" "sha256:$(printf 'f%.0s' {1..64})"
-	[ "$status" -eq 1 ]
-	[[ "$output" == *"not found"* ]]
+	[ "$status" -eq 3 ]
+	[[ "$output" == *"could not fetch attestation"* ]]
 }
 
 @test "a tag-only image reference is rejected (exit 2)" {

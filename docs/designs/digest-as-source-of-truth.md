@@ -1487,9 +1487,35 @@ fail "bad signature" against the new pubkey. Rotation procedure lives in
     referrer → clear error, no partial attest; OpenBao sealed → exit 3 with
     the unseal hint; EOF at the prompt → no attestation written; tag-only
     ref → rejected (full `registry/repo@sha256:` required).
-- [ ] **T5b (P1, human: ~1h / CC: ~20min)** — local deploy — pitchfork
-  daemon + state-file consume mechanism, replaces the earlier "locked"
-  k8s-namespace demo consumption (Approach D, revised this session)
+- [x] **T5b (P1)** — local deploy — **DONE 2026-09-06** (branch
+  `t5b-local-deploy`). `deploy/frontend/run.sh` (pitchfork daemon
+  entrypoint), `deploy/frontend/scripts/consume.sh` (`mise run consume` —
+  verify → atomic `current-image.txt` → `pitchfork restart frontend` →
+  truthful :44100 readiness), `pitchfork.toml` `[daemons.frontend]`
+  (`run=./run.sh`, `dir=deploy/frontend`, `ready_port=44100`, no `auto`,
+  `retry=0`), `.gitignore` (`current-image.txt`),
+  `deploy/frontend/tests/deploy.bats` (9 tests).
+  `verify-approval.sh` gained **exit 3 = retryable** (attestation/bundle
+  fetch failed) vs **exit 1 = terminal** (bad sig / verdict rejected /
+  wrong subject) so `run.sh` retries only the transient case.
+  - `run.sh` runs `docker run` as a tracked child (NOT `exec`) with
+    EXIT/TERM/INT traps that `docker stop` the container — `exec docker run`
+    orphaned the daemon-owned container when pitchfork SIGKILLed the CLI.
+  - **Proved live 2026-09-06:** built a serving distroless image, pushed to
+    a local `registry:3` (zot rejects docker-built manifests — known), the
+    real `openbao://approval-key` signed it, `mise run consume` → verify →
+    `current-image.txt` (2 lines, atomic) → `pitchfork restart` → `run.sh`
+    re-verified → container up → `curl :44100` → HTTP 200. `pitchfork stop
+    frontend` → container gone, no orphan; double `pitchfork start` → one
+    container; a rejected attestation → `consume` exit 1, state file +
+    running container untouched; registry-unreachable → bounded retry
+    (2s+4s) then stopped, no hang; a wrong-key (terminal) verify → stopped
+    at once, no retries.
+  - `deploy.bats`: 6 fast cases (no container) + 3 `[docker]` cases that
+    skip without docker. The container cases are slow (~2-3 min total —
+    `docker build` pulls the distroless base once) — an integration suite,
+    not the pre-commit path, same as `bootstrap.bats`.
+  - Superseded spec below (kept):
   - Surfaced by: this session's deploy-target discussion +
     `/plan-eng-review` D1-D6 (Codex outside-voice)
   - Depends on: T5 (approve/consume proven, including the once-only round-trip)

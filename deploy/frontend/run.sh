@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# pitchfork daemon entrypoint for the local cv_frontend demo deploy
+# (docs/designs/digest-as-source-of-truth.md § T5b). pitchfork runs this
+# with cwd = deploy/frontend (pitchfork.toml `dir`); it is also safe to run
+# directly. NEVER edit pitchfork.toml to point somewhere else — this file
+# is the fixed indirection so a deploy never rewrites pitchfork's own
+# config.
+#
+# Reads the currently-approved image from current-image.txt (written
+# atomically by `mise run consume`), RE-VERIFIES its approval at launch
+# time (not just at consume time), then `exec`s `docker run` in the
+# foreground so pitchfork is the sole supervisor.
+#
+# Launch re-verify (Codex P1-8): bounded retries + backoff on a retryable
+# verify failure (registry unreachable / referrer not propagated), then a
+# clear stopped state — never an unbounded loop. A TERMINAL verify failure
+# (bad signature / verdict rejected / wrong subject) stops immediately, no
+# retries. Must work on a COLD, non-interactive start with no inherited
+# shell credentials — the image and its referrers are pulled anonymously.
+#
+# Known gap, named not solved: this only gates the LAUNCH. It does not stop
+# an already-running container whose image is rejected afterwards — that
+# needs a separate watch, deferred.
+
+cd "$(dirname "$0")"
+
+STATE="current-image.txt"
+VERIFY="scripts/verify-approval.sh"
+PORT=44100
+NAME="toolbox-frontend"
+MAX_ATTEMPTS="${TOOLBOX_FRONTEND_VERIFY_ATTEMPTS:-5}"
+
+stopped() { echo "frontend: $1 — not launching" >&2; exit 1; }
+
+[ -f "$STATE" ] || stopped "no approved image yet (run: mise run consume -- <registry/repo@sha256:...> <sha256:attestation>)"
+
+# Two lines: full image reference, then the approval-attestation digest.
+image_ref="$(sed -n '1p' "$STATE")"
+att_digest="$(sed -n '2p' "$STATE")"
+[ -n "$image_ref" ] && [ -n "$att_digest" ] || stopped "$STATE is malformed (need: <image-ref> on line 1, <attestation-digest> on line 2)"
+
+# Cold-start hygiene: pull anonymously, no inherited docker/gh credentials.
+SCRATCH_DOCKER_CONFIG="$(mktemp -d)"
+export DOCKER_CONFIG="$SCRATCH_DOCKER_CONFIG"
+unset GH_TOKEN GITHUB_TOKEN VAULT_TOKEN 2>/dev/null || true
+
+NAME_SET=""
+# shellcheck disable=SC2329  # invoked via the EXIT / TERM / INT traps below
+cleanup() {
+	[ -n "$NAME_SET" ] && { docker stop -t 5 "$NAME" >/dev/null 2>&1 || true; docker rm -f "$NAME" >/dev/null 2>&1 || true; }
+	rm -rf "$SCRATCH_DOCKER_CONFIG"
+}
+trap cleanup EXIT
+trap 'cleanup; exit 143' TERM INT
+
+attempt=1
+while :; do
+	set +e
+	"./$VERIFY" "$image_ref" "$att_digest"
+	rc=$?
+	set -e
+	case "$rc" in
+	0)
+		break
+		;;
+	3)
+		if [ "$attempt" -ge "$MAX_ATTEMPTS" ]; then
+			stopped "could not verify $image_ref after $MAX_ATTEMPTS attempts (registry unreachable?)"
+		fi
+		backoff=$((2 ** attempt))
+		echo "frontend: verify attempt $attempt/$MAX_ATTEMPTS not ready (retryable) — retrying in ${backoff}s" >&2
+		sleep "$backoff"
+		attempt=$((attempt + 1))
+		;;
+	*)
+		stopped "$image_ref failed approval verification (exit $rc) — see the line above"
+		;;
+	esac
+done
+
+echo "frontend: $image_ref verified approved — starting on :$PORT" >&2
+
+# Run the container as a tracked child, NOT `exec docker run`: pitchfork's
+# stop can SIGKILL the `docker run` CLI without it forwarding to the
+# daemon-owned container, orphaning it. Staying PID 1 lets the traps above
+# `docker stop` it explicitly so nothing is left behind.
+docker rm -f "$NAME" >/dev/null 2>&1 || true
+NAME_SET=1
+
+docker run --rm --name "$NAME" --platform linux/arm64 -p "${PORT}:${PORT}" "$image_ref" &
+child=$!
+set +e
+wait "$child"
+rc=$?
+set -e
+echo "frontend: container exited (code $rc)" >&2
+exit "$rc"
