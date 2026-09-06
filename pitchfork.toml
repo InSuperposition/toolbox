@@ -6,8 +6,8 @@ retry = 0
 ready_delay = 2
 ready_port = 8200
 
-# Local cv_frontend demo deploy (docs/designs/digest-as-source-of-truth.md
-# § T5b). `run.sh` is a FIXED indirection — never repoint it; `mise run
+# Local cv_frontend demo deploy (docs/adr/0009-demo-consumer-is-local-
+# container-not-k8s.md). `run.sh` is a FIXED indirection — never repoint it; `mise run
 # consume` records the approved image in deploy/frontend/current-image.txt
 # and restarts this daemon. No `auto`: the operator (or `mise run consume`)
 # starts it explicitly, so a `cd` into the repo does not crash-loop on

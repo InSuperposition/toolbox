@@ -24,11 +24,11 @@ design, not an afterthought.
 
 - No code inside configuration files (YAML/TOML/HCL/CUE/Pkl/CI pipelines).
   A script is its own file, lintable and testable on its own.
-  - **Named carve-out (2026-09-06):** `deploy/frontend/Dockerfile` is the one
+  - **Named carve-out:** `deploy/frontend/Dockerfile` is the one
     hand-authored Dockerfile in this repo. It packages the external
-    consumer `cv_frontend` as a distroless Node image after Paketo
-    buildpacks were dropped (see `docs/designs/digest-as-source-of-truth.md`
-    § Pivot). It is a minimal two-stage build — two `RUN` lines, no shell
+    consumer `cv_frontend` as a distroless Node image
+    (`docs/adr/0007-distroless-dockerfile-not-buildpacks.md`). It is a
+    minimal two-stage build — two `RUN` lines, no shell
     logic — which is the industry-standard declarative form, not the "RUN
     soup" this rule targets. Both base images are pinned by digest. Any
     real build logic (evidence-gathering, the approval decision) still
@@ -73,7 +73,7 @@ each row links to.
 | **pitchfork** | Local dev daemon supervision only (directory-scoped autostart/autostop). | Repo-policy choice — pitchfork itself can run production daemons; we simply don't use it that way here. |
 | **hk** | Sole git-hook gate — concurrent, file-locked, three-way-merge stash-safe. | Config in `hk.pkl`. |
 | **mise** | Bootstrap + task runner. | Call graph is one direction only: `mise run check` → `hk check` → individual linters/formatters. `hk.pkl` never calls back into a mise task. |
-| **CI build/scan/approve pipeline** | Digest-pinned build → scan+SBOM → cosign-signed approval gate for app repos consumed by this stack (e.g. `cv_frontend`). | Build is a **distroless Node image** from `deploy/frontend/Dockerfile` (`docker buildx` in Phase-1 CI, kaniko or the BuildKit k8s driver in Phase-2 Tekton — pivot 2026-09-06 dropped Paketo buildpacks, see `docs/designs/digest-as-source-of-truth.md` § Pivot). Reusable pieces: `modules/task-kaniko-build`, `modules/task-trivy-scan`, `modules/task-oras-attach`, `modules/pipeline-build-scan-approve` (Tekton Tasks/Pipeline, parameterized — not app-specific); a per-consumer instance lives in `deploy/<consumer>/` (e.g. `deploy/frontend/`). Replaces the earlier placeholder `ci-build-frontend` module name/directory. |
+| **CI build/scan/approve pipeline** | Digest-pinned build → scan+SBOM → cosign-signed approval gate for app repos consumed by this stack (e.g. `cv_frontend`). | Build is a **distroless Node image** from `deploy/frontend/Dockerfile` (`docker buildx` in Phase-1 CI; the Phase-2 Tekton in-cluster builder is an open spike — `TODOS.md`). `docs/adr/0007`. Reusable pieces: `modules/task-<builder>-build`, `modules/task-trivy-scan`, `modules/task-oras-attach`, `modules/pipeline-build-scan-approve` (Tekton Tasks/Pipeline, parameterized — not app-specific); a per-consumer instance lives in `deploy/<consumer>/` (e.g. `deploy/frontend/`). Full design: `docs/designs/digest-as-source-of-truth.md`. |
 | ~~**buildpacks**~~ | **Removed 2026-09-06.** Was the image build tool; the pivot replaced it with a hand-authored distroless Dockerfile (carve-out above). No longer pinned in `mise.toml`. | — |
 | **chainsaw / kubeconform** | Primary test tools for k8s manifests — not strictly exclusive. | See Testing Strategy (§9). |
 
@@ -130,6 +130,28 @@ trace was skipped for T3/T6: the daemon reseals on every restart and the
 unseal key was left human-held, which reads as "memorize a key, re-enter
 it after every reboot".
 
+## Docs layout
+
+Three kinds of doc, one job each:
+
+| Doc | Holds | Tense |
+|---|---|---|
+| `docs/designs/*.md` | What a system **is** — its current architecture | present |
+| `docs/adr/NNNN-slug.md` | **Why** a hard-to-reverse, non-obvious call was made | past |
+| `TODOS.md` | **Open** work, phase sequencing, planning-session triggers | future |
+
+Rules:
+
+- Revise a design doc **in place**, present tense. Never strike-through a
+  superseded decision inside it — write a new ADR and mark the old one
+  `Status: superseded by ADR-NNNN`.
+- ADRs are minimal: a title plus one to three sentences (format:
+  `~/.claude/skills/grill-with-docs/ADR-FORMAT.md`, which the `diagnose` /
+  `improve-codebase-architecture` skills read). Only for decisions that are
+  hard to reverse **and** surprising without context **and** a real
+  trade-off — not every choice.
+- Task status lives in `TODOS.md` and git history, not in the design doc.
+
 ## Module Structure & Naming
 
 Naming: `modules/<type>-<tool>` — existing: `vm-orbstack`, `cluster-k0sctl`,
@@ -156,9 +178,8 @@ A per-consumer instantiation (PipelineRun binding + consumer-specific
 scripts/tests) lives in `deploy/<consumer>/` (e.g. `deploy/frontend/`),
 matching this repo's own Repo Role split (`modules/` reusable, a root
 composition applies them) extended to a new resource kind rather than
-inventing a separate pattern. This replaces the earlier placeholder
-`ci-build-frontend` module — see `docs/designs/digest-as-source-of-truth.md`
-for the full design.
+inventing a separate pattern. Full design:
+`docs/designs/digest-as-source-of-truth.md`.
 
 ## Testing Strategy
 
@@ -223,21 +244,17 @@ Config files reference scripts by path — never embed them.
 
 ## CI Build/Scan/Approve Pipeline
 
-Designed and phased in `docs/designs/digest-as-source-of-truth.md`
-(supersedes the earlier `ci-build-frontend` placeholder): distroless
-Dockerfile build (buildpacks dropped in the 2026-09-06 pivot, § Pivot)
-→ trivy scan+SBOM → cosign-signed approval gate, backed by OpenBao Transit
-for key custody. Phase 1 runs as GitHub Actions + GHCR (no cluster), on a
-native `linux/arm64` runner; Phase 2+ moves to Tekton Pipelines/Chains +
-`zot` on OrbStack's built-in k8s.
+Architecture: `docs/designs/digest-as-source-of-truth.md`. Decisions and
+rationale: `docs/adr/`. Open work and phase sequencing: `TODOS.md`.
+
+Shape: distroless Dockerfile build (`docs/adr/0007`) → trivy scan + SBOM +
+scan-report referrers → cosign-signed approval gate backed by OpenBao
+Transit (`docs/adr/0004`). Phase 1 (shipped) runs as GitHub Actions + GHCR
+on a native `linux/arm64` runner; Phase 2+ moves to Tekton
+Pipelines/Chains + `zot` on OrbStack's k8s (`docs/adr/0003`, deferred).
 [Pipelines-as-Code](https://pipelinesascode.com/) (not raw Tekton
 Triggers/EventListener) remains the already-researched *webhook-triggering*
-mechanism for if/when this pipeline moves from on-demand to
-webhook-driven — it owns webhook ingestion itself and matches events to
-`PipelineRun`/`Pipeline` YAML stored in-repo, replacing the separate
-Triggers/EventListener/TriggerBinding/TriggerTemplate stack. Not yet built
-as of this note; the design doc's Build Phases is the authoritative
-sequencing.
+mechanism for if/when this pipeline moves from on-demand to webhook-driven.
 
 ## Deferred / Not Yet Decided
 
@@ -246,10 +263,9 @@ Stated explicitly rather than guessed:
 - **Crossplane** — pinned, inactive. No boundary assigned until a concrete
   self-service in-cluster provisioning need appears.
 - **Pipelines-as-Code** — pinned/researched, not yet wired. The CI
-  build/scan/approve pipeline (`docs/designs/digest-as-source-of-truth.md`)
-  runs on-demand/manually triggered through Phase 3; webhook-driven
-  triggering via Pipelines-as-Code is a later addition, not required to
-  prove the pipeline itself.
+  build/scan/approve pipeline runs on-demand/manually triggered through
+  Phase 3; webhook-driven triggering via Pipelines-as-Code is a later
+  addition, not required to prove the pipeline itself.
 - **Tekton Triggers/EventListener** — not used; if/when webhook-driven
   triggering is built, Pipelines-as-Code replaces this stack outright.
 - **`flux bootstrap`** — not eliminated, only reduced to a one-time step

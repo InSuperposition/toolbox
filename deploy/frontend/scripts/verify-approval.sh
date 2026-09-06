@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # The consume-side gate — and the one shared seam every consumer goes
-# through (docs/designs/digest-as-source-of-truth.md § T5): `mise run
+# through (docs/designs/digest-as-source-of-truth.md § Architecture): `mise run
 # consume`, T5b's run.sh launch re-verify, and T10's VEX check all call
 # this. Given an image digest and the digest of a specific approval
 # attestation, it answers one question: is THIS attestation a valid

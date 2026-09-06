@@ -4,7 +4,7 @@
 # cosign key pair standing in for openbao://approval-key (approve.sh's
 # TOOLBOX_APPROVE_KEY seam), and a tiny `oras push`ed artifact standing in
 # for the built image. No OpenBao, no network, no GHCR — the openbao:// KMS
-# leg is proved separately (docs/designs/digest-as-source-of-truth.md § T5
+# leg is proved separately (docs/designs/digest-as-source-of-truth.md § Architecture
 # round-trip proof).
 
 _free_port() {

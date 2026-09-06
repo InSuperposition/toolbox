@@ -1,10 +1,10 @@
 #!/usr/bin/env bats
 
 # approve.sh matrix. The signing paths use a local cosign key via the
-# TOOLBOX_APPROVE_KEY seam (no OpenBao — the openbao:// KMS leg is proved in
-# the § T5 round-trip proof). The OpenBao-preflight path is exercised
-# against a dead address. Cases from docs/designs/digest-as-source-of-truth.md
-# § T5.
+# TOOLBOX_APPROVE_KEY seam (no OpenBao — the openbao:// KMS leg is proved
+# separately). The OpenBao-preflight path is exercised against a dead
+# address. Covers docs/designs/digest-as-source-of-truth.md § Architecture
+# (the approve path) and its failure modes.
 
 setup_file() {
 	load helper

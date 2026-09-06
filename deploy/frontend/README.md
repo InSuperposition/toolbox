@@ -167,14 +167,14 @@ into this directory.
 
 ## Why a local container, not a k8s Deployment
 
-T5b deliberately reopened an earlier "locked" decision (a `cv-frontend` k8s
-namespace + `kubectl apply` on OrbStack's cluster) — see
-`docs/designs/digest-as-source-of-truth.md`'s Approach D for the full
+This reopened an earlier "locked" decision (a `cv-frontend` k8s namespace +
+`kubectl apply` on OrbStack's cluster) — see
+`docs/adr/0009-demo-consumer-is-local-container-not-k8s.md` for the full
 reasoning. `orb start k8s` still exists and still hosts Tekton
-Pipelines/Chains (Phase 2+, T7/T8) — that dependency is unaffected; only
-where the *app itself* runs changed.
+Pipelines/Chains (Phase 2+) — that dependency is unaffected; only where the
+*app itself* runs changed.
 
-T5b proves the pipeline mechanism (right image pulled, container starts,
+This proves the pipeline mechanism (right image pulled, container starts,
 HTTP readiness checked and its real result reported truthfully) — not
 `cv_frontend`'s own correctness. `cv_frontend` currently crashes at
 runtime with a Remix v3 `IMPORT_OUTSIDE_FILE_MAP` error (a different repo's

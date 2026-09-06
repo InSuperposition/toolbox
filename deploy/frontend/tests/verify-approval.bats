@@ -2,9 +2,9 @@
 
 # The consume-side gate (verify-approval.sh / `mise run consume`) is the
 # actual trust boundary — it never touches OpenBao, so it is fully testable
-# with a local zot + a throwaway cosign key. Matrix from
-# docs/designs/digest-as-source-of-truth.md § T5 ("Key interactions" +
-# "Edge cases").
+# with a local zot + a throwaway cosign key. Covers the
+# docs/designs/digest-as-source-of-truth.md § Architecture consume path and
+# its failure modes.
 
 setup() {
 	load helper

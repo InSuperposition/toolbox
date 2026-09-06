@@ -4,7 +4,7 @@ set -euo pipefail
 # The one place in the digest-as-source-of-truth pipeline with real logic:
 # gather the build evidence, put it in front of a human, take their
 # approve/reject decision, and sign it as an in-toto attestation over the
-# image digest (docs/designs/digest-as-source-of-truth.md § T5).
+# image digest (docs/designs/digest-as-source-of-truth.md § Architecture).
 #
 #   mise run approve -- <registry/repo@sha256:...>
 #
