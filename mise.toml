@@ -68,8 +68,8 @@ description = "Restore the local OpenBao from a raft snapshot — args: [-force]
 run = "bao operator raft snapshot restore"
 
 [tasks.export-approval-pubkey]
-description = "Re-export deploy/frontend/cosign-approval.pub from openbao://approval-key (run after a key rotation)"
-run = "./scripts/export-approval-pubkey.sh"
+description = "Re-export deploy/frontend/cosign-approval.pub from openbao://approval-key, then `git add` + commit it (run after a Transit key rotation). Needs OpenBao up + VAULT_TOKEN (fnox activate)."
+run = "cosign public-key --key openbao://approval-key --outfile deploy/frontend/cosign-approval.pub"
 
 [tasks.approve]
 description = "Review build evidence and sign an approve/reject decision for an image digest (see deploy/frontend/README.md)"

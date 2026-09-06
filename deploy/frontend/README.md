@@ -147,7 +147,7 @@ never a trust input.
 | `run.sh` | pitchfork `frontend` daemon entrypoint — re-verify + run the container in the foreground |
 | `scripts/openbao-preflight.sh` | distinguishes unreachable / sealed / unauthorized / missing-key, exit 3 |
 | `verdict-approved.cue` | `#Predicate` (permissive, sign side) + `#ApprovedStatement` (verdict==approved, consume side) |
-| `cosign-approval.pub` | committed public half of `openbao://approval-key` — what verify checks against; written by `../../scripts/export-approval-pubkey.sh` (also `mise run export-approval-pubkey`), re-run after a key rotation |
+| `cosign-approval.pub` | committed public half of `openbao://approval-key` — what verify checks against; written by `mise run export-approval-pubkey` (one `cosign public-key` line; `mise run openbao-bootstrap` also writes it), re-run + commit after a Transit key rotation |
 | `current-image.txt` | git-ignored, per-machine — the image ref + attestation digest `run.sh` deploys |
 | `tests/{approve,verify-approval,deploy}.bats`, `tests/helper.bash` | the test matrix (local zot + a throwaway cosign key via the `TOOLBOX_APPROVE_KEY` seam; `deploy.bats`'s container cases also need docker) |
 

@@ -129,10 +129,14 @@ tofu_apply
 # Export the approval key's PUBLIC half into the repo. verify-approval.sh /
 # `mise run consume` verify a pinned approval attestation against THIS file
 # and never call OpenBao (Codex P1-7) -- a raft-store loss stops future
-# signing but leaves every past approval verifiable. Re-run this bootstrap
-# (or `mise run export-approval-pubkey`) after any Transit key rotation.
+# signing but leaves every past approval verifiable. Same one line as
+# `mise run export-approval-pubkey` (inlined, not called -- a script must
+# not invoke a mise task that sits on its own call path, CLAUDE.md § mise).
+# cosign 3.1.3: openbao:// and hashivault:// are the same KMS plugin.
 echo "==> Exporting approval public key -> deploy/frontend/cosign-approval.pub"
-"$REPO_ROOT/scripts/export-approval-pubkey.sh" || {
+mkdir -p "$REPO_ROOT/deploy/frontend"
+cosign public-key --key openbao://approval-key \
+  --outfile "$REPO_ROOT/deploy/frontend/cosign-approval.pub" || {
   echo "    WARNING: pubkey export failed -- OpenBao itself is fine." >&2
   echo "    Re-run: mise run export-approval-pubkey   (before mise run consume)" >&2
 }

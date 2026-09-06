@@ -81,6 +81,10 @@ teardown() {
   VAULT_TOKEN="$(fnox get VAULT_TOKEN)"
   run bao secrets list
   [[ "$output" == *"transit/"* ]]
+
+  # the inlined `cosign public-key --key openbao://approval-key` step ran
+  run grep -q "BEGIN PUBLIC KEY" "$SCRATCH/deploy/frontend/cosign-approval.pub"
+  [ "$status" -eq 0 ]
 }
 
 @test "the daemon auto-unseals on restart with no manual step" {
