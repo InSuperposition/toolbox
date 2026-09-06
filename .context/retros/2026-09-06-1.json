@@ -1,0 +1,51 @@
+{
+  "date": "2026-09-06",
+  "window": "7d",
+  "metrics": {
+    "commits": 31,
+    "merge_commits": 4,
+    "contributors": 2,
+    "prs_merged": 4,
+    "insertions": 6330,
+    "deletions": 978,
+    "net_loc": 5352,
+    "logical_sloc_added": 4688,
+    "test_loc": 965,
+    "test_ratio": 0.15,
+    "active_days": 2,
+    "sessions": 6,
+    "deep_sessions": 4,
+    "medium_sessions": 1,
+    "micro_sessions": 1,
+    "total_active_minutes": 319,
+    "avg_session_minutes": 53,
+    "loc_per_session_hour": 1200,
+    "docs_pct": 0.35,
+    "feat_pct": 0.19,
+    "fix_pct": 0.06,
+    "peak_hour": 15,
+    "focus_score": 0.35,
+    "ai_assisted_commits": 26,
+    "weighted_commits": 135
+  },
+  "authors": {
+    "InSuperposition": { "commits": 27, "insertions": 6330, "deletions": 978, "test_ratio": 0.15, "top_area": "(root)" },
+    "Forrest Galloway": { "commits": 4, "insertions": 0, "deletions": 0, "test_ratio": null, "top_area": "merges only (same operator, GitHub UI)" }
+  },
+  "streak_days": 2,
+  "tweetable": "Week of Aug 30: 31 commits (solo), 4.7k logical SLOC, 4 PRs merged, docs-heavy (35%), fix-ratio 6%, peak 3pm | Streak: 2d",
+  "test_health": {
+    "total_test_files": 8,
+    "tests_added_this_period": 8,
+    "regression_test_commits": 0,
+    "note": "metrics script TEST_FILES_TOTAL=0 is a detector gap — it does not recognise .bats / .tftest.hcl; real count is 5 bats + 3 tftest.hcl"
+  },
+  "backlog": {
+    "total_open": 12,
+    "p1": 3,
+    "p2": 5,
+    "p3": 4,
+    "completed_this_period": 4,
+    "note": "T4/T5/T5b/T6 shipped; unseal-key storage + scripts-policy audit added as P1 debt this period"
+  }
+}
