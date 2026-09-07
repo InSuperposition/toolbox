@@ -294,26 +294,42 @@ same time.
 
 **Priority:** P2 · **Depends on:** T7 (Phase 2) shipped.
 
-### T9 — bisect-safety CI gate + `mise run check` — P1
+### T9a — `mise run check` in CI — DONE (feat/ci-check-workflow)
 
-**What:** Wire `hk.pkl` as the git-hook gate (shellcheck, bats,
-lint/format per touched filetype) and expose the identical checks as
-`mise run check` for manual/CI use — one definition, two entry points. Add
-`scripts/check-history.sh` (rebuild-in-isolation per commit in a pushed
-range), invoked CI-side via `mise run check` (async — a full isolated
-rebuild per commit is too slow for a pre-push hook), wired as a required
-GitHub status check.
+**What:** `.github/workflows/check.yml` — every push and every PR to main
+runs `mise run check` (the hk `check` hook: shellcheck, pkl, tofu
+fmt/validate/test, cue fmt, ls-lint, ast-grep, bats, check-coverage). One
+definition (`hk.pkl`), two entry points. Report-only (no branch
+protection). Also fixed the one Linux portability break (`stat -f '%A'` →
+`tests/lib/assert.bash` `file_mode()`), made the `[docker]` bats cases
+CI-fatal instead of skip-on-no-docker, and added failure diagnostics
+(`bats --print-output-on-failure`, un-silenced docker fixtures).
 
-**Why:** there is currently **no automated lint/test gate at all** — every
-commit is `shellcheck` + `bats` + `tofu test` by hand. This is Phase 4 of
-the design and independent of Phases 1–3.
+**Branch protection — deliberately NOT added.** Solo repo: the only admin
+is the maintainer, so `enforce_admins=false` exempts every ordinary push
+(not just emergencies) and `enforce_admins=true` adds a recurring
+break-glass ritual the Operational Lifecycle Trace flags as a flaw. CI
+`check` stays advisory. **Revisit trigger:** a second committer joins the
+repo — then a PR-gated `required_status_checks` flow earns its keep.
 
-**Scope note:** the history gate proves *historical buildability* only
-("this commit's suite passed with the tool versions pinned at that
-commit") — it does not re-check today's CVE policy against old commits.
+### T9b — per-commit bisect-safety history gate — P2
 
-**Priority:** P1 (do before T7 adds more shell/YAML) · **Depends on:**
-nothing.
+**What:** `scripts/check-history.sh` — rebuild-in-isolation per commit in
+a pushed range (`git rev-list before..after`): dynamic matrix, per-commit
+`git worktree` + `mise install` + `mise run check`, an aggregate
+`needs`-all status job, a force-push range fallback (`before` unreachable
+→ tip only). Never an `hk` step / inside `mise run check` — it re-invokes
+`mise run check` per commit (recursion; CLAUDE.md no-cycle rule).
+
+**Why:** keeps `git bisect` clean — every landed commit, not just the push
+tip, has a green suite. Deferred from T9a: heavy for a solo dev pushing
+1–2 commits/push who already runs `mise run check` per phase by hand.
+
+**Scope note:** proves *historical buildability* only ("this commit's
+suite passed with the tool versions pinned at that commit") — it does not
+re-check today's CVE policy against old commits.
+
+**Priority:** P2 · **Depends on:** T9a shipped.
 
 ### T10 — VEX hardening — P3, post-T8
 
