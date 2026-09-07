@@ -12,81 +12,69 @@ No memorized secret, no recurring manual step. `pitchfork.toml`-rewrite and
 `fnox.toml`-rewrite hazards documented (F7/F8). `gh` token expiry is still
 open — folded into "Auth + multi-member DX".
 
-### Scripts-policy audit of the T5 / T5b shell — mostly ✅ DONE
+### Scripts-policy audit of the T5 / T5b shell — reduction pass — ✅ DONE
 
-Landed on `feat/openbao-machine-global-and-gate`: `hk.pkl` + `mise run
+Round 1 (`feat/openbao-machine-global-and-gate`): `hk.pkl` + `mise run
 check` gate (was missing entirely); `export-approval-pubkey.sh` deleted →
 one-line mise task; `openbao-preflight.sh` advice trimmed; `bootstrap` /
-`reset` simplified (no `fnox`, no `security`, atomic file writes). Remaining
-(P2, own pass): `consume.sh` readiness poll, `verify-approval.sh` cosign-
-stderr `case`, `run.sh` trap dance, `helper.bash` split. Original scope
-kept below for that pass.
+`reset` simplified (no `fnox`, no `security`, atomic file writes).
 
-### Scripts-policy audit of the T5 / T5b shell — P2, remaining reduction pass
+Round 2 (this eng-reviewed reduction pass — 3 pushes):
 
-**What:** Run `/plan-eng-review` (and `/office-hours` if it grows) on every
-shell file added for T5 / T5b, against CLAUDE.md's Scripts Policy ("Scripts
-are minimal, tested, and the last resort — never the first"; "Declarative
-first: check for an existing tool, then a `mise.toml` task, only then write
-a script").
+Eng-reviewed (+ Codex outside voice), 3 pushes on `main`, plan
+`~/.claude/plans/polymorphic-twirling-minsky.md`:
 
-**Why:** T5 / T5b landed leaning on scripts as the *first* tool, not the
-last. Some were pre-sanctioned by the design doc; several were not, and a
-few are heavier than "minimal". The build is working and tested, but the
-shell surface conflicts with this repo's stated goals and should be pared
-back deliberately, not left to accrete.
+- **Push 1** (`ebdaf92`) — `attestation-verify.sh`: deleted the
+  `case "$err" in` cosign-stderr classifier (a cosign bump would silently
+  reclassify a trust failure). One terminal "attestation verification
+  failed" line + cosign's own output to the log; cosign's
+  `--type/--check-claims/--digest` call unchanged (Codex: don't
+  re-implement it in jq). attestation-verify.bats 9→11.
+- **Push 2** (`813509b`) — `attestation-sign.sh` §7:
+  `cosign attest --no-upload --bundle` + `oras attach
+  --disable-path-validation --format go-template --template '{{.digest}}'`
+  → deterministic `ATT_DIGEST`; deleted the `oras discover` diff +
+  predicate-match candidate loop (~35 lines, net −21). `oras attach` sets
+  `artifactType` but not the `predicateType` annotation — nothing in-repo
+  reads it (consumer decodes the DSSE layer; ADR 0006).
+- **Push 3** — consistency only. `openbao-reset.sh` stale
+  `bootstrap-openbao.sh` comments → `openbao-bootstrap.sh`.
+  **Commit C (frontend readiness) was DROPPED:** the plan's premise
+  ("redundant poll, move to config") is wrong — pitchfork 2.24's `ready_*`
+  poll is UNBOUNDED (verified: a never-ready `ready_cmd` hangs `pitchfork
+  restart` forever), and `pitchfork restart --delay 0` + no daemon
+  readiness broke the happy-path [docker] deploy tests (container not
+  observed serving within the poll window). Current state — `ready_port =
+  44100` on the daemon + a 30s poll in `frontend-deploy.sh` — works and is
+  tested. Revisit only if the cv_frontend crash actually hangs a deploy in
+  practice (Remix likely binds the port then crashes on a request →
+  `ready_port` passes → the poll reports "did NOT come ready", no hang).
 
-**In scope, per file:**
-- `scripts/export-approval-pubkey.sh` (now `mise run export-approval-pubkey`,
-  a one-line task) — **was not in the design**, invented
-  during implementation. Its core job is one command (`cosign public-key
-  --key openbao://approval-key --outfile ...`). The `openbao://` →
-  `hashivault://` → `bao read | jq` fallback chain is unrequested
-  complexity. Candidate: a `mise` task one-liner; decide whether any
-  fallback is actually warranted (it is a design question, not an
-  implementation detail).
-- `attestation/scripts/openbao-preflight.sh` — moved out of `deploy/frontend/`
-  in Phase 4a; Phase 4c corrected the stale sealed-state advice, reordered
-  the init check before the seal check, and added `openbao-preflight.bats`
-  (5 states + healthy). The thin-as-possible reduction review still applies:
-  is `bao status -format=json` + one authed read the minimum?
-- `deploy/frontend/scripts/frontend-deploy.sh` — the design said "`mise run consume`
-  writes the new reference, then `pitchfork restart frontend`" (implying a
-  task). It became a 69-line script. The atomic write + real readiness poll
-  justify *some* script; check whether pitchfork's own `ready_port` +
-  `ready_delay` + a thin task covers it, and whether the readiness reporting
-  belongs in the script at all.
-- `attestation/scripts/attestation-verify.sh` — error classification is
-  done by **string-matching `cosign` stderr** (`*"invalid predicate
-  type"*`, `*"accepted signatures do not match threshold"*`, …). Fragile —
-  it depends on cosign's unversioned error text (Map-is-not-Territory).
-  Check whether `cosign` / `cue` expose distinguishable exit codes, or
-  `--output json`, that replace the grep.
-- `deploy/frontend/scripts/frontend-serve.sh` — design-named; retry/backoff/signal-traps are
-  genuine logic. Lightest-touch review: is the trap/child-process dance the
-  simplest correct shape, or does pitchfork have a supervised-`docker`
-  primitive?
-- the per-concern `scripts/tests/helper.bash` fixtures — check for
-  duplication across `attestation/` and `deploy/frontend/` (both now spin a
-  zot registry + cosign key via `tests/lib/registry.bash`). The
-  `deploy.bats` docker-path split is **done** (Phase 4b: `frontend-serve.bats`
-  / `frontend-deploy.bats`).
-- `attestation/scripts/attestation-sign.sh` — design's one sanctioned
-  "real-logic" script. Lightest review: only that it has not absorbed
-  responsibilities that belong elsewhere.
+**KEPT (rejected reductions):** `openbao-preflight.sh` (5-state floor,
+reviewed 4c), `attestation-sign.sh` orchestration, `frontend-serve.sh` (the
+`docker run &` + trap dance IS the documented-correct shape — pitchfork
+`exec docker run` orphans the container), `openbao-{reset,snapshot}.sh`,
+`check-coverage.sh`, the `sign_image`/`run_sign` 6-line overlap (`tests/lib`
+can't name a concern — `boundary-testlib-concern-ref`), the `TOOLBOX_*`
+seams.
 
-**Also decide:** whether the `TOOLBOX_*` env test-seams
-(`TOOLBOX_APPROVE_KEY`, `TOOLBOX_APPROVAL_PUBKEY`, `TOOLBOX_APPROVED_BY`,
-`TOOLBOX_FRONTEND_VERIFY_ATTEMPTS`, `TOOLBOX_CONSUME_READY_TIMEOUT`) are the
-right seam or a smell.
+### `openbao-bootstrap.sh` has no OpenBao-identity guard — P3
 
-**Constraint:** T5 / T5b are merged and tested — this is a *reduction*
-pass, behavior-preserving, with the bats matrix as the regression net. Not
-a rewrite.
+**What:** `openbao-bootstrap.sh:101` — `bao status -format=json | jq -e
+'.initialized == true'` treats ANY initialised `bao` on `$LISTEN` as ours.
+A foreign `bao server` on `:8200` → the 2nd `tofu apply` + pubkey export
+run against the wrong instance.
 
-**Effort:** planning ~1 session; implementation ~0.5–1d
-**Priority:** P1 (do before T7, which adds a lot more YAML/shell)
-**Depends on:** nothing — the merged state is the input.
+**Why:** silent wrong-instance operation. Mostly closed by the
+machine-global daemon design (ADR 0010) — one `bao` per machine — so low
+probability, but a cheap guard belongs on the next bootstrap touch.
+Historical instance: the `toolbox-sealed-8200-stale-worktree` bug (a stale
+sibling-worktree daemon).
+
+**Fix:** compare `cluster_id` / check `$STATE_DIR/data` exists before
+trusting "initialised" and skipping init.
+
+**Depends on:** nothing. Surfaced by the reduction-pass eng review.
 
 ## Infrastructure
 
