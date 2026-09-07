@@ -98,7 +98,23 @@ else
 fi
 
 if bao status -format=json 2>/dev/null | jq -e '.initialized == true' >/dev/null 2>&1; then
-  echo "==> Already initialized -- run scripts/reset-openbao.sh first to start fresh"
+  # An initialised bao answers on $LISTEN. Confirm it is OURS before
+  # skipping init: our root.token must authenticate against it. A foreign
+  # `bao server` on this address, or a stale per-worktree daemon (the
+  # toolbox-sealed-8200-stale-worktree bug), fails this and we stop rather
+  # than run the 2nd `tofu apply` + pubkey export against the wrong instance.
+  if [ -s "$STATE_DIR/root.token" ] &&
+    VAULT_TOKEN="$(cat "$STATE_DIR/root.token")" bao token lookup >/dev/null 2>&1; then
+    echo "==> Already initialized -- run 'mise run local:openbao:reset' first to start fresh"
+  else
+    {
+      echo "ERROR: a bao server is initialised on $LISTEN but it is not the toolbox daemon --"
+      echo "  $STATE_DIR/root.token is missing or does not authenticate against it."
+      echo "  Likely a foreign 'bao server' on $LISTEN or a stale per-worktree daemon."
+      echo "  Inspect:  pitchfork list   ps aux | grep '[b]ao server'"
+    } >&2
+    exit 1
+  fi
 else
   echo "==> Initializing (static seal auto-unseals; single recovery share -- solo dev daemon)"
   init_json=$(bao operator init -recovery-shares=1 -recovery-threshold=1 -format=json)

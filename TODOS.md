@@ -58,23 +58,22 @@ reviewed 4c), `attestation-sign.sh` orchestration, `frontend-serve.sh` (the
 can't name a concern — `boundary-testlib-concern-ref`), the `TOOLBOX_*`
 seams.
 
-### `openbao-bootstrap.sh` has no OpenBao-identity guard — P3
+### `openbao-bootstrap.sh` OpenBao-identity guard — ✅ DONE (fix/openbao-identity-guard)
 
-**What:** `openbao-bootstrap.sh:101` — `bao status -format=json | jq -e
-'.initialized == true'` treats ANY initialised `bao` on `$LISTEN` as ours.
-A foreign `bao server` on `:8200` → the 2nd `tofu apply` + pubkey export
-run against the wrong instance.
+**Was:** `openbao-bootstrap.sh` `bao status … '.initialized == true'`
+treated ANY initialised `bao` on `$LISTEN` as ours → a foreign
+`bao server` on `:8200`, or a stale per-worktree daemon
+(`toolbox-sealed-8200-stale-worktree`), got the 2nd `tofu apply` + pubkey
+export.
 
-**Why:** silent wrong-instance operation. Mostly closed by the
-machine-global daemon design (ADR 0010) — one `bao` per machine — so low
-probability, but a cheap guard belongs on the next bootstrap touch.
-Historical instance: the `toolbox-sealed-8200-stale-worktree` bug (a stale
-sibling-worktree daemon).
-
-**Fix:** compare `cluster_id` / check `$STATE_DIR/data` exists before
-trusting "initialised" and skipping init.
-
-**Depends on:** nothing. Surfaced by the reduction-pass eng review.
+**Fix:** before skipping init on `initialized == true`, require
+`$STATE_DIR/root.token` to authenticate against the running instance
+(`bao token lookup`). Miss → `exit 1` naming the likely cause, with
+`pitchfork list` / `ps aux | grep '[b]ao server'` hints. Negative-space:
+no new state file, no `cluster_id` fingerprint — reuses `root.token`,
+which must be valid for the rest of the script anyway. New bats case
+(openbao-bootstrap.bats 8→9): garbage `root.token` post-init → exit 1, no
+Transit provisioning.
 
 ## Infrastructure
 
