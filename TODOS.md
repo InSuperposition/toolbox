@@ -260,11 +260,17 @@ re-cut the whole arc around a **composable `ci/` concern** and
   timestamp reproducibility).
 
 **T7a — rootless BuildKit feasibility spike, then the `ci/` concern.**
-_Prove first._ Step 1: smallest hand-applied rootless daemonless BuildKit
-TaskRun on `orb start k8s`, 6-point verification (Succeeded, strict
-`sha256:` result, `oras` manifest + arm64 config, `docker pull` works, pod
-has no `privileged`/`SYS_ADMIN`, broken-build writes no result). Disposable.
-Step 2 (only if it passes): extract to `ci/tasks/buildkit-build.yaml` +
+_Prove first._ **Step 1 ✓ PASSED 2026-09-08** — daemonless rootless BuildKit
+built `cv_frontend` in-cluster (orb k8s v1.35.6, Tekton Pipelines v1.6.0)
+and pushed `linux/arm64` by digest to GHCR; `docker pull` of that digest
+verified. Minimum pod posture: `runAsUser 1000`, `seccomp: Unconfined`,
+`allowPrivilegeEscalation: true` (file-cap `newuidmap`), `caps drop [ALL]
+add [SETUID,SETGID]`, `BUILDKITD_FLAGS=--oci-worker-no-process-sandbox`
+(required). NOT privileged, no `SYS_ADMIN`; `hostUsers: false` unavailable
+(Tekton `podTemplate` has no such field). Full result + proven Task config
+in `~/.claude/plans/t7a-buildkit-in-cluster-proof.md` § "Step 1 — SPIKE
+RESULT". Tekton v1.6.0 kept for Step 2.
+Step 2 (now unblocked): extract to `ci/tasks/buildkit-build.yaml` +
 `ci/runtime/namespace.yaml` (no RBAC, `automountServiceAccountToken: false`)
 + `ci/scripts/ci-taskrun.sh` + bats/chainsaw + `local:tekton:install` mise
 task + machine-global `orb-k8s` pitchfork daemon (ADR 0010 consistency) +

@@ -218,8 +218,8 @@ independently (Gall's Law). The full sequencing lives in `TODOS.md`.
   `mise run local:openbao:snapshot` / `local:openbao:snapshot-restore` for backup.
   Registry is **GHCR** — hosted, zero-ops, unmetered on public repos.
 
-- **Phase 2 — Tekton (deferred, T7a–T7d — planned 2026-09-08).** Move the
-  build/scan/attach path into reusable Tekton Tasks + a Pipeline on
+- **Phase 2 — Tekton (T7a–T7d — planned 2026-09-08; T7a spike ✓ 2026-09-08).**
+  Move the build/scan/attach path into reusable Tekton Tasks + a Pipeline on
   `orb start k8s` ([ADR 0003](../adr/0003-tekton-pipelines-on-orbstack-k8s.md)),
   packaged as **digest-pinned OCI bundles** in the `ci/` concern
   ([ADR 0014](../adr/0014-tekton-defs-are-oci-bundles-in-ci.md)). Builder is
@@ -230,6 +230,31 @@ independently (Gall's Law). The full sequencing lives in `TODOS.md`.
   digest pins, kubeconform + chainsaw harness; retires
   `build-cv-frontend.yml`. **T7c** — local Flux reconciles `ci/**` +
   `environments/local/`. **T7d** — GHCR → `zot`. Full detail in `TODOS.md`.
+
+  **T7a Step 1 spike result (2026-09-08, orb k8s v1.35.6, Tekton Pipelines
+  v1.6.0):** daemonless rootless BuildKit built `cv_frontend` in-cluster and
+  pushed `linux/arm64` by digest to GHCR (`docker pull` of that digest
+  verified, config `arch=arm64`). The four answers:
+  1. **Rootless viability** — works, no privileged pod. Minimum pod posture:
+     `runAsUser/Group: 1000`, `runAsNonRoot: true`,
+     `seccompProfile: {type: Unconfined}`, `allowPrivilegeEscalation: true`
+     (setuid-less `newuidmap` uses **file capabilities**, so `no_new_privs`
+     must be OFF), `capabilities: {drop: [ALL], add: [SETUID, SETGID]}` (both
+     must stay in the bounding set for `newuidmap`/`newgidmap`), and
+     `BUILDKITD_FLAGS=--oci-worker-no-process-sandbox` (**required** — without
+     it the dockerfile-frontend step fails to solve; k8s user-namespaces
+     `hostUsers: false` is **not** an option because Tekton's `podTemplate`
+     does not expose it).
+  2. **In-cluster GHCR push** — the `gh auth token` interim credential works,
+     wired as a `docker-registry` Secret and copied to
+     `$DOCKER_CONFIG/config.json` inside the step.
+  3. **Pod privilege posture** — **no** `privileged`, **no** `CAP_SYS_ADMIN`,
+     **no** `CAP_SYS_PTRACE`. The residual surface is `SETUID`/`SETGID` +
+     `allowPrivilegeEscalation` + `seccomp: Unconfined` + the
+     no-process-sandbox flag (host-PID-namespace exposure inside the build
+     pod). Blast radius: the single-user OrbStack VM.
+  4. **Digest** — recorded; cross-builder parity vs the Phase-1 GHA build is
+     not a gate (GHA retires end of T7b); byte reproducibility is T8.
 
 - **Phase 3 — Tekton Chains (T8).** Install Chains; a second OpenBao Transit
   key (`chains-provenance-key`) with an access policy denying it
