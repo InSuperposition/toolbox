@@ -1,0 +1,25 @@
+# Test-suite coverage manifest — tests/check-coverage.sh diffs the live
+# tree, this file, and what hk schedules; a mismatch fails `mise run check`.
+#
+# Update this deliberately whenever a suite is added, removed, moved, or
+# changes case count. That is the point: a silent drop should NOT be
+# possible without an explicit edit here.
+#
+# Format:  <kind>  <repo-relative path>  <case count>
+#   kind  = bats | tftest
+#   cases = `bats --count <f>` for bats; `run` blocks for a .tftest.hcl
+#           (docker-gated bats cases are counted here too — they skip at
+#           runtime without docker, they do not vanish from the count)
+
+bats    deploy/frontend/scripts/tests/approve.bats          10
+bats    deploy/frontend/scripts/tests/deploy.bats           9    # 3 [docker] cases skip without docker
+bats    deploy/frontend/scripts/tests/verify-approval.bats  9
+bats    environments/local/tests/bootstrap.bats             8
+bats    environments/local/tests/mise-env.bats              3
+bats    environments/local/tests/reset-openbao.bats         3
+bats    environments/local/tests/snapshot.bats              3
+bats    tests/check-coverage.bats                           3
+
+tftest  modules/secret-openbao-local/tests/config_render.tftest.hcl  4
+tftest  modules/secret-openbao-local/tests/keys.tftest.hcl           3
+tftest  modules/secret-openbao-local/tests/policies.tftest.hcl       2

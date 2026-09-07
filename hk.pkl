@@ -59,11 +59,24 @@ local fast = new Mapping<String, Step> {
 }
 
 /// Offline correctness. pre-push and check.
+///
+/// `tofu-init` is an ordered PREREQUISITE of tofu-validate and tofu-test
+/// (CX #8), not a parallel sibling: `tofu validate` needs an initialised
+/// workspace, and an unordered init racing the validate/test steps under
+/// hk corrupts `.terraform/`. `depends` serialises it; `-backend=false`
+/// keeps it offline.
 local validate = new Mapping<String, Step> {
+  ["tofu-init"] {
+    glob = List("**/*.tf", "**/*.tftest.hcl")
+    check = "tofu -chdir={{workspace}} init -backend=false -input=false"
+    workspace_indicator = "versions.tf"
+    exclusive = true
+  }
   ["tofu-validate"] {
     glob = List("**/*.tf")
     check = "tofu -chdir={{workspace}} validate"
     workspace_indicator = "versions.tf"
+    depends = "tofu-init"
   }
 }
 
@@ -73,11 +86,21 @@ local heavy = new Mapping<String, Step> {
     glob = List("modules/**/*.tf", "modules/**/*.tftest.hcl")
     check = "tofu -chdir={{workspace}} test"
     workspace_indicator = "versions.tf"
+    depends = "tofu-init"
   }
   ["bats"] {
     // *.bash (helper.bash) is a fixture, not a suite - excluded
     glob = List("**/tests/*.bats")
     check = "bats {{files}}"
+  }
+  // Silent-coverage-drop guard (F5). Diffs the suites on disk, the
+  // committed tests/manifest.txt, and what hk schedules — a mismatch fails
+  // the gate. Runs last: it reads `hk check --plan`, it does not re-run
+  // the suites.
+  ["check-coverage"] {
+    glob = List("**/tests/*.bats", "**/*.tftest.hcl", "hk.pkl", "tests/manifest.txt", "tests/check-coverage.sh")
+    depends = List("bats", "tofu-test")
+    check = "./tests/check-coverage.sh"
   }
 }
 

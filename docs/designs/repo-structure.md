@@ -150,9 +150,9 @@ toolbox/
 ├── sgconfig.yml  rules/boundary-*.yml                dependency edges, ast-grep (Phase 1a)
 │
 ├── tests/                                            repo-level shared test support (leaf)
-│   ├── check-coverage.sh                             parses `hk check --format jsonl`, diffs scheduled
-│   │                                                 steps + case counts vs manifest.txt      (Phase 1c)
-│   ├── manifest.txt                                  committed: every suite + its expected case count (Phase 1c)
+│   ├── check-coverage.sh                             diffs suites on disk vs manifest.txt vs `hk … --plan`  (Phase 1c)
+│   ├── check-coverage.bats                           mutation tests for the guard itself                    (Phase 1c)
+│   ├── manifest.txt                                  committed: every suite (bats + tftest) + its case count (Phase 1c)
 │   └── lib/                                          each <concern>/scripts/tests/helper.bash sources these
 │       ├── scratch.bash        toolbox_repo_root + scratch_copy — caller names the paths to copy (Phase 1b)
 │       ├── registry.bash       free_port + a throwaway zot registry / cosign key / fake image (Phase 1b)
@@ -224,13 +224,15 @@ toolbox/
 
 ## Enforcement
 
-Two `hk` fast-layer steps, both covered by `mise run check`:
+`hk` steps, all covered by `mise run check`. `ls-lint` + `ast-grep` are in
+the `fast` layer (pre-commit); `check-coverage.sh` runs last in the `check`
+hook only.
 
 | tool | job | how |
 |---|---|---|
 | `ls-lint` (`aqua:loeffel-io/ls-lint`; the `hk` `ls_lint` builtin drives the binary) | structure + naming | `.ls-lint.yml`: `.dir` is `kebab-case`; the `.sh` **stem** matches `^[a-z]+(-[a-z]+)+$` (`<domain>-<verb>`, no `\.sh` in the pattern) |
 | `ast-grep` (`aqua:ast-grep/ast-grep`) | forbidden-edge **lint** | `sgconfig.yml` + `rules/boundary-*.yml`: **shell only** — a literal `deploy/` path in a script upstream of `deploy/`; a `../` climb two-or-more levels or into a named sibling concern; a concern-directory name inside `tests/lib/*.bash` |
-| `tests/check-coverage.sh` (Phase 1c) | `scripts/`↔`tests/` pairing + suite scheduling | not ls-lint — a script; see § Testing in CLAUDE.md |
+| `tests/check-coverage.sh` (Phase 1c, own `hk` step, `check` hook, runs last) | silent-coverage-drop guard | diffs three views: suites found on disk (its own `find`), `tests/manifest.txt` (committed path + case count), and what `hk check --all --plan --json` schedules. A mismatch fails the gate. `tests/check-coverage.bats` mutation-tests it. |
 
 Each phase's `.ls-lint.yml` and `rules/` describe the **then-current** tree.
 A temporary exception (a pre-restructure name or a not-yet-fixed edge) is
@@ -263,8 +265,9 @@ lands, the affected files stay at their pre-restructure paths:
 |---|---|---|
 | 0 | this doc + CLAUDE.md rule + 2 ADRs — no code | done |
 | 1a | pin `ls-lint` + `ast-grep`; `.ls-lint.yml` + `sgconfig.yml` + `rules/` for the **current** tree; both wired into `hk.pkl` fast layer | done |
-| 1b | `tests/lib/{scratch,registry}.bash`; `deploy/frontend/tests/` → `deploy/frontend/scripts/tests/` | ← you are here |
-| 1c–1d | coverage guard, parallel-safe isolation | pending |
+| 1b | `tests/lib/{scratch,registry}.bash`; `deploy/frontend/tests/` → `deploy/frontend/scripts/tests/` | done |
+| 1c | `tests/check-coverage.sh` + `manifest.txt` + mutation test; `tofu-init` ordered prereq in `hk.pkl` | ← you are here |
+| 1d | parallel-safe test isolation (per-run ports + container names) | pending |
 | 2 | local-OpenBao → `environments/local/{openbao,scripts}/`; root `scripts/` emptied; `modules/` → README only | pending |
 | 3 | mise task namespacing | pending |
 | 4 | `attestation/` split out of `deploy/frontend/` (one PR) | pending |

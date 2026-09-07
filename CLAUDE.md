@@ -228,11 +228,12 @@ registry, later port allocation and assertions) live in repo-level
 `tests/lib/*.bash`. Each `scripts/tests/` has a `helper.bash` that walks up
 to the checkout root (`mise.toml` marker) and sources them; a `.bats` file
 reaches the lib with `load helper` — no `BATS_LIB_PATH`, no mise `[env]`
-coupling. `tests/check-coverage.sh` (its own `hk` step, Phase 1c) parses
-`hk check --format jsonl` and diffs the suites `hk` actually scheduled +
-their case counts against a committed `tests/manifest.txt` — so an `hk`
-glob edit that silently drops a suite fails the gate. Full spec:
-`docs/designs/repo-structure.md`.
+coupling. `tests/check-coverage.sh` (its own `hk` step, runs last in the `check`
+hook) diffs three views — the suites it finds on disk, the committed
+`tests/manifest.txt` (path + case count), and what `hk check --all --plan
+--json` schedules — so an `hk` glob edit or a moved test file that
+silently drops a suite fails the gate. `tests/check-coverage.bats`
+mutation-tests the guard. Full spec: `docs/designs/repo-structure.md`.
 
 Harness prerequisites (isolated test cluster, rendered-manifest source, CRD
 schema fetch for kubeconform, controllers/policies installed + readiness
