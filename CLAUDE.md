@@ -223,13 +223,16 @@ non-overlapping claim:
 | Shell scripts | bats | Every script gets one, in `<concern>/scripts/tests/*.bats` beside the script. |
 
 Layout: each concern's `.bats` live in `scripts/tests/` next to the scripts
-they cover. Shared bats primitives (scratch dir, assertions, port
-allocation, fake registry) live in repo-level `tests/lib/*.bash`, loaded
-bats-native via `tests/setup_suite.bash`. `tests/check-coverage.sh` (its
-own `hk` step) parses `hk check --format jsonl` and diffs the suites `hk`
-actually scheduled + their case counts against a committed
-`tests/manifest.txt` — so an `hk` glob edit that silently drops a suite
-fails the gate. Full spec: `docs/designs/repo-structure.md`.
+they cover. Shared bats primitives (scratch-dir copy, a throwaway zot
+registry, later port allocation and assertions) live in repo-level
+`tests/lib/*.bash`. Each `scripts/tests/` has a `helper.bash` that walks up
+to the checkout root (`mise.toml` marker) and sources them; a `.bats` file
+reaches the lib with `load helper` — no `BATS_LIB_PATH`, no mise `[env]`
+coupling. `tests/check-coverage.sh` (its own `hk` step, Phase 1c) parses
+`hk check --format jsonl` and diffs the suites `hk` actually scheduled +
+their case counts against a committed `tests/manifest.txt` — so an `hk`
+glob edit that silently drops a suite fails the gate. Full spec:
+`docs/designs/repo-structure.md`.
 
 Harness prerequisites (isolated test cluster, rendered-manifest source, CRD
 schema fetch for kubeconform, controllers/policies installed + readiness

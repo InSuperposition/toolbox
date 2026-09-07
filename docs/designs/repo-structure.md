@@ -88,7 +88,7 @@ Runtime-only edges (env vars / mise-task calls, not file paths — allowed, not 
 
 | concern | owns | may depend on |
 |---|---|---|
-| `tests/` | repo-level shared test support (`lib/`, `setup_suite.bash`, the coverage guard) | nothing — leaf; concern-agnostic (helpers take paths as args) |
+| `tests/` | repo-level shared test support (`lib/`, the coverage guard) | nothing — leaf; concern-agnostic (helpers take paths as args) |
 | `attestation/` | the sign + verify + preflight seam, `verdict-approved.cue`, `cosign-approval.pub` | `tests/lib` |
 | `deploy/frontend/` | one consumer of an approved image: build, deploy, serve | `attestation` (the verify seam, via env), `tests/lib` |
 | `environments/local/` | one deployment target: the tofu composition, the orchestration scripts that bring its units up | its own `openbao/` unit, `tests/lib`; calls `attestation:export-pubkey` as a task |
@@ -104,6 +104,12 @@ Runtime-only edges (env vars / mise-task calls, not file paths — allowed, not 
 - **Directories:** kebab-case.
 - **Tests:** `<concern>/scripts/tests/*.bats`, beside the scripts. The tofu
   unit keeps `<unit>/tests/*.tftest.hcl`.
+- **Shared test lib:** each `<concern>/scripts/tests/` has a `helper.bash`
+  that walks up to the checkout root (the `mise.toml` marker — no fixed
+  depth, no `BATS_LIB_PATH`, no `setup_suite.bash` discovery, no mise
+  `[env]` coupling — F2) and sources the repo-level `tests/lib/*.bash`.
+  A `.bats` file reaches the lib with the standard `load helper`. Anything
+  concern-specific stays in that same `helper.bash`.
 - **Runtime shared shell:** `<concern>/scripts/lib/<domain>.sh` —
   self-contained, no repo-level runtime lib. The `SCRIPT_DIR` / `REPO_ROOT`
   idiom stays inline (standard bash, not domain logic).
@@ -144,15 +150,14 @@ toolbox/
 ├── sgconfig.yml  rules/boundary-*.yml                dependency edges, ast-grep (Phase 1a)
 │
 ├── tests/                                            repo-level shared test support (leaf)
-│   ├── setup_suite.bash                              bats-native — exposes load_lib
 │   ├── check-coverage.sh                             parses `hk check --format jsonl`, diffs scheduled
-│   │                                                 steps + case counts vs manifest.txt
-│   ├── manifest.txt                                  committed: every suite + its expected case count
-│   └── lib/
-│       ├── scratch.bash        scratch dir; caller passes which concern paths to copy
-│       ├── assert.bash         assert_success / assert_exit / assert_file_mode …
-│       ├── ports.bash          allocate a free host port; host ≠ container mapping
-│       └── registry.bash       spin a local zot / fake registry
+│   │                                                 steps + case counts vs manifest.txt      (Phase 1c)
+│   ├── manifest.txt                                  committed: every suite + its expected case count (Phase 1c)
+│   └── lib/                                          each <concern>/scripts/tests/helper.bash sources these
+│       ├── scratch.bash        toolbox_repo_root + scratch_copy — caller names the paths to copy (Phase 1b)
+│       ├── registry.bash       free_port + a throwaway zot registry / cosign key / fake image (Phase 1b)
+│       ├── assert.bash         assert_exit / assert_file_mode … — added when a suite first needs it
+│       └── ports.bash          allocate a free host port; host ≠ container mapping             (Phase 1d)
 │
 ├── attestation/                                      consumer-agnostic sign + verify seam
 │   ├── verdict-approved.cue
@@ -224,7 +229,7 @@ Two `hk` fast-layer steps, both covered by `mise run check`:
 | tool | job | how |
 |---|---|---|
 | `ls-lint` (`aqua:loeffel-io/ls-lint`; the `hk` `ls_lint` builtin drives the binary) | structure + naming | `.ls-lint.yml`: `.dir` is `kebab-case`; the `.sh` **stem** matches `^[a-z]+(-[a-z]+)+$` (`<domain>-<verb>`, no `\.sh` in the pattern) |
-| `ast-grep` (`aqua:ast-grep/ast-grep`) | forbidden-edge **lint** | `sgconfig.yml` + `rules/boundary-*.yml`: **shell only** — error on a literal `deploy/` path in a script upstream of `deploy/`, and on a `../` climb two-or-more levels or into a named sibling concern |
+| `ast-grep` (`aqua:ast-grep/ast-grep`) | forbidden-edge **lint** | `sgconfig.yml` + `rules/boundary-*.yml`: **shell only** — a literal `deploy/` path in a script upstream of `deploy/`; a `../` climb two-or-more levels or into a named sibling concern; a concern-directory name inside `tests/lib/*.bash` |
 | `tests/check-coverage.sh` (Phase 1c) | `scripts/`↔`tests/` pairing + suite scheduling | not ls-lint — a script; see § Testing in CLAUDE.md |
 
 Each phase's `.ls-lint.yml` and `rules/` describe the **then-current** tree.
@@ -257,8 +262,9 @@ lands, the affected files stay at their pre-restructure paths:
 | phase | moves | status |
 |---|---|---|
 | 0 | this doc + CLAUDE.md rule + 2 ADRs — no code | done |
-| 1a | pin `ls-lint` + `ast-grep`; `.ls-lint.yml` + `sgconfig.yml` + `rules/` for the **current** tree; both wired into `hk.pkl` fast layer | ← you are here |
-| 1b–1d | `tests/lib/`, co-locate `deploy/frontend/tests/`, coverage guard, parallel-safe isolation | pending |
+| 1a | pin `ls-lint` + `ast-grep`; `.ls-lint.yml` + `sgconfig.yml` + `rules/` for the **current** tree; both wired into `hk.pkl` fast layer | done |
+| 1b | `tests/lib/{scratch,registry}.bash`; `deploy/frontend/tests/` → `deploy/frontend/scripts/tests/` | ← you are here |
+| 1c–1d | coverage guard, parallel-safe isolation | pending |
 | 2 | local-OpenBao → `environments/local/{openbao,scripts}/`; root `scripts/` emptied; `modules/` → README only | pending |
 | 3 | mise task namespacing | pending |
 | 4 | `attestation/` split out of `deploy/frontend/` (one PR) | pending |

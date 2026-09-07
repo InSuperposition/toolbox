@@ -101,13 +101,22 @@ duplicate detail.
 |---|---|---|---|
 | T1 | 0 | `repo-structure.md` + CLAUDE.md § File Placement + ADR 0012/0013 — no code | ✅ done |
 | T2a | 1a | pin `ls-lint` (`aqua:loeffel-io/ls-lint`) + `ast-grep` (`aqua:ast-grep/ast-grep`); `.ls-lint.yml` + `sgconfig.yml` + `rules/boundary-*.yml` for the **current** tree; wire both into `hk.pkl` fast layer | ✅ done |
-| T2b | 1b | `tests/lib/{scratch,assert,registry}.bash` + `tests/setup_suite.bash` + `load_lib`; move `deploy/frontend/tests/` → `scripts/tests/` | pending |
+| T2b | 1b | `tests/lib/{scratch,registry}.bash`; per-`tests/`-dir `helper.bash` loader (F2 resolved simpler — no `setup_suite.bash` / `BATS_LIB_PATH`); `deploy/frontend/tests/` → `deploy/frontend/scripts/tests/` | ✅ done |
 | T2c | 1c | `tests/check-coverage.sh` + `tests/manifest.txt` (parse `hk check --format jsonl`); `tofu init` as an ordered prereq in `hk.pkl`; clean-checkout validation | pending |
 | T2d | 1d | parallel-safe test isolation — per-run host port + container-name seams; scope `deploy.bats` + `bootstrap.bats:41` cleanup | pending |
 | T3 | 2 | OpenBao `git mv` → `environments/local/{openbao,scripts}/`, `source = "./openbao"` (label kept), `lib/openbao.sh` + `openbao-snapshot.sh` extracted, widen `hk` tofu globs to `environments/**`, `modules/README.md` | pending |
 | T4 | 3 | rename all mise tasks `<env>:<domain>:<verb>` / `<domain>:<verb>`; grep-rewrite every `mise run <old>` reference | pending |
 | T5a–d | 4 | **ONE PR** — extract `attestation/`; split `deploy/frontend/` (`frontend-deploy.sh` / `frontend-serve.sh` + `TOOLBOX_ATTESTATION_VERIFY` seam); `openbao-preflight.bats` **5-state** + fix its stale sealed-state advice; cut `cosign-approval.pub` over via `mise run attestation:export-pubkey` | pending |
 | T6 | 5 | docs-accuracy sweep — every `.md` re-verified against the moved code | pending |
+
+**Phase 1b carry-overs** (not blockers):
+
+- `environments/local/tests/*.bats` keep their inline `mkdir`+`cp -r`
+  scratch blocks. They adopt `tests/lib/scratch.bash`'s `scratch_copy`
+  in **Phase 2**, when `git mv` moves the dir to
+  `environments/local/scripts/tests/` anyway.
+- `tests/lib/assert.bash` not created yet — added when a suite first needs
+  a structured assertion. Existing `[ "$status" -eq N ]` checks stay.
 
 **Phase 1a temporary lint exceptions** (CX5 — each carries its removal
 phase in the rule/config file):

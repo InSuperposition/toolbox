@@ -9,7 +9,7 @@
 setup_file() {
 	load helper
 	export FIX_FILE="$(mktemp -d)"
-	export SCRIPTS="$(cd "$BATS_TEST_DIRNAME/../scripts" && pwd)"
+	export SCRIPTS="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
 	start_registry "$FIX_FILE"
 	export REG
 	make_key "$FIX_FILE"

@@ -1,0 +1,16 @@
+id: boundary-testlib-concern-ref
+language: bash
+severity: error
+message: >-
+  tests/lib is a leaf — it must not name a concern directory. A shared test
+  helper stays concern-agnostic: the caller passes the paths to copy as
+  arguments (CX #3). See docs/designs/repo-structure.md § The concerns.
+files:
+  - "tests/lib/**/*.bash"
+rule:
+  all:
+    - regex: "(^|/)(deploy|attestation|environments|modules)/"
+    - any:
+        - { kind: string_content }
+        - { kind: word }
+        - { kind: raw_string }

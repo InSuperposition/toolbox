@@ -11,8 +11,8 @@
 setup() {
 	load helper
 	FIX="$(mktemp -d)"
-	SCRIPTS="$(cd "$BATS_TEST_DIRNAME/../scripts" && pwd)"
-	FRONTEND="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+	SCRIPTS="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
+	FRONTEND="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
 }
 
 teardown() {

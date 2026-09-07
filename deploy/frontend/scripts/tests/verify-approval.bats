@@ -9,7 +9,7 @@
 setup() {
 	load helper
 	FIX="$(mktemp -d)"
-	SCRIPTS="$(cd "$BATS_TEST_DIRNAME/../scripts" && pwd)"
+	SCRIPTS="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
 	start_registry "$FIX"
 	make_key "$FIX"
 	export TOOLBOX_APPROVAL_PUBKEY="$FIX/cosign.pub"
