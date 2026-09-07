@@ -19,7 +19,12 @@ locals {
 }
 
 module "secret_openbao_local" {
-  source = "../../modules/secret-openbao-local" # environments/local/ -> environments/ -> repo root -> modules/
+  # The local-OpenBao tofu unit is owned by this environment, not published
+  # (ADR 0012). The module LABEL stays `secret_openbao_local` so the tofu
+  # state addresses (module.secret_openbao_local.*) do not churn on the
+  # move — the Phase 2 verification is an in-place upgrade, not a
+  # destroy/recreate (C1).
+  source = "./openbao"
 
   transit_keys = [
     { name = "approval-key", type = "ecdsa-p256" },

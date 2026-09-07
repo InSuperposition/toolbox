@@ -15,6 +15,11 @@ ls:
   # The stem is matched — the pattern carries no `\.sh` (repo-structure.md).
   .sh: regex:^[a-z]+(-[a-z]+)+$
 
+  # A runtime shared-shell lib is <domain>.sh (scripts/lib/openbao.sh) —
+  # not <verb>-bearing. Allow a single lowercase word there.
+  "**/scripts/lib":
+    .sh: regex:^[a-z]+(-[a-z]+)*$
+
 ignore:
   - .git
   - .github

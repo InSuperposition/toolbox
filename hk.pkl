@@ -83,7 +83,11 @@ local validate = new Mapping<String, Step> {
 /// The full matrix. `hk check` / `mise run check` only - starts real daemons.
 local heavy = new Mapping<String, Step> {
   ["tofu-test"] {
-    glob = List("modules/**/*.tf", "modules/**/*.tftest.hcl")
+    // modules/** for a future published module; environments/** for the
+    // in-repo units (the local-OpenBao unit moved here in Phase 2, ADR
+    // 0012). `workspace_indicator` scopes each run to one versions.tf dir;
+    // `tofu test` in a dir with no tests/ is a clean 0-pass no-op.
+    glob = List("modules/**/*.tf", "modules/**/*.tftest.hcl", "environments/**/*.tf", "environments/**/*.tftest.hcl")
     check = "tofu -chdir={{workspace}} test"
     workspace_indicator = "versions.tf"
     depends = "tofu-init"

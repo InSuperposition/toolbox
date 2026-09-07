@@ -37,13 +37,17 @@ shell surface conflicts with this repo's stated goals and should be pared
 back deliberately, not left to accrete.
 
 **In scope, per file:**
-- `scripts/export-approval-pubkey.sh` — **not in the design**, invented
+- `scripts/export-approval-pubkey.sh` (now `mise run export-approval-pubkey`,
+  a one-line task) — **was not in the design**, invented
   during implementation. Its core job is one command (`cosign public-key
   --key openbao://approval-key --outfile ...`). The `openbao://` →
   `hashivault://` → `bao read | jq` fallback chain is unrequested
   complexity. Candidate: a `mise` task one-liner; decide whether any
   fallback is actually warranted (it is a design question, not an
   implementation detail).
+- `deploy/frontend/scripts/openbao-preflight.sh` — moves to `attestation/`
+  in Phase 4c (which also corrects its stale sealed-state advice + adds a
+  5th state); the reduction review folds into that.
 - `deploy/frontend/scripts/consume.sh` — the design said "`mise run consume`
   writes the new reference, then `pitchfork restart frontend`" (implying a
   task). It became a 69-line script. The atomic write + real readiness poll
@@ -104,19 +108,16 @@ duplicate detail.
 | T2b | 1b | `tests/lib/{scratch,registry}.bash`; per-`tests/`-dir `helper.bash` loader (F2 resolved simpler — no `setup_suite.bash` / `BATS_LIB_PATH`); `deploy/frontend/tests/` → `deploy/frontend/scripts/tests/` | ✅ done |
 | T2c | 1c | `tests/check-coverage.sh` (disk vs `manifest.txt` vs `hk … --plan --json`) + `tests/check-coverage.bats` mutation test; `tofu-init` ordered prereq (`depends`) in `hk.pkl`; clean-checkout validation | ✅ done |
 | T2d | 1d | `tests/lib/ports.bash`; OpenBao bats take a free port (was fixed :8397-8399); `run.sh`/`consume.sh` gain `TOOLBOX_FRONTEND_{HOST_PORT,CONTAINER}` seams (baked into `scratch_frontend`'s `pitchfork.toml` env); dropped `bootstrap.bats` machine-wide `pitchfork clean`; scoped `deploy.bats` teardown | ✅ done |
-| T3 | 2 | OpenBao `git mv` → `environments/local/{openbao,scripts}/`, `source = "./openbao"` (label kept), `lib/openbao.sh` + `openbao-snapshot.sh` extracted, widen `hk` tofu globs to `environments/**`, `modules/README.md` | pending |
+| T3 | 2 | OpenBao `git mv` → `environments/local/{openbao,scripts}/`, `source = "./openbao"` (label kept — `tofu plan` = No changes), `lib/openbao.sh` + `openbao-snapshot.sh` extracted, `hk` tofu globs widened to `environments/**`, `modules/README.md`, `.ls-lint.yml` `**/scripts/lib` override, openbao bats adopt `scratch_copy` + `pitchfork clean --daemon` | ✅ done |
 | T4 | 3 | rename all mise tasks `<env>:<domain>:<verb>` / `<domain>:<verb>`; grep-rewrite every `mise run <old>` reference | pending |
 | T5a–d | 4 | **ONE PR** — extract `attestation/`; split `deploy/frontend/` (`frontend-deploy.sh` / `frontend-serve.sh` + `TOOLBOX_ATTESTATION_VERIFY` seam); `openbao-preflight.bats` **5-state** + fix its stale sealed-state advice; cut `cosign-approval.pub` over via `mise run attestation:export-pubkey` | pending |
 | T6 | 5 | docs-accuracy sweep — every `.md` re-verified against the moved code | pending |
 
 **Phase 1b–1d carry-overs** (not blockers):
 
-- `environments/local/tests/*.bats` now `load helper` (a loader for
-  `tests/lib/ports.bash`) but keep their inline `mkdir`+`cp -r` scratch
-  blocks. They adopt `tests/lib/scratch.bash`'s `scratch_copy` in
-  **Phase 2**, when `git mv` moves the dir to
-  `environments/local/scripts/tests/`; `environments/local/tests/helper.bash`
-  moves with them.
+- ~~`environments/local/tests/*.bats` adopt `scratch_copy` in Phase 2~~ —
+  done (Phase 2 moved the dir to `environments/local/scripts/tests/` and
+  they now use `scratch_copy`).
 - `tests/lib/assert.bash` not created yet — added when a suite first needs
   a structured assertion. Existing `[ "$status" -eq N ]` checks stay.
 - **C4** (`attestation/` scratch + a default-`TOOLBOX_ATTESTATION_VERIFY`
@@ -137,9 +138,11 @@ phase in the rule/config file):
 
 - `.ls-lint.yml` ignores `deploy/frontend/run.sh`, `.../scripts/approve.sh`,
   `.../scripts/consume.sh` — pre-restructure names, renamed in Phase 4 (T5).
-- `rules/boundary-shell-deploy-ref.yml` excludes
-  `scripts/bootstrap-openbao.sh` — it writes `deploy/frontend/cosign-approval.pub`
-  today; Phase 4d (T5d) switches it to `mise run attestation:export-pubkey`.
+- `rules/boundary-shell-deploy-ref.yml` + `rules/boundary-shell-concern-climb.yml`
+  both exclude `environments/local/scripts/openbao-bootstrap.sh` — it writes
+  `deploy/frontend/cosign-approval.pub` (and walks to repo root to do it)
+  today; Phase 4d (T5d) switches it to `mise run attestation:export-pubkey`
+  and the climb goes with it.
 - **HCL not covered.** `ast-grep` ships no Terraform grammar, so the tofu
   unit's forbidden edges are not machine-checked. Folds into the deferred
   resolved-graph planning session below.
@@ -226,7 +229,7 @@ backends, `gh`; check whether Cilium/Kyverno play a role at the
 cluster edge later).
 
 **Context:** Surfaced by the 2026-09-06 T5 eng review.
-`modules/secret-openbao-local` already has an empty `policies` input ready
+`environments/local/openbao` already has an empty `policies` input ready
 for the scoped policy. See `docs/designs/digest-as-source-of-truth.md`
 § Trust boundary and `docs/adr/0004-approval-key-openbao-transit-not-acl.md`.
 
@@ -288,7 +291,7 @@ Transit key (`chains-provenance-key`) with an access policy that denies it
 per build (`cosign verify-attestation --key <chains-pubkey>`).
 
 **Why:** the third supply-chain leg (how the build happened), signed
-mechanically. `modules/secret-openbao-local` already has an empty `policies`
+mechanically. `environments/local/openbao` already has an empty `policies`
 input for the scoped policy.
 
 **First task, real blocker:** Chains runs in a pod on OrbStack's k8s;

@@ -3,7 +3,7 @@
 # The local OpenBao daemon's rendered config, raft store, snapshots and
 # tofu state now live in ~/.local/state/toolbox/openbao/ (machine-global,
 # ADR 0010) — nothing OpenBao-related is written under the worktree.
-modules/*/tests/tmp/
+**/tests/tmp/
 *.tfstate*
 # per-machine record of the approved image the local frontend daemon runs
 # (written by `mise run consume`) — never committed

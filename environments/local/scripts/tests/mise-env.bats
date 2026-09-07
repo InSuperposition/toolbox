@@ -5,7 +5,8 @@
 # `mise` resolution, not just "a file exists".
 
 setup() {
-  REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
+  load helper
+  REPO_ROOT="$(toolbox_repo_root)"
   SCRATCH="$(mktemp -d)"
   export XDG_STATE_HOME="$SCRATCH"
   mkdir -p "$SCRATCH/toolbox/openbao"

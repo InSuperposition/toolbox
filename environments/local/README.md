@@ -4,9 +4,11 @@
 
 The repo's local, single-node reference composition — currently just the
 local OpenBao / Transit signing backend the digest-as-source-of-truth
-pipeline's approval gate uses (`modules/secret-openbao-local`). Named
-`local` (not left at repo root) so `environments/production/` can slot in
-later for real `secret-openbao` / `cluster-k0sctl` infra with zero rename.
+pipeline's approval gate uses. This environment **owns** that unit
+(`./openbao/`, `module "secret_openbao_local"`) and the scripts that bring
+it up (`scripts/openbao-*.sh`) — ADR 0012. Named `local` (not left at repo
+root) so `environments/production/` can slot in later for real
+`secret-openbao` / `cluster-k0sctl` infra with zero rename.
 
 The OpenBao daemon is **machine-global** (one per developer machine, not
 one per git worktree — ADR 0010): a pitchfork *global* daemon
@@ -136,9 +138,9 @@ printf '%s' "<new root token>" > "$OPENBAO_STATE_DIR/root.token" && chmod 600 "$
 ## Notes
 
 - **Not the production `secret-openbao` module.** That module is deferred
-  until a real k0s cluster exists (`TODOS.md`); `modules/
-  secret-openbao-local` is what this reference deployment runs today, and
-  it keeps its own out-of-band requirement.
+  until a real k0s cluster exists (`TODOS.md`); the `./openbao/` unit is
+  what this reference deployment runs today. The production module keeps
+  its own out-of-band requirement (ADR 0012).
 - Test seams on the scripts: `TOOLBOX_OPENBAO_{STATE_DIR,DAEMON,LISTEN,
   SUPERVISOR}` — `SUPERVISOR=none` runs a plain tracked `bao server` +
   pidfile instead of pitchfork, so bats never writes the real

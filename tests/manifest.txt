@@ -14,12 +14,12 @@
 bats    deploy/frontend/scripts/tests/approve.bats          10
 bats    deploy/frontend/scripts/tests/deploy.bats           9    # 3 [docker] cases skip without docker
 bats    deploy/frontend/scripts/tests/verify-approval.bats  9
-bats    environments/local/tests/bootstrap.bats             8
-bats    environments/local/tests/mise-env.bats              3
-bats    environments/local/tests/reset-openbao.bats         3
-bats    environments/local/tests/snapshot.bats              3
+bats    environments/local/scripts/tests/openbao-bootstrap.bats  8
+bats    environments/local/scripts/tests/openbao-reset.bats      3
+bats    environments/local/scripts/tests/openbao-snapshot.bats   3
+bats    environments/local/scripts/tests/mise-env.bats           3
 bats    tests/check-coverage.bats                           3
 
-tftest  modules/secret-openbao-local/tests/config_render.tftest.hcl  4
-tftest  modules/secret-openbao-local/tests/keys.tftest.hcl           3
-tftest  modules/secret-openbao-local/tests/policies.tftest.hcl       2
+tftest  environments/local/openbao/tests/config_render.tftest.hcl  4
+tftest  environments/local/openbao/tests/keys.tftest.hcl           3
+tftest  environments/local/openbao/tests/policies.tftest.hcl       2

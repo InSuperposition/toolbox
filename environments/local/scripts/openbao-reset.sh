@@ -41,6 +41,10 @@ else
   pid="$(pgrep -f "bao server -config=$STATE_DIR/openbao.hcl" | head -1 || true)"
   pitchfork stop "global/$DAEMON" 2>/dev/null || true
   pitchfork daemons remove --global "$DAEMON" 2>/dev/null || true
+  # `daemons remove` drops it from config.toml but leaves a stopped entry
+  # in `pitchfork list`; --daemon clears exactly that one (never a
+  # machine-wide `pitchfork clean`).
+  pitchfork clean --daemon "global/$DAEMON" 2>/dev/null || true
 fi
 
 # Wait for the daemon to actually exit before deleting its storage --

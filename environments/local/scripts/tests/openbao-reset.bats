@@ -1,14 +1,13 @@
 #!/usr/bin/env bats
 
-# Focused coverage for scripts/reset-openbao.sh: the confirm gate, what it
-# wipes vs keeps (snapshots/ = the restore bundle), and that it waits for a
-# live daemon to exit before deleting its raft store.
+# Focused coverage for environments/local/scripts/openbao-reset.sh: the
+# confirm gate, what it wipes vs keeps (snapshots/ = the restore bundle),
+# and that it waits for a live daemon to exit before deleting its raft store.
 
 setup() {
   load helper
   SCRATCH="$(mktemp -d)"
-  REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
-  cp -r "$REPO_ROOT/scripts" "$SCRATCH/scripts"
+  scratch_copy "$SCRATCH" "environments/local/scripts"
 
   export OPENBAO_PORT; OPENBAO_PORT="$(free_port)"
   export TOOLBOX_OPENBAO_STATE_DIR="$SCRATCH/state"
@@ -35,7 +34,7 @@ teardown() {
 }
 
 @test "no confirmation and no TOOLBOX_OPENBAO_RESET_YES -> aborts, wipes nothing" {
-  run bash -c 'printf "n\n" | ./scripts/reset-openbao.sh'
+  run bash -c 'printf "n\n" | ./environments/local/scripts/openbao-reset.sh'
   [ "$status" -eq 0 ]
   [[ "$output" == *"Aborted."* ]]
   [ -d "$TOOLBOX_OPENBAO_STATE_DIR/data" ]
@@ -44,7 +43,7 @@ teardown() {
 
 @test "confirmed reset wipes data/config/seal.key/root.token/recovery.key/tfstate, keeps snapshots/" {
   export TOOLBOX_OPENBAO_RESET_YES=1
-  run ./scripts/reset-openbao.sh
+  run ./environments/local/scripts/openbao-reset.sh
   [ "$status" -eq 0 ]
   for f in data openbao.hcl seal.key root.token recovery.key tofu.tfstate; do
     [ ! -e "$TOOLBOX_OPENBAO_STATE_DIR/$f" ]
@@ -68,7 +67,7 @@ EOF
   for _ in $(seq 1 40); do curl -sf -o /dev/null "http://127.0.0.1:$OPENBAO_PORT/v1/sys/health?uninitcode=200&sealedcode=200" && break; sleep 0.2; done
 
   export TOOLBOX_OPENBAO_RESET_YES=1
-  run ./scripts/reset-openbao.sh
+  run ./environments/local/scripts/openbao-reset.sh
   [ "$status" -eq 0 ]
   ! kill -0 "$pid" 2>/dev/null       # daemon gone
   [ ! -e "$TOOLBOX_OPENBAO_STATE_DIR/data" ]

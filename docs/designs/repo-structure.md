@@ -118,9 +118,11 @@ Runtime-only edges (env vars / mise-task calls, not file paths — allowed, not 
   Teardown is scoped to the test's own daemon/container — never a
   machine-wide `pitchfork clean` or a fixed `docker rm`. Two `mise run
   check` in separate worktrees run without collision.
-- **Runtime shared shell:** `<concern>/scripts/lib/<domain>.sh` —
-  self-contained, no repo-level runtime lib. The `SCRIPT_DIR` / `REPO_ROOT`
-  idiom stays inline (standard bash, not domain logic).
+- **Runtime shared shell:** `<concern>/scripts/lib/<domain>.sh` — a single
+  lowercase word (not `<verb>`-bearing); `.ls-lint.yml` relaxes the stem
+  rule under `**/scripts/lib`. Self-contained, no repo-level runtime lib.
+  The `SCRIPT_DIR` / `REPO_ROOT` idiom stays inline (standard bash, not
+  domain logic).
 - **Test support** lives under a `tests/` path; a production script never
   sources from a `tests/` path.
 
@@ -275,8 +277,8 @@ lands, the affected files stay at their pre-restructure paths:
 | 1a | pin `ls-lint` + `ast-grep`; `.ls-lint.yml` + `sgconfig.yml` + `rules/` for the **current** tree; both wired into `hk.pkl` fast layer | done |
 | 1b | `tests/lib/{scratch,registry}.bash`; `deploy/frontend/tests/` → `deploy/frontend/scripts/tests/` | done |
 | 1c | `tests/check-coverage.sh` + `manifest.txt` + mutation test; `tofu-init` ordered prereq in `hk.pkl` | done |
-| 1d | `tests/lib/ports.bash`; every port/container-bound suite takes a free port; `run.sh`/`consume.sh` gain `TOOLBOX_FRONTEND_{HOST_PORT,CONTAINER}` seams | ← you are here |
-| 2 | local-OpenBao → `environments/local/{openbao,scripts}/`; root `scripts/` emptied; `modules/` → README only | pending |
+| 1d | `tests/lib/ports.bash`; every port/container-bound suite takes a free port; `run.sh`/`consume.sh` gain `TOOLBOX_FRONTEND_{HOST_PORT,CONTAINER}` seams | done |
+| 2 | local-OpenBao unit → `environments/local/openbao/`; scripts → `environments/local/scripts/` (renamed `openbao-<verb>.sh`), `lib/openbao.sh` + `openbao-snapshot.sh` extracted; root `scripts/` gone; `modules/` → README only | ← you are here |
 | 3 | mise task namespacing | pending |
 | 4 | `attestation/` split out of `deploy/frontend/` (one PR) | pending |
 | 5 | docs-accuracy sweep — every `.md` re-verified against the moved code | pending |

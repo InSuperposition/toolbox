@@ -1,9 +1,9 @@
 #!/usr/bin/env bats
 
 # Integration test for the machine-global OpenBao bootstrap flow
-# (scripts/bootstrap-openbao.sh + bao server). Runs against a disposable
-# scratch copy of the repo's OpenBao-relevant files, a scratch state dir
-# and a spare port -- so it never touches ~/.local/state/toolbox/openbao/.
+# (environments/local/scripts/openbao-bootstrap.sh + bao server). Runs
+# against a disposable scratch copy of environments/local, a scratch state
+# dir and a spare port -- so it never touches ~/.local/state/toolbox/openbao/.
 #
 # All secrets are 0600 files under the scratch state dir (ADR 0011): no
 # keychain, no fnox -- so the suite never triggers a keychain prompt.
@@ -15,13 +15,13 @@
 setup() {
   load helper
   SCRATCH="$(mktemp -d)"
-  REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
-
-  mkdir -p "$SCRATCH/environments"
-  cp -r "$REPO_ROOT/environments/local" "$SCRATCH/environments/local"
-  rm -rf "$SCRATCH/environments/local/.terraform" "$SCRATCH/environments/local/tests"
-  cp -r "$REPO_ROOT/modules" "$SCRATCH/modules"
-  cp -r "$REPO_ROOT/scripts" "$SCRATCH/scripts"
+  # the whole environments/local concern — its scripts, the ./openbao tofu
+  # unit, main.tf; the script's REPO_ROOT resolves to $SCRATCH and it
+  # auto-creates deploy/frontend for the pubkey export.
+  scratch_copy "$SCRATCH" "environments/local"
+  rm -rf "$SCRATCH/environments/local/.terraform" \
+         "$SCRATCH/environments/local/openbao/.terraform" \
+         "$SCRATCH/environments/local/scripts/tests"
 
   # a free port per test, not a fixed one — two `mise run check` in
   # separate worktrees must not fight over the listener.
@@ -42,21 +42,23 @@ teardown() {
     kill "$(cat "$TOOLBOX_OPENBAO_STATE_DIR/bao.pid")" 2>/dev/null || true
   pkill -f "bao server -config=$TOOLBOX_OPENBAO_STATE_DIR" 2>/dev/null || true
   # scoped to THIS test's daemon only — never a machine-wide `pitchfork
-  # clean`, which would nuke a concurrent run's daemon (CX #7).
+  # clean`, which would nuke a concurrent run's daemon (CX #7). --daemon
+  # also clears the stopped entry `daemons remove` leaves in `pitchfork list`.
   pitchfork stop "global/$TOOLBOX_OPENBAO_DAEMON" 2>/dev/null || true
   pitchfork daemons remove --global "$TOOLBOX_OPENBAO_DAEMON" 2>/dev/null || true
+  pitchfork clean --daemon "global/$TOOLBOX_OPENBAO_DAEMON" 2>/dev/null || true
   cd /
   rm -rf "$SCRATCH"
 }
 
 @test "bootstrap renders config + creates the raft data dir despite the expected first-apply auth error" {
-  run ./scripts/bootstrap-openbao.sh
+  run ./environments/local/scripts/openbao-bootstrap.sh
   [ -f "$TOOLBOX_OPENBAO_STATE_DIR/openbao.hcl" ]
   [ -d "$TOOLBOX_OPENBAO_STATE_DIR/data" ]
 }
 
 @test "full bootstrap: init, auto-unseal, apply, verify raft + transit + secret files" {
-  run ./scripts/bootstrap-openbao.sh
+  run ./environments/local/scripts/openbao-bootstrap.sh
   [ "$status" -eq 0 ]
   [[ "$output" != *"UNSEAL KEY"* ]]   # static seal — no unseal ceremony
 
@@ -84,7 +86,7 @@ teardown() {
 @test "bootstrap ignores an inherited VAULT_TOKEN — always uses its own root.token" {
   # Under `mise run check` a scratch bootstrap would otherwise carry the
   # real daemon's token and 403 against this instance's listener.
-  VAULT_TOKEN="hvs.inherited-garbage-not-this-instance" run ./scripts/bootstrap-openbao.sh
+  VAULT_TOKEN="hvs.inherited-garbage-not-this-instance" run ./environments/local/scripts/openbao-bootstrap.sh
   [ "$status" -eq 0 ]
   export VAULT_TOKEN
   VAULT_TOKEN="$(cat "$TOOLBOX_OPENBAO_STATE_DIR/root.token")"
@@ -92,12 +94,13 @@ teardown() {
   [[ "$output" == *"transit/"* ]]
 }
 
-@test "write_secret_file replaces an existing 0644 file atomically at 0600" {
-  # The helper bootstrap uses -- redirecting into an existing file keeps its
-  # perms and follows symlinks, so mktemp+chmod+mv is required.
+@test "write_secret_file (lib/openbao.sh) replaces an existing 0644 file atomically at 0600" {
+  # Redirecting into an existing file keeps its perms and follows symlinks,
+  # so the extracted helper does mktemp+chmod+mv. Test the real lib, not a
+  # copy.
   run bash -euo pipefail -c '
+    . "'"$SCRATCH"'/environments/local/scripts/lib/openbao.sh"
     d="'"$TOOLBOX_OPENBAO_STATE_DIR"'"; mkdir -p "$d"
-    write_secret_file() { local dst="$1" tmp; tmp="$(mktemp "$(dirname "$dst")/.tmp.XXXXXX")"; chmod 600 "$tmp"; printf "%s" "$2" >"$tmp"; mv -f "$tmp" "$dst"; }
     printf oldbad > "$d/k"; chmod 666 "$d/k"
     write_secret_file "$d/k" newval
     [ "$(cat "$d/k")" = newval ]
@@ -107,7 +110,7 @@ teardown() {
 }
 
 @test "the daemon auto-unseals on restart with no manual step" {
-  ./scripts/bootstrap-openbao.sh
+  ./environments/local/scripts/openbao-bootstrap.sh
 
   local pid
   pid="$(cat "$TOOLBOX_OPENBAO_STATE_DIR/bao.pid")"
@@ -127,20 +130,20 @@ teardown() {
 }
 
 @test "re-running the bootstrap script after init is a clean no-op, not a re-init attempt" {
-  ./scripts/bootstrap-openbao.sh
-  run ./scripts/bootstrap-openbao.sh
+  ./environments/local/scripts/openbao-bootstrap.sh
+  run ./environments/local/scripts/openbao-bootstrap.sh
   [ "$status" -eq 0 ]
   [[ "$output" == *"Already initialized"* ]]
 }
 
 @test "reset then re-bootstrap starts fully fresh" {
-  ./scripts/bootstrap-openbao.sh
-  run ./scripts/reset-openbao.sh
+  ./environments/local/scripts/openbao-bootstrap.sh
+  run ./environments/local/scripts/openbao-reset.sh
   [ "$status" -eq 0 ]
   [ ! -e "$TOOLBOX_OPENBAO_STATE_DIR/root.token" ]
   [ ! -e "$TOOLBOX_OPENBAO_STATE_DIR/seal.key" ]
 
-  run ./scripts/bootstrap-openbao.sh
+  run ./environments/local/scripts/openbao-bootstrap.sh
   [ "$status" -eq 0 ]
   run bash -c "bao status -format=json | jq -e '.initialized == true'"
   [ "$status" -eq 0 ]
@@ -148,7 +151,7 @@ teardown() {
 
 @test "bootstrap registers + starts a machine-global pitchfork daemon" {
   export TOOLBOX_OPENBAO_SUPERVISOR="pitchfork"
-  ./scripts/bootstrap-openbao.sh
+  ./environments/local/scripts/openbao-bootstrap.sh
   run pitchfork list
   [[ "$output" == *"$TOOLBOX_OPENBAO_DAEMON"* ]]
   [[ "$output" == *"running"* ]]

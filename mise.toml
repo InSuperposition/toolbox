@@ -54,7 +54,7 @@ run = "hk fix --all"
 
 [tasks.openbao-bootstrap]
 description = "One-time PER-MACHINE OpenBao bootstrap (render config, register the global pitchfork daemon, init, provision Transit, write the 0600 secret files) — see environments/local/README.md"
-run = "./scripts/bootstrap-openbao.sh"
+run = "./environments/local/scripts/openbao-bootstrap.sh"
 
 [tasks.openbao-up]
 description = "Start the machine-global OpenBao daemon (after a reboot, or if it was stopped). No-op if already running."
@@ -62,14 +62,11 @@ run = "pitchfork start global/openbao"
 
 [tasks.openbao-reset]
 description = "Machine-wide: stop + unregister the global OpenBao daemon (waits for it to exit), wipe its raft store / config / seal.key / root.token / recovery.key / tofu state. snapshots/ (the restore bundle) is kept."
-run = "./scripts/reset-openbao.sh"
+run = "./environments/local/scripts/openbao-reset.sh"
 
 [tasks.openbao-snapshot]
 description = "Save a COMPLETE restore bundle (raft snapshot + seal.key + root.token) to $OPENBAO_STATE_DIR/snapshots/. Copy that whole directory off-machine for real disaster recovery."
-run = [
-  "bao operator raft snapshot save \"$OPENBAO_STATE_DIR/snapshots/latest.snap\"",
-  "cp -f \"$OPENBAO_STATE_DIR/seal.key\" \"$OPENBAO_STATE_DIR/root.token\" \"$OPENBAO_STATE_DIR/snapshots/\"",
-]
+run = "./environments/local/scripts/openbao-snapshot.sh"
 
 [tasks.openbao-snapshot-restore]
 description = "Restore the local OpenBao from a snapshot bundle — args: [-force] <snapshot-file>. The bundle's seal.key + root.token must be in $OPENBAO_STATE_DIR first (see environments/local/README.md § disaster). Use -force into a freshly bootstrapped instance."

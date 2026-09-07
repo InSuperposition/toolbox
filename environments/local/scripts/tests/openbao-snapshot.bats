@@ -14,15 +14,11 @@
 setup() {
   load helper
   SCRATCH="$(mktemp -d)"
-  REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
-
-  mkdir -p "$SCRATCH/environments"
-  cp -r "$REPO_ROOT/environments/local" "$SCRATCH/environments/local"
+  scratch_copy "$SCRATCH" "environments/local"
   rm -rf "$SCRATCH/environments/local/.terraform" \
     "$SCRATCH/environments/local/.terraform.lock.hcl" \
-    "$SCRATCH/environments/local/tests"
-  cp -r "$REPO_ROOT/modules" "$SCRATCH/modules"
-  cp -r "$REPO_ROOT/scripts" "$SCRATCH/scripts"
+    "$SCRATCH/environments/local/openbao/.terraform" \
+    "$SCRATCH/environments/local/scripts/tests"
 
   local port; port="$(free_port)"
   export TOOLBOX_OPENBAO_STATE_DIR="$SCRATCH/state"
@@ -47,16 +43,13 @@ teardown() {
 
 # bootstrap (static seal auto-unseals) + echo the root token
 _bootstrap() {
-  ./scripts/bootstrap-openbao.sh >/dev/null 2>&1
+  ./environments/local/scripts/openbao-bootstrap.sh >/dev/null 2>&1
   cat "$TOOLBOX_OPENBAO_STATE_DIR/root.token"
 }
 
 # The bundle `mise run openbao-snapshot` writes: snap + seal.key + root.token.
 _snapshot_bundle() {
-  bao operator raft snapshot save "$SNAP"
-  cp -f "$TOOLBOX_OPENBAO_STATE_DIR/seal.key" \
-    "$TOOLBOX_OPENBAO_STATE_DIR/root.token" \
-    "$TOOLBOX_OPENBAO_STATE_DIR/snapshots/"
+  ./environments/local/scripts/openbao-snapshot.sh >/dev/null
 }
 
 # Static seal: the daemon auto-unseals on every start AND after a restore
@@ -126,7 +119,7 @@ _restart_daemon() {
   before="$(_pubkey)"
   _snapshot_bundle                                     # snap + seal.key + root.token in snapshots/
 
-  ./scripts/reset-openbao.sh
+  ./environments/local/scripts/openbao-reset.sh
   [ -d "$TOOLBOX_OPENBAO_STATE_DIR/snapshots" ]        # reset kept the bundle
 
   fresh_token="$(_bootstrap)"

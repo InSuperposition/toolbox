@@ -268,7 +268,9 @@ tool limitation.
 
 The local dev daemon's bootstrap secrets are **`0600` files** in
 `$OPENBAO_STATE_DIR` (`~/.local/state/toolbox/openbao/`), written atomically
-by `scripts/bootstrap-openbao.sh`, beside the raft store they protect:
+by `environments/local/scripts/openbao-bootstrap.sh` (ADR 0012 — the local
+OpenBao tofu unit and its orchestration scripts are owned by that
+environment, not `modules/`), beside the raft store they protect:
 
 | file | role | held by |
 |---|---|---|

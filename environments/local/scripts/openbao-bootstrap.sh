@@ -30,7 +30,11 @@ set -euo pipefail
 # Test seams (bats): TOOLBOX_OPENBAO_STATE_DIR, TOOLBOX_OPENBAO_DAEMON,
 # TOOLBOX_OPENBAO_LISTEN, TOOLBOX_OPENBAO_SUPERVISOR (pitchfork|none).
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"        # environments/local/scripts
+ENV_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"            # environments/local — the tofu root
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"    # repo root — for deploy/frontend (P4 drops this)
+# shellcheck source=/dev/null  # lib is bats-tested directly (openbao-bootstrap.bats)
+. "$SCRIPT_DIR/lib/openbao.sh"
 
 STATE_DIR="${TOOLBOX_OPENBAO_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/toolbox/openbao}"
 DAEMON="${TOOLBOX_OPENBAO_DAEMON:-openbao}"
@@ -38,26 +42,7 @@ LISTEN="${TOOLBOX_OPENBAO_LISTEN:-127.0.0.1:8200}"
 SUPERVISOR="${TOOLBOX_OPENBAO_SUPERVISOR:-pitchfork}"
 mkdir -p "$STATE_DIR"
 
-# Write $2 into $1 as a 0600 file, atomically. `umask`/`chmod` after the fact
-# is not enough: redirecting into an existing 0644 file keeps 0644 and
-# follows symlinks. mktemp+chmod+mv in the same dir is atomic and safe.
-write_secret_file() {
-  local dst="$1" tmp
-  tmp="$(mktemp "$(dirname "$dst")/.tmp.XXXXXX")"
-  chmod 600 "$tmp"
-  printf '%s' "$2" >"$tmp"
-  mv -f "$tmp" "$dst"
-}
-
 HEALTH="http://${LISTEN}/v1/sys/health?sealedcode=200&uninitcode=200&standbycode=200"
-wait_ready() {
-  for _ in $(seq 1 50); do
-    curl -sf -o /dev/null "$HEALTH" && return 0
-    sleep 0.2
-  done
-  echo "OpenBao did not become reachable at $LISTEN" >&2
-  return 1
-}
 
 # environments/local/main.tf reads these (test seam + the machine-global
 # path); the vault provider reads VAULT_ADDR / VAULT_TOKEN.
@@ -68,7 +53,7 @@ export VAULT_ADDR
 
 TFSTATE="$STATE_DIR/tofu.tfstate"
 tofu_apply() {
-  (cd "$REPO_ROOT/environments/local" &&
+  (cd "$ENV_DIR" &&
     tofu init -input=false >/dev/null &&
     tofu apply -auto-approve -input=false -state="$TFSTATE")
 }
@@ -96,7 +81,7 @@ if [ "$SUPERVISOR" = "none" ]; then
     bao server -config="$STATE_DIR/openbao.hcl" >"$STATE_DIR/bao.log" 2>&1 &
     echo $! >"$STATE_DIR/bao.pid"
   fi
-  wait_ready
+  openbao_wait_ready "$LISTEN"
 else
   echo "==> Registering + starting the machine-global pitchfork daemon 'global/$DAEMON'"
   if ! pitchfork daemons --global 2>/dev/null | grep -qE "(^|/)${DAEMON}([[:space:]]|$)"; then

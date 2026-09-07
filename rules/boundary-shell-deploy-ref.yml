@@ -7,16 +7,16 @@ message: >-
   orchestration scripts) may reference it. Reach it through a task call or an
   env seam instead. See docs/designs/repo-structure.md.
 note: >-
-  TEMPORARY EXCEPTION: scripts/bootstrap-openbao.sh is excluded below. It
-  writes deploy/frontend/cosign-approval.pub today; Phase 4d (T5d) changes it
-  to call `mise run attestation:export-pubkey` (--outfile ->
-  attestation/cosign-approval.pub). Drop the ignore when that lands.
+  TEMPORARY EXCEPTION: environments/local/scripts/openbao-bootstrap.sh is
+  excluded below. It writes deploy/frontend/cosign-approval.pub today;
+  Phase 4d (T5d) changes it to call `mise run attestation:export-pubkey`
+  (--outfile -> attestation/cosign-approval.pub) and the REPO_ROOT climb
+  goes with it. Drop the ignore when that lands.
 files:
-  - "scripts/**/*.sh"
   - "environments/**/*.sh"
   - "attestation/**/*.sh"
 ignores:
-  - "scripts/bootstrap-openbao.sh"
+  - "environments/local/scripts/openbao-bootstrap.sh"
 rule:
   all:
     - regex: "deploy/"
