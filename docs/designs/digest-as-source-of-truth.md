@@ -191,7 +191,7 @@ independently (Gall's Law). The full sequencing lives in `TODOS.md`.
   supervised by `pitchfork`; `approve.sh` / `verify-approval.sh` /
   `consume.sh` proven live against real GHCR; the demo consumer is a local
   `pitchfork` container ([ADR 0009](../adr/0009-demo-consumer-is-local-container-not-k8s.md));
-  `mise run openbao-snapshot` / `openbao-snapshot-restore` for backup.
+  `mise run local:openbao:snapshot` / `openbao-snapshot-restore` for backup.
   Registry is **GHCR** — hosted, zero-ops, unmetered on public repos.
 
 - **Phase 2 — Tekton (deferred, T7a/T7b/T7c).** Move the build/scan/attach

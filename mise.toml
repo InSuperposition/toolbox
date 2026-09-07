@@ -32,7 +32,7 @@ trivy = "0.74.0"
 # `mise` chains [env] vars and runs a shell for `exec()`, so VAULT_TOKEN is
 # injected into every `mise run` task (and the interactive shell) with no
 # shell hook. A missing root.token yields an empty VAULT_TOKEN, not an error;
-# `openbao-preflight.sh` turns that into a clear "run mise run openbao-bootstrap".
+# `openbao-preflight.sh` turns that into a clear "run mise run local:openbao:bootstrap".
 [env]
 VAULT_ADDR = "http://127.0.0.1:8200"
 OPENBAO_STATE_DIR = "{{ exec(command='echo \"${XDG_STATE_HOME:-$HOME/.local/state}/toolbox/openbao\"') }}"
@@ -52,23 +52,30 @@ run = "hk check --all"
 description = "Apply the auto-fixable half of `mise run check` (formatters)."
 run = "hk fix --all"
 
-[tasks.openbao-bootstrap]
+# OpenBao tasks are namespaced <environment>:<domain>:<verb> (Phase 3 of
+# the repo restructure, docs/designs/repo-structure.md § mise task map).
+# A future `local:bootstrap` aggregate fans out to these.
+[tasks."local:openbao:bootstrap"]
 description = "One-time PER-MACHINE OpenBao bootstrap (render config, register the global pitchfork daemon, init, provision Transit, write the 0600 secret files) — see environments/local/README.md"
 run = "./environments/local/scripts/openbao-bootstrap.sh"
 
-[tasks.openbao-up]
+[tasks."local:openbao:start"]
 description = "Start the machine-global OpenBao daemon (after a reboot, or if it was stopped). No-op if already running."
 run = "pitchfork start global/openbao"
 
-[tasks.openbao-reset]
+[tasks."local:openbao:stop"]
+description = "Stop the machine-global OpenBao daemon (leaves it registered — `local:openbao:start` brings it back)."
+run = "pitchfork stop global/openbao"
+
+[tasks."local:openbao:reset"]
 description = "Machine-wide: stop + unregister the global OpenBao daemon (waits for it to exit), wipe its raft store / config / seal.key / root.token / recovery.key / tofu state. snapshots/ (the restore bundle) is kept."
 run = "./environments/local/scripts/openbao-reset.sh"
 
-[tasks.openbao-snapshot]
+[tasks."local:openbao:snapshot"]
 description = "Save a COMPLETE restore bundle (raft snapshot + seal.key + root.token) to $OPENBAO_STATE_DIR/snapshots/. Copy that whole directory off-machine for real disaster recovery."
 run = "./environments/local/scripts/openbao-snapshot.sh"
 
-[tasks.openbao-snapshot-restore]
+[tasks."local:openbao:snapshot-restore"]
 description = "Restore the local OpenBao from a snapshot bundle — args: [-force] <snapshot-file>. The bundle's seal.key + root.token must be in $OPENBAO_STATE_DIR first (see environments/local/README.md § disaster). Use -force into a freshly bootstrapped instance."
 run = "bao operator raft snapshot restore"
 

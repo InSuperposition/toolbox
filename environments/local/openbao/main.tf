@@ -52,7 +52,7 @@ resource "local_file" "openbao_data_dir_keep" {
 resource "local_file" "openbao_snapshot_dir_keep" {
   # `bao operator raft snapshot save <file>` does not create its output
   # directory. Same declarative placeholder trick as openbao_data_dir_keep
-  # so `mise run openbao-snapshot` works on a fresh checkout without a
+  # so `mise run local:openbao:snapshot` works on a fresh checkout without a
   # scripted `mkdir`.
   filename        = "${var.openbao_snapshot_path}/.gitkeep"
   content         = ""

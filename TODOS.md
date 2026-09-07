@@ -109,7 +109,7 @@ duplicate detail.
 | T2c | 1c | `tests/check-coverage.sh` (disk vs `manifest.txt` vs `hk … --plan --json`) + `tests/check-coverage.bats` mutation test; `tofu-init` ordered prereq (`depends`) in `hk.pkl`; clean-checkout validation | ✅ done |
 | T2d | 1d | `tests/lib/ports.bash`; OpenBao bats take a free port (was fixed :8397-8399); `run.sh`/`consume.sh` gain `TOOLBOX_FRONTEND_{HOST_PORT,CONTAINER}` seams (baked into `scratch_frontend`'s `pitchfork.toml` env); dropped `bootstrap.bats` machine-wide `pitchfork clean`; scoped `deploy.bats` teardown | ✅ done |
 | T3 | 2 | OpenBao `git mv` → `environments/local/{openbao,scripts}/`, `source = "./openbao"` (label kept — `tofu plan` = No changes), `lib/openbao.sh` + `openbao-snapshot.sh` extracted, `hk` tofu globs widened to `environments/**`, `modules/README.md`, `.ls-lint.yml` `**/scripts/lib` override, openbao bats adopt `scratch_copy` + `pitchfork clean --daemon` | ✅ done |
-| T4 | 3 | rename all mise tasks `<env>:<domain>:<verb>` / `<domain>:<verb>`; grep-rewrite every `mise run <old>` reference | pending |
+| T4 | 3 | `openbao-*` mise tasks → `local:openbao:*` (+ new `local:openbao:stop`); every `mise run openbao-*` ref rewritten (scripts, bats, docs, ADRs, pitchfork.toml). `approve`/`consume`/`verify-approval`/`export-approval-pubkey` → `attestation:*`/`frontend:*` deferred to Phase 4 (renamed with their script moves). | ✅ done |
 | T5a–d | 4 | **ONE PR** — extract `attestation/`; split `deploy/frontend/` (`frontend-deploy.sh` / `frontend-serve.sh` + `TOOLBOX_ATTESTATION_VERIFY` seam); `openbao-preflight.bats` **5-state** + fix its stale sealed-state advice; cut `cosign-approval.pub` over via `mise run attestation:export-pubkey` | pending |
 | T6 | 5 | docs-accuracy sweep — every `.md` re-verified against the moved code | pending |
 
@@ -190,8 +190,8 @@ The first `approval-key` was rotated on 2026-09-06 (commit `bcbb862`)
 because it was provisioned in an AI session whose bootstrap output was
 transcript-visible. Procedure for any future rotation:
 ```
-mise run openbao-reset            # stops daemon, wipes raft store + 0600 secret files + tfstate
-mise run openbao-bootstrap        # fresh approval-key; regenerates seal.key / root.token /
+mise run local:openbao:reset            # stops daemon, wipes raft store + 0600 secret files + tfstate
+mise run local:openbao:bootstrap        # fresh approval-key; regenerates seal.key / root.token /
                                   #   recovery.key (all 0600); rewrites cosign-approval.pub
 git add deploy/frontend/cosign-approval.pub && git commit
 ```

@@ -25,7 +25,7 @@ the key from a file. `seal.key` sits beside `vault.db`, which already holds
 everything the key protects — no additional exposure. Routine restart and
 machine reboot are now zero-step. The one remaining manual case is the
 disaster `-force` snapshot restore, which needs the snapshot's *own*
-`seal.key` + `root.token` — `mise run openbao-snapshot` writes them together
+`seal.key` + `root.token` — `mise run local:openbao:snapshot` writes them together
 as a bundle (ADR 0011, `environments/local/README.md`).
 
 Why static seal, not Transit auto-unseal: Transit needs a second OpenBao

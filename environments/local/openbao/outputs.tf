@@ -19,6 +19,6 @@ output "openbao_config_path" {
 }
 
 output "openbao_snapshot_dir" {
-  description = "Directory `mise run openbao-snapshot` writes raft snapshots to (T6 backup)."
+  description = "Directory `mise run local:openbao:snapshot` writes raft snapshots to (T6 backup)."
   value       = var.openbao_snapshot_path
 }

@@ -250,6 +250,13 @@ k8s-manifest-bearing module is built — not fully speced yet.
 runbook. A mise task may call a script; a script may call mise tasks; never
 both directions on the same path (no cycles).
 
+Task names are namespaced `<environment>:<domain>:<verb>` (or
+`<domain>:<verb>`) — `local:openbao:bootstrap`, `local:openbao:snapshot`,
+… (`docs/designs/repo-structure.md` § mise task map). `check` / `fix` stay
+top-level. A task body is a single inline command unless it carries real
+logic (loop / conditional / error classification / multi-step invariant) —
+only then a script (§ Scripts Policy).
+
 ## hk: Git Hook Gating
 
 `hk.pkl` is the only place hook logic is declared: shellcheck, bats,
@@ -282,8 +289,8 @@ No keychain, no `fnox` (removed — it rewrote `fnox.toml` and its keychain
 items prompted for a password). There is **no memorized secret and no
 recurring manual step**: restart and reboot auto-unseal. The one manual
 case is the disaster `-force` snapshot restore, which needs the snapshot's
-*own* `seal.key` + `root.token` — `mise run openbao-snapshot` writes all
-three together as a bundle in `snapshots/`, which `openbao-reset` keeps.
+*own* `seal.key` + `root.token` — `mise run local:openbao:snapshot` writes all
+three together as a bundle in `snapshots/`, which `local:openbao:reset` keeps.
 
 For app secrets created *after* OpenBao is up, OpenBao is the store of
 record; a client that reads them into the dev env is a future concern

@@ -27,12 +27,12 @@ keychain, no `fnox`.
 | `data/` | raft store (encrypted by `seal.key`) |
 | `openbao.hcl` | rendered config |
 | `tofu.tfstate` | provisioning state |
-| `snapshots/` | restore bundles — kept across `openbao-reset` |
+| `snapshots/` | restore bundles — kept across `local:openbao:reset` |
 
 ## Bootstrap (once per machine)
 
 ```
-mise run openbao-bootstrap
+mise run local:openbao:bootstrap
 ```
 
 Renders `openbao.hcl`, generates `seal.key`, registers + starts the global
@@ -55,12 +55,12 @@ pitchfork list | grep openbao    # global/openbao   running
 ```
 
 After a reboot the daemon boot-starts and auto-unseals. If it is stopped:
-`mise run openbao-up`.
+`mise run local:openbao:start`.
 
 ## Reset (machine-wide)
 
 ```
-mise run openbao-reset
+mise run local:openbao:reset
 ```
 
 Stops + unregisters the global daemon (**waiting until it has actually
@@ -80,7 +80,7 @@ OpenBao community has no snapshot scheduler
 **on demand**, before anything risky (key rotation, OS upgrade, reset):
 
 ```
-mise run openbao-snapshot
+mise run local:openbao:snapshot
 ```
 
 Writes a **complete bundle** to `$OPENBAO_STATE_DIR/snapshots/`:
@@ -97,7 +97,7 @@ resume *signing* without minting a new `approval-key`.
 ### Roll back a change (daemon up)
 
 ```
-mise run openbao-snapshot-restore -- "$OPENBAO_STATE_DIR/snapshots/latest.snap"
+mise run local:openbao:snapshot-restore -- "$OPENBAO_STATE_DIR/snapshots/latest.snap"
 ```
 Same `seal.key`, so the daemon auto-unseals straight after — no manual step.
 
@@ -109,8 +109,8 @@ by the snapshot's **original** seal key and only its **original** root token
 is valid. That is why the bundle carries them.
 
 ```
-mise run openbao-reset                                   # keeps snapshots/
-mise run openbao-bootstrap                               # fresh instance (its keys are throwaway)
+mise run local:openbao:reset                                   # keeps snapshots/
+mise run local:openbao:bootstrap                               # fresh instance (its keys are throwaway)
 bao operator raft snapshot restore -force "$OPENBAO_STATE_DIR/snapshots/latest.snap"
 cp -f "$OPENBAO_STATE_DIR/snapshots/seal.key"  "$OPENBAO_STATE_DIR/seal.key"
 pitchfork restart global/openbao                         # re-reads the original seal.key -> auto-unseal

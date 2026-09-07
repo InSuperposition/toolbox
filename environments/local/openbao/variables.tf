@@ -23,7 +23,7 @@ variable "openbao_data_path" {
 }
 
 variable "openbao_snapshot_path" {
-  description = "Directory `bao operator raft snapshot save` writes to (T6 backup — relative to the pitchfork daemon's `dir`). `mise run openbao-snapshot` writes `latest.snap` here; `scripts/reset-openbao.sh` deliberately preserves it. The module only creates the directory (a .gitkeep placeholder, same reason as openbao_data_path)."
+  description = "Directory `bao operator raft snapshot save` writes to (T6 backup — relative to the pitchfork daemon's `dir`). `mise run local:openbao:snapshot` writes `latest.snap` here; `scripts/reset-openbao.sh` deliberately preserves it. The module only creates the directory (a .gitkeep placeholder, same reason as openbao_data_path)."
   type        = string
   default     = "openbao/snapshots"
 }

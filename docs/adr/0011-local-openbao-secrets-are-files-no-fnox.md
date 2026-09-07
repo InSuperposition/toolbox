@@ -24,12 +24,12 @@ everything the token protects anyway. The machine is the trust boundary
 The recovery key is kept as a file (not discarded): a file is zero
 DX cost — never typed, never shown — and it is the only *non-destructive*
 recovery when `root.token` is lost or corrupt but the daemon is healthy
-(`bao operator generate-root`). `openbao-reset` rotates the Transit
+(`bao operator generate-root`). `local:openbao:reset` rotates the Transit
 `approval-key`, so it is not a recovery path.
 
-`mise run openbao-snapshot` writes a *bundle* — the raft snapshot plus a
+`mise run local:openbao:snapshot` writes a *bundle* — the raft snapshot plus a
 copy of `seal.key` and `root.token` — into `snapshots/`, which
-`openbao-reset` preserves. A bare `.snap` cannot be restored; the three
+`local:openbao:reset` preserves. A bare `.snap` cannot be restored; the three
 files must travel together (copy the whole `snapshots/` dir off-machine for
 real disaster recovery).
 

@@ -36,7 +36,7 @@ set -e
 
 if [ -z "$status_json" ]; then
 	die "cannot reach OpenBao at $VAULT_ADDR" \
-		"mise run openbao-up   (then: mise run openbao-bootstrap if never initialised)"
+		"mise run local:openbao:start   (then: mise run local:openbao:bootstrap if never initialised)"
 fi
 
 # --- sealed? ---
@@ -46,7 +46,7 @@ if [ "$status_rc" -eq 2 ] || [ "$(echo "$status_json" | jq -r '.sealed')" = "tru
 fi
 
 if [ "$(echo "$status_json" | jq -r '.initialized')" != "true" ]; then
-	die "OpenBao is not initialised" "mise run openbao-bootstrap"
+	die "OpenBao is not initialised" "mise run local:openbao:bootstrap"
 fi
 
 # --- authorized + key present? ---
@@ -54,7 +54,7 @@ fi
 # 404-shaped error is a missing key.
 if [ -z "${VAULT_TOKEN:-}" ]; then
 	die "no VAULT_TOKEN in the environment" \
-		"mise run openbao-bootstrap   (then open a new shell — mise [env] reads \$OPENBAO_STATE_DIR/root.token)"
+		"mise run local:openbao:bootstrap   (then open a new shell — mise [env] reads \$OPENBAO_STATE_DIR/root.token)"
 fi
 export VAULT_TOKEN
 
@@ -67,11 +67,11 @@ if [ "$read_rc" -ne 0 ]; then
 	case "$read_err" in
 	*[Pp]ermission\ denied* | *403*)
 		die "VAULT_TOKEN cannot read transit/keys/${KEY_NAME}" \
-			"the token is \$OPENBAO_STATE_DIR/root.token — re-run mise run openbao-bootstrap if stale, or 'bao operator generate-root' with \$OPENBAO_STATE_DIR/recovery.key if it is corrupt"
+			"the token is \$OPENBAO_STATE_DIR/root.token — re-run mise run local:openbao:bootstrap if stale, or 'bao operator generate-root' with \$OPENBAO_STATE_DIR/recovery.key if it is corrupt"
 		;;
 	*)
 		die "Transit key '${KEY_NAME}' does not exist" \
-			"mise run openbao-bootstrap   (provisions transit/ + the approval key from environments/local/)"
+			"mise run local:openbao:bootstrap   (provisions transit/ + the approval key from environments/local/)"
 		;;
 	esac
 fi

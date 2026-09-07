@@ -96,6 +96,6 @@ run "creates_the_snapshot_directory" {
   # either — same declarative placeholder.
   assert {
     condition     = local_file.openbao_snapshot_dir_keep.filename == "openbao/snapshots/.gitkeep"
-    error_message = "expected a placeholder under the default openbao_snapshot_path so `mise run openbao-snapshot` works on a fresh checkout"
+    error_message = "expected a placeholder under the default openbao_snapshot_path so `mise run local:openbao:snapshot` works on a fresh checkout"
   }
 }

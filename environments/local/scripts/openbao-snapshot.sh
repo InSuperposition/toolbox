@@ -12,7 +12,7 @@ set -euo pipefail
 # § Disaster restore). A bare `.snap` on its own is not recoverable. Copy
 # the whole snapshots/ directory off-machine for real disaster recovery.
 #
-# `mise run openbao-snapshot` calls this with no arguments. Test seam:
+# `mise run local:openbao:snapshot` calls this with no arguments. Test seam:
 # TOOLBOX_OPENBAO_STATE_DIR (bats), same as openbao-bootstrap.sh.
 
 STATE_DIR="${TOOLBOX_OPENBAO_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/toolbox/openbao}"

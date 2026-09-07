@@ -6,7 +6,7 @@ set -euo pipefail
 # has actually exited), then wipes the raft store / rendered config /
 # secret files / tofu state. Raft snapshots under <state_dir>/snapshots/
 # are KEPT -- that directory is the restore bundle (snap + seal.key +
-# root.token, written together by `mise run openbao-snapshot`).
+# root.token, written together by `mise run local:openbao:snapshot`).
 #
 # GitOps role: one-time teardown. Not a reconcile-loop step.
 #
@@ -63,4 +63,4 @@ rm -rf "$STATE_DIR/data"
 rm -f "$STATE_DIR"/{openbao.hcl,seal.key,root.token,recovery.key} \
   "$STATE_DIR"/{tofu.tfstate,tofu.tfstate.backup,bao.pid,bao.log}
 
-echo "Cleared. Run: mise run openbao-bootstrap"
+echo "Cleared. Run: mise run local:openbao:bootstrap"

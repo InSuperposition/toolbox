@@ -9,7 +9,7 @@
 #   1. restore into the running daemon rolls a change back (auto-unseal)
 #   2. `-force` restore into a fresh instance recovers the original
 #      approval-key — given the snapshot's own seal.key + root.token
-#      (the bundle `mise run openbao-snapshot` writes together)
+#      (the bundle `mise run local:openbao:snapshot` writes together)
 
 setup() {
   load helper
@@ -47,7 +47,7 @@ _bootstrap() {
   cat "$TOOLBOX_OPENBAO_STATE_DIR/root.token"
 }
 
-# The bundle `mise run openbao-snapshot` writes: snap + seal.key + root.token.
+# The bundle `mise run local:openbao:snapshot` writes: snap + seal.key + root.token.
 _snapshot_bundle() {
   ./environments/local/scripts/openbao-snapshot.sh >/dev/null
 }
