@@ -1,8 +1,15 @@
 # deploy/frontend test fixtures. The concern-agnostic half (throwaway zot
-# registry, cosign key, fake image artifacts, scratch-dir copy) lives in
-# tests/lib/ and is loaded below; what stays here is frontend-specific: the
-# docker serving-image path (T5b), the approve.sh call wrappers, and the
-# scratch deploy/frontend tree with its own pitchfork.toml.
+# registry, cosign key, fake image artifacts, scratch-dir copy, free ports)
+# lives in tests/lib/ and is loaded below. What stays here is
+# frontend-specific: the docker serving-image path, the attestation-sign
+# fixture wrapper, and the scratch deploy/frontend + attestation tree with
+# its own pitchfork.toml.
+#
+# The default TOOLBOX_ATTESTATION_VERIFY seam (repo-structure.md § The
+# concerns, C4) is exercised by every scratch test: scratch_frontend copies
+# BOTH attestation/ and deploy/frontend/ plus a mise.toml marker, and no
+# test sets TOOLBOX_ATTESTATION_VERIFY — frontend-serve.sh / frontend-deploy.sh
+# resolve the seam to the scratch attestation/ copy on their own.
 
 # --- load the shared test lib (per-dir loader, no BATS_LIB_PATH / mise env) -
 # ports.bash first — registry.bash uses free_port.
@@ -14,26 +21,26 @@ while [ "$_d" != "/" ] && [ ! -e "$_d/mise.toml" ]; do _d="$(dirname "$_d")"; do
 . "$_d/tests/lib/scratch.bash"
 # shellcheck source=/dev/null
 . "$_d/tests/lib/registry.bash"
+ATTESTATION_SCRIPTS="$_d/attestation/scripts"
 unset _d
 
-# --- approve.sh call wrappers --------------------------------------------
+# --- attestation-sign fixture wrapper ----------------------------------
+# deploy/frontend consumes an approved image, so its tests need to produce
+# one (an allowed edge: deploy/frontend ▶ attestation). Signs with the
+# local test key via the TOOLBOX_APPROVE_KEY seam — no OpenBao.
 
-# run_approve <image-ref> <approve|reject> <reason> -> runs approve.sh with
-# the local test key and the decision fed on stdin. Echoes its stdout.
-run_approve() {
-	printf '%s\n%s\n' "$2" "$3" >"$FIX/answers"
-	TOOLBOX_APPROVE_KEY="$FIX/cosign.key" \
-		COSIGN_PASSWORD="" \
-		TOOLBOX_APPROVED_BY="bats" \
-		"$SCRIPTS/approve.sh" "$1" <"$FIX/answers"
+# sign_image <image-ref> <approve|reject> [reason] -> echoes the attestation
+# digest the sign script told the operator to record.
+sign_image() {
+	local reason="${3:-t5b $2}"
+	printf '%s\n%s\n' "$2" "$reason" >"$FIX/sign-answers"
+	local out
+	out="$(TOOLBOX_APPROVE_KEY="$FIX/cosign.key" COSIGN_PASSWORD="" TOOLBOX_APPROVED_BY="bats" \
+		"$ATTESTATION_SCRIPTS/attestation-sign.sh" "$1" <"$FIX/sign-answers")"
+	printf '%s' "$out" | sed -n 's/^attestation digest: //p'
 }
 
-# attestation_digest <approve output> -> the sha256:... it told the operator to record
-attestation_digest() {
-	printf '%s' "$1" | sed -n 's/^attestation digest: //p'
-}
-
-# --- deploy.bats (T5b) docker-backed fixture ----------------------------
+# --- frontend-deploy.bats docker-backed fixture ----------------------------
 # A real serving image needs docker + a registry docker can push to. zot
 # rejects docker-built manifests, so this uses `registry:3` (pulled once).
 # All of this is skipped when docker is unavailable.
@@ -90,31 +97,27 @@ make_serving_image() {
 	echo "$ref"
 }
 
-# sign_local <image-ref> <verdict> -> echoes the attestation digest, signed
-# with $FIX/cosign.key (make_key must have run).
-sign_local() {
-	printf '%s\n%s\n' "$2" "t5b $2" >"$FIX/ans"
-	local out
-	out="$(TOOLBOX_APPROVE_KEY="$FIX/cosign.key" COSIGN_PASSWORD="" TOOLBOX_APPROVED_BY="bats" \
-		"$SCRIPTS/approve.sh" "$1" <"$FIX/ans")"
-	attestation_digest "$out"
-}
-
-# scratch_frontend <scratchdir> -> copies deploy/frontend into <scratchdir>
-# and writes a pitchfork.toml there with only the frontend daemon, so
-# pitchfork commands never touch a real `frontend` daemon. The per-run
-# isolation seams (set by frontend_isolation in setup) are baked into the
-# daemon's env block so a pitchfork-restarted run.sh picks them up — a
-# `pitchfork restart` does NOT inherit the caller's environment.
+# scratch_frontend <scratchdir> -> a self-contained checkout slice: the
+# attestation/ seam + deploy/frontend/ + a mise.toml marker + a pitchfork.toml
+# with only the frontend daemon, so pitchfork commands never touch a real
+# `frontend` daemon and the default verify seam resolves inside the scratch.
+# The per-run isolation seams (set by frontend_isolation in setup) are baked
+# into the daemon's env block so a pitchfork-restarted frontend-serve.sh
+# picks them up — `pitchfork restart` does NOT inherit the caller's env.
 scratch_frontend() {
 	local s="$1"
 	local host_port="${TOOLBOX_FRONTEND_HOST_PORT:-44100}"
 	local container="${TOOLBOX_FRONTEND_CONTAINER:-toolbox-frontend}"
-	scratch_copy "$s" "deploy/frontend"
-	rm -rf "$s/deploy/frontend/scripts/tests" "$s/deploy/frontend/current-image.txt"
+	scratch_copy "$s" "attestation" "deploy/frontend"
+	rm -rf "$s/attestation/scripts/tests" \
+		"$s/deploy/frontend/scripts/tests" \
+		"$s/deploy/frontend/current-image.txt"
+	# mise.toml marker — frontend_repo_root (lib/frontend.sh) walks up to it
+	# to resolve the default attestation-verify path.
+	: >"$s/mise.toml"
 	cat >"$s/pitchfork.toml" <<-EOF
 		[daemons.frontend]
-		run = "./run.sh"
+		run = "./scripts/frontend-serve.sh"
 		dir = "deploy/frontend"
 		retry = 0
 		ready_port = ${host_port}

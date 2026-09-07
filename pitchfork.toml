@@ -9,16 +9,17 @@
 #   pitchfork logs -g openbao  -> daemon logs
 
 # Local cv_frontend demo deploy (docs/adr/0009-demo-consumer-is-local-
-# container-not-k8s.md). `run.sh` is a FIXED indirection — never repoint it; `mise run
-# consume` records the approved image in deploy/frontend/current-image.txt
-# and restarts this daemon. No `auto`: the operator (or `mise run consume`)
+# container-not-k8s.md). `scripts/frontend-serve.sh` is the indirection this
+# daemon runs — a deploy records the approved image in
+# deploy/frontend/current-image.txt and restarts this daemon; it never
+# rewrites this file. No `auto`: the operator (or `mise run frontend:deploy`)
 # starts it explicitly, so a `cd` into the repo does not crash-loop on
 # cv_frontend's known runtime bug. `retry = 0` for the same reason.
 #
 # NOTE: `pitchfork daemons remove`/`add` rewrites this file and drops these
 # comments — edit it by hand.
 [daemons.frontend]
-run = "./run.sh"
+run = "./scripts/frontend-serve.sh"
 dir = "deploy/frontend"
 retry = 0
 ready_port = 44100

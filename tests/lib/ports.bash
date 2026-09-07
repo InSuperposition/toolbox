@@ -15,8 +15,9 @@ free_port() {
 }
 
 # frontend_isolation — call in a bats setup(). Exports the two seams that
-# run.sh / consume.sh / scratch_frontend read so a docker deploy test never
-# collides with another run's container or host port. The container port
+# frontend-serve.sh / frontend-deploy.sh / scratch_frontend read so a docker
+# deploy test never collides with another run's container or host port. The
+# container port
 # stays fixed (44100 — the image's own contract, CX #7); only the host side
 # is mapped to a free port.
 #   TOOLBOX_FRONTEND_HOST_PORT  — free host port

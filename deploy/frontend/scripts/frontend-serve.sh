@@ -2,16 +2,20 @@
 set -euo pipefail
 
 # pitchfork daemon entrypoint for the local cv_frontend demo deploy
-# (docs/adr/0009-demo-consumer-is-local-container-not-k8s.md). pitchfork runs this
-# with cwd = deploy/frontend (pitchfork.toml `dir`); it is also safe to run
-# directly. NEVER edit pitchfork.toml to point somewhere else — this file
-# is the fixed indirection so a deploy never rewrites pitchfork's own
-# config.
+# (docs/adr/0009-demo-consumer-is-local-container-not-k8s.md). pitchfork runs
+# this with cwd = deploy/frontend (pitchfork.toml `dir`); it is also safe to
+# run directly. pitchfork.toml points `run` at this script and nothing else
+# — a deploy records the approved image in current-image.txt, it never
+# rewrites pitchfork's own config.
 #
 # Reads the currently-approved image from current-image.txt (written
-# atomically by `mise run consume`), RE-VERIFIES its approval at launch
-# time (not just at consume time), then `exec`s `docker run` in the
+# atomically by `mise run frontend:deploy`), RE-VERIFIES its approval at
+# launch time (not just at deploy time), then runs `docker run` in the
 # foreground so pitchfork is the sole supervisor.
+#
+# The verify seam lives in the attestation/ concern; this reaches it through
+# lib/frontend.sh's TOOLBOX_ATTESTATION_VERIFY seam (the one allowed
+# cross-concern edge — repo-structure.md § The concerns, ADR 0013).
 #
 # Launch re-verify (Codex P1-8): bounded retries + backoff on a retryable
 # verify failure (registry unreachable / referrer not propagated), then a
@@ -24,10 +28,12 @@ set -euo pipefail
 # an already-running container whose image is rejected afterwards — that
 # needs a separate watch, deferred.
 
-cd "$(dirname "$0")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null  # lib is exercised via frontend-serve.bats
+. "$SCRIPT_DIR/lib/frontend.sh"
+cd "$SCRIPT_DIR/.."
 
 STATE="current-image.txt"
-VERIFY="scripts/verify-approval.sh"
 PORT=44100                                            # container port — the image's own contract
 HOST_PORT="${TOOLBOX_FRONTEND_HOST_PORT:-$PORT}"      # host side; a test overrides it for parallel-safety (CX #7)
 NAME="${TOOLBOX_FRONTEND_CONTAINER:-toolbox-frontend}"
@@ -35,7 +41,7 @@ MAX_ATTEMPTS="${TOOLBOX_FRONTEND_VERIFY_ATTEMPTS:-5}"
 
 stopped() { echo "frontend: $1 — not launching" >&2; exit 1; }
 
-[ -f "$STATE" ] || stopped "no approved image yet (run: mise run consume -- <registry/repo@sha256:...> <sha256:attestation>)"
+[ -f "$STATE" ] || stopped "no approved image yet (run: mise run frontend:deploy -- <registry/repo@sha256:...> <sha256:attestation>)"
 
 # Two lines: full image reference, then the approval-attestation digest.
 image_ref="$(sed -n '1p' "$STATE")"
@@ -59,7 +65,7 @@ trap 'cleanup; exit 143' TERM INT
 attempt=1
 while :; do
 	set +e
-	"./$VERIFY" "$image_ref" "$att_digest"
+	frontend_attestation_verify "$image_ref" "$att_digest"
 	rc=$?
 	set -e
 	case "$rc" in

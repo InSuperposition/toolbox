@@ -93,6 +93,7 @@ run = "./attestation/scripts/attestation-sign.sh"
 description = "Verify a pinned approval attestation, no deploy — args: <registry/repo@sha256:...> <sha256:attestation-digest>"
 run = "./attestation/scripts/attestation-verify.sh"
 
-[tasks.consume]
+# The frontend image consumer (docs/designs/repo-structure.md § mise task map).
+[tasks."frontend:deploy"]
 description = "Verify a pinned approval attestation and deploy that image to the local pitchfork frontend daemon — args: <registry/repo@sha256:...> <sha256:attestation-digest>"
-run = "./deploy/frontend/scripts/consume.sh"
+run = "./deploy/frontend/scripts/frontend-deploy.sh"
