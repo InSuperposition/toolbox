@@ -12,7 +12,7 @@
 #           runtime without docker, they do not vanish from the count)
 
 bats    attestation/scripts/tests/attestation-sign.bats     10
-bats    attestation/scripts/tests/attestation-verify.bats   9
+bats    attestation/scripts/tests/attestation-verify.bats   11
 bats    attestation/scripts/tests/openbao-preflight.bats    8
 bats    deploy/frontend/scripts/tests/frontend-deploy.bats  4    # 2 [docker] cases skip without docker
 bats    deploy/frontend/scripts/tests/frontend-serve.bats   6    # 1 [docker] case skips without docker

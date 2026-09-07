@@ -46,20 +46,64 @@ sign() { # <verdict> -> echoes the attestation digest
 	[ "$status" -eq 0 ]
 }
 
-@test "wrong subject: an approval for another image is refused" {
+# cosign's own claim check (signature + subject + predicate type, one call)
+# is a single terminal "attestation verification failed" — the script no
+# longer parses cosign's unversioned stderr to sub-classify. These three
+# cases prove each of those checks still fires; the verdict-rejected case
+# above is the one distinct message (it comes from the CUE schema, not cosign).
+
+@test "wrong subject: an approval for another image is refused (exit 1)" {
 	att="$(sign approve)"
 	OTHER="$(make_image "$FIX")"
 	run "$SCRIPTS/attestation-verify.sh" "$OTHER" "$att"
 	[ "$status" -eq 1 ]
-	[[ "$output" == *"wrong subject"* ]]
+	[[ "$output" == *"attestation verification failed"* ]]
 }
 
-@test "bad signature: verifying against a different public key is refused" {
+@test "bad signature: verifying against a different public key is refused (exit 1)" {
 	att="$(sign approve)"
 	( cd "$FIX" && COSIGN_PASSWORD="" cosign generate-key-pair --output-key-prefix other >/dev/null 2>&1 )
 	TOOLBOX_APPROVAL_PUBKEY="$FIX/other.pub" run "$SCRIPTS/attestation-verify.sh" "$IMAGE" "$att"
 	[ "$status" -eq 1 ]
-	[[ "$output" == *"bad signature"* ]]
+	[[ "$output" == *"attestation verification failed"* ]]
+}
+
+@test "wrong predicate type: a validly-signed non-approval attestation is refused (exit 1)" {
+	# sign the image with a DIFFERENT predicate type — cosign's --type check
+	# must still catch it (Codex: don't lose the predicate-type binding).
+	jq -n --arg d "sha256:${IMAGE##*@sha256:}" \
+		'{schemaVersion:1, digest:$d, verdict:"approved", reason:"x",
+		  approvedBy:"bats", approvedAt:"2026-01-01T00:00:00Z",
+		  scanReportRef:"sha256:0000000000000000000000000000000000000000000000000000000000000000"}' \
+		>"$FIX/pred.json"
+	COSIGN_PASSWORD="" cosign attest --predicate "$FIX/pred.json" \
+		--type "https://example.com/not-an-approval/v1" \
+		--key "$FIX/cosign.key" --use-signing-config=false --tlog-upload=false \
+		"$IMAGE" >/dev/null 2>&1
+	wrong="$(oras discover --plain-http --format json "$IMAGE" | jq -r '
+		[.referrers[] | select(.artifactType == "application/vnd.dev.sigstore.bundle.v0.3+json")] | last | .digest')"
+	run "$SCRIPTS/attestation-verify.sh" "$IMAGE" "$wrong"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"attestation verification failed"* ]]
+}
+
+@test "a post-sign-tampered statement fails the signature check (exit 1)" {
+	att="$(sign approve)"
+	mf="$(oras manifest fetch --plain-http "${IMAGE%@*}@${att}")"
+	layer="$(printf '%s' "$mf" | jq -r '.layers[0].digest')"
+	oras blob fetch --plain-http --output "$FIX/good.json" "${IMAGE%@*}@${layer}"
+	# decode the DSSE payload, change one field, re-encode — the signature
+	# (over the ORIGINAL payload) no longer matches.
+	tampered="$(jq -r '.dsseEnvelope.payload' "$FIX/good.json" | base64 -d \
+		| jq -c '.predicate.reason = "TAMPERED"' | base64 | tr -d '\n')"
+	jq --arg p "$tampered" '.dsseEnvelope.payload = $p' "$FIX/good.json" >"$FIX/bad.json"
+	bad="$(cd "$FIX" && oras attach --plain-http \
+		--artifact-type application/vnd.dev.sigstore.bundle.v0.3+json \
+		--format go-template --template '{{.digest}}' \
+		"$IMAGE" "bad.json:application/vnd.dev.sigstore.bundle.v0.3+json" 2>/dev/null)"
+	run "$SCRIPTS/attestation-verify.sh" "$IMAGE" "$bad"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"attestation verification failed"* ]]
 }
 
 @test "unknown attestation digest is retryable (exit 3), not a terminal failure" {

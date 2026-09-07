@@ -21,9 +21,13 @@ set -euo pipefail
 # irrelevant — only the pinned attestation is looked at.
 #
 # Exit 0  — valid, signed by the approval key, verdict "approved".
-# Exit 1  — TERMINAL verification failure, distinct stderr line: bad
-#           signature / wrong subject / wrong predicate type / verdict
-#           rejected / bad schema. Re-running will not change the answer.
+# Exit 1  — TERMINAL verification failure. cosign's claim check (signature +
+#           subject + predicate type, one call) failed → the generic
+#           "attestation verification failed" line, with cosign's own output
+#           in $WORKDIR/verify.err (captured, echoed to the daemon log, never
+#           parsed — its wording is unversioned). The one distinct case is
+#           "verdict: rejected", which comes from the CUE schema check, not
+#           cosign. Re-running will not change the answer.
 # Exit 2  — bad arguments / missing public key.
 # Exit 3  — RETRYABLE: the attestation or its bundle blob could not be
 #           pulled (not found yet / registry unreachable / rate-limited).
@@ -80,7 +84,11 @@ if ! oras blob fetch "${ORAS_HTTP[@]}" --output "$WORKDIR/bundle.json" "${REPO}@
 	retryable "could not fetch attestation bundle blob from $REPO: $(head -1 "$WORKDIR/err")"
 fi
 
-# --- 2. Signature + subject + predicate-type, in one cosign call ---
+# --- 2. Signature + subject + predicate type — cosign's own claim check,
+#        one call, its most-audited path. On failure we do NOT parse
+#        cosign's stderr to sub-classify (its wording is unversioned — a
+#        cosign bump would silently reclassify a trust failure). One
+#        terminal line; the detail is in verify.err for the operator log.
 if ! cosign verify-blob-attestation \
 	--bundle "$WORKDIR/bundle.json" \
 	--key "$PUBKEY" \
@@ -90,17 +98,11 @@ if ! cosign verify-blob-attestation \
 	--digestAlg sha256 \
 	--insecure-ignore-tlog \
 	>/dev/null 2>"$WORKDIR/verify.err"; then
-	err="$(cat "$WORKDIR/verify.err")"
-	case "$err" in
-	*"invalid predicate type"*) fail "wrong predicate type — this attestation is not an approval record" ;;
-	*"does not match any digest in statement"*) fail "wrong subject — this attestation is for a different image" ;;
-	*"accepted signatures do not match threshold"* | *"could not verify envelope"* | *"signature"*)
-		fail "bad signature — not signed by the approval key ($PUBKEY)" ;;
-	*) fail "attestation verification failed: ${err%%$'\n'*}" ;;
-	esac
+	sed 's/^/  cosign: /' "$WORKDIR/verify.err" >&2
+	fail "attestation verification failed — not a valid approval for $IMAGE_HEX (see cosign output above)"
 fi
 
-# --- 3. Verdict must be "approved" (the poison-proof check) ---
+# --- 3. Verdict must be "approved" (the poison-proof check — CUE, not cosign) ---
 jq -r '.dsseEnvelope.payload' "$WORKDIR/bundle.json" | base64 -d >"$WORKDIR/statement.json"
 if ! cue vet "$WORKDIR/statement.json" -d '#ApprovedStatement' "$POLICY" 2>"$WORKDIR/cue.err"; then
 	verdict="$(jq -r '.predicate.verdict // "unknown"' "$WORKDIR/statement.json")"

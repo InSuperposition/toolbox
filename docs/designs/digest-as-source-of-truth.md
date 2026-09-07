@@ -107,12 +107,14 @@ build ─▶ scan+gate ─▶ evidence referrers ─▶ human approval ─▶ co
    `attestation/cosign-approval.pub`
    ([ADR 0005](../adr/0005-consume-verifies-against-committed-pubkey.md)),
    checks the subject digest and predicate type with `cosign
-   verify-blob-attestation`, then `cue vet`s the statement against
-   `#ApprovedStatement` (verdict must be `approved`). Exit 0 = valid and
-   approved; exit 1 = terminal failure with a distinct message (bad
-   signature / wrong subject / wrong predicate type / verdict rejected /
-   bad schema); exit 3 = retryable (attestation or bundle could not be
-   pulled). `cosign verify-attestation --policy` is deliberately **not**
+   verify-blob-attestation` (one call — its wording is unversioned, so a
+   failure there is one generic terminal line plus cosign's own output in
+   the log, never re-classified by parsing that text), then `cue vet`s the
+   statement against `#ApprovedStatement` (verdict must be `approved`).
+   Exit 0 = valid and approved; exit 1 = terminal failure ("attestation
+   verification failed", or the CUE-derived "verdict: rejected"); exit 3 =
+   retryable (attestation or bundle could not be pulled). `cosign
+   verify-attestation --policy` is deliberately **not**
    used — it fails if *any* attestation of the type on the image fails the
    policy, which the digest pin avoids.
 
@@ -298,7 +300,7 @@ GitHub Actions (public repo, unmetered)          Local (repo owner's machine)
 | `mise run attestation:sign` | OpenBao unreachable / uninitialised / sealed / unauthorized / missing-key | `openbao-preflight.sh` distinguishes all five, exit 3, names the fix |
 | `mise run attestation:sign` | Ctrl-C / EOF / empty at the prompt | no signed record written, clean abort |
 | `mise run attestation:sign` | `cosign attest` signs but the registry push fails | read-back check fails loudly, non-zero; no false "approved" |
-| `mise run frontend:deploy` / launch re-verify | attestation missing / bad sig / wrong subject / verdict rejected | `attestation-verify.sh` exit 1, distinct stderr per case |
+| `mise run frontend:deploy` / launch re-verify | attestation missing / bad sig / wrong subject / verdict rejected | `attestation-verify.sh` exit 1 — "attestation verification failed" (cosign's claim check) or "verdict: rejected" (CUE); cosign's own output in the log |
 | launch re-verify | GHCR transient failure | `attestation-verify.sh` exit 3 → `frontend-serve.sh` bounded retry + backoff → visible stopped state, never a hang |
 | `attestation-verify.sh` | OpenBao down | not applicable — verify never touches OpenBao |
 | OpenBao Transit | raft store lost | past approvals still verify (pubkey in-repo); `mise run local:openbao:snapshot-restore` restores signing ability |
