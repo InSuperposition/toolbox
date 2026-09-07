@@ -1,0 +1,22 @@
+id: boundary-shell-concern-climb
+language: bash
+severity: error
+message: >-
+  A relative-path climb crosses a concern boundary — two-or-more levels up,
+  or up into a named sibling concern (deploy/ attestation/ modules/
+  environments/). A concern reaches another only through an env seam or a
+  mise-task call, never a literal `../` path. A single `$SCRIPT_DIR/../file`
+  within the same concern is fine. See docs/designs/repo-structure.md.
+files:
+  - "**/*.sh"
+ignores:
+  - "**/tests/**"
+rule:
+  all:
+    - any:
+        - { regex: "\\.\\./\\.\\./" }
+        - { regex: "\\.\\./(deploy|attestation|modules|environments)/" }
+    - any:
+        - { kind: string_content }
+        - { kind: word }
+        - { kind: raw_string }

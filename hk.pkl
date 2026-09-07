@@ -8,11 +8,17 @@
 /// hk.pkl NEVER calls back into a mise task (no cycle, CLAUDE.md § mise).
 ///
 /// Layering:
-///   pre-commit  fast + side-effect-free : shellcheck, shfmt-check, pkl, tofu fmt, cue fmt
+///   pre-commit  fast + side-effect-free : shellcheck, pkl, tofu fmt, cue fmt, ls-lint, ast-grep
 ///   pre-push    + offline validation    : tofu validate
 ///   check       + the full test matrix  : tofu test, bats
 ///                (bats spins real OpenBao/docker daemons - too heavy for a
 ///                 file-triggered hook, so it lives in `check` only)
+///
+/// ls-lint + ast-grep enforce docs/designs/repo-structure.md: directory case
+/// and <domain>-<verb>.sh naming (ls-lint, .ls-lint.yml), and forbidden
+/// cross-concern path refs in shell (ast-grep, sgconfig.yml + rules/). Both
+/// read the whole tree, not a file list — an honestly-scoped lint, not graph
+/// analysis (repo-structure.md § Honest scope).
 amends "package://github.com/jdx/hk/releases/download/v1.57.0/hk@1.57.0#/Config.pkl"
 import "package://github.com/jdx/hk/releases/download/v1.57.0/hk@1.57.0#/Builtins.pkl"
 
@@ -35,6 +41,20 @@ local fast = new Mapping<String, Step> {
     glob = List("**/*.cue")
     check = "cue fmt --check {{files}}"
     fix = "cue fmt {{files}}"
+  }
+  // Structure + naming (docs/designs/repo-structure.md § Enforcement).
+  // ls-lint reads names only and validates the whole tree against
+  // .ls-lint.yml itself, so it takes no file list.
+  ["ls-lint"] = Builtins.ls_lint
+  // Forbidden cross-concern path refs in shell. `ast-grep scan` reads
+  // sgconfig.yml + rules/ and walks the whole tree; the glob only gates
+  // whether the step runs when a relevant file changes.
+  ["ast-grep"] {
+    glob = List("**/*.sh", "**/*.bash", "sgconfig.yml", "rules/**/*.yml")
+    allow_binary = true
+    allow_symlinks = true
+    batch = false
+    check = "ast-grep scan"
   }
 }
 

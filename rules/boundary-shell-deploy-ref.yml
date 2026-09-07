@@ -1,0 +1,26 @@
+id: boundary-shell-deploy-ref
+language: bash
+severity: error
+message: >-
+  A script outside deploy/ names a literal deploy/ path. deploy/frontend is a
+  consumer — nothing upstream of it (the attestation seam, an environment's
+  orchestration scripts) may reference it. Reach it through a task call or an
+  env seam instead. See docs/designs/repo-structure.md.
+note: >-
+  TEMPORARY EXCEPTION: scripts/bootstrap-openbao.sh is excluded below. It
+  writes deploy/frontend/cosign-approval.pub today; Phase 4d (T5d) changes it
+  to call `mise run attestation:export-pubkey` (--outfile ->
+  attestation/cosign-approval.pub). Drop the ignore when that lands.
+files:
+  - "scripts/**/*.sh"
+  - "environments/**/*.sh"
+  - "attestation/**/*.sh"
+ignores:
+  - "scripts/bootstrap-openbao.sh"
+rule:
+  all:
+    - regex: "deploy/"
+    - any:
+        - { kind: string_content }
+        - { kind: word }
+        - { kind: raw_string }

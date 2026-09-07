@@ -223,17 +223,24 @@ Two `hk` fast-layer steps, both covered by `mise run check`:
 
 | tool | job | how |
 |---|---|---|
-| `ls-lint` (`aqua:loeffel-io/ls-lint`; the `hk` `ls_lint` builtin drives the binary) | structure + naming | `.ls-lint.yml`: kebab-case directories; the `.sh` **stem** matches `^[a-z]+(-[a-z]+)+$`; each `scripts/` has a `tests/`; allowed extensions per directory |
-| `ast-grep` (`aqua:ast-grep/ast-grep`) | forbidden-edge **lint** | `sgconfig.yml` + `rules/boundary-*.yml`: per concern, per language — error on a **literal** `deploy/` / `attestation/` path string, a `../<concern>` relative climb, or `source`/exec of a literal path crossing a boundary |
+| `ls-lint` (`aqua:loeffel-io/ls-lint`; the `hk` `ls_lint` builtin drives the binary) | structure + naming | `.ls-lint.yml`: `.dir` is `kebab-case`; the `.sh` **stem** matches `^[a-z]+(-[a-z]+)+$` (`<domain>-<verb>`, no `\.sh` in the pattern) |
+| `ast-grep` (`aqua:ast-grep/ast-grep`) | forbidden-edge **lint** | `sgconfig.yml` + `rules/boundary-*.yml`: **shell only** — error on a literal `deploy/` path in a script upstream of `deploy/`, and on a `../` climb two-or-more levels or into a named sibling concern |
+| `tests/check-coverage.sh` (Phase 1c) | `scripts/`↔`tests/` pairing + suite scheduling | not ls-lint — a script; see § Testing in CLAUDE.md |
+
+Each phase's `.ls-lint.yml` and `rules/` describe the **then-current** tree.
+A temporary exception (a pre-restructure name or a not-yet-fixed edge) is
+carried as an explicit `ignores:` / `files:` exclusion with the removing
+phase named in the rule file, and listed in that phase's PR body.
 
 ### Honest scope
 
 `ls-lint` + `ast-grep` are a **strong lint, not dependency-graph
-analysis.** They catch literal path strings, relative climbs, and
-`source`/exec of a literal. They do **not** catch: a path assembled from
-variables, `source "$x"` resolution, or cross-language task references
-(the `ast-grep` rules are per-language; TOML/Pkl task refs are not
-covered). The lint is paired with a review checklist for the rest.
+analysis.** They catch literal path strings and relative climbs in shell.
+They do **not** catch: a path assembled from variables, `source "$x"`
+resolution, cross-language task references, or **anything in the HCL
+layer** — `ast-grep` ships no Terraform/HCL grammar, so the tofu unit's
+edges (`environments/local/openbao ─╳▶ …`) are not machine-checked here.
+The lint is paired with a review checklist for the rest.
 
 A real resolved-dependency-graph check — a generated manifest validated by
 `conftest`/OPA (Rego), `tofu graph` for the HCL layer, or CUE/Timoni
@@ -249,8 +256,8 @@ lands, the affected files stay at their pre-restructure paths:
 
 | phase | moves | status |
 |---|---|---|
-| 0 | this doc + CLAUDE.md rule + 2 ADRs — no code | ← you are here |
-| 1a | pin `ls-lint` + `ast-grep`; `.ls-lint.yml` + `rules/` for the **current** tree | pending |
+| 0 | this doc + CLAUDE.md rule + 2 ADRs — no code | done |
+| 1a | pin `ls-lint` + `ast-grep`; `.ls-lint.yml` + `sgconfig.yml` + `rules/` for the **current** tree; both wired into `hk.pkl` fast layer | ← you are here |
 | 1b–1d | `tests/lib/`, co-locate `deploy/frontend/tests/`, coverage guard, parallel-safe isolation | pending |
 | 2 | local-OpenBao → `environments/local/{openbao,scripts}/`; root `scripts/` emptied; `modules/` → README only | pending |
 | 3 | mise task namespacing | pending |

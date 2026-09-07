@@ -100,7 +100,7 @@ duplicate detail.
 | task | phase | what | status |
 |---|---|---|---|
 | T1 | 0 | `repo-structure.md` + CLAUDE.md § File Placement + ADR 0012/0013 — no code | ✅ done |
-| T2a | 1a | pin `ls-lint` (`aqua:loeffel-io/ls-lint`) + `ast-grep` (`aqua:ast-grep/ast-grep`); `.ls-lint.yml` + `sgconfig.yml` + `rules/boundary-*.yml` for the **current** tree; wire both into `hk.pkl` fast layer | pending |
+| T2a | 1a | pin `ls-lint` (`aqua:loeffel-io/ls-lint`) + `ast-grep` (`aqua:ast-grep/ast-grep`); `.ls-lint.yml` + `sgconfig.yml` + `rules/boundary-*.yml` for the **current** tree; wire both into `hk.pkl` fast layer | ✅ done |
 | T2b | 1b | `tests/lib/{scratch,assert,registry}.bash` + `tests/setup_suite.bash` + `load_lib`; move `deploy/frontend/tests/` → `scripts/tests/` | pending |
 | T2c | 1c | `tests/check-coverage.sh` + `tests/manifest.txt` (parse `hk check --format jsonl`); `tofu init` as an ordered prereq in `hk.pkl`; clean-checkout validation | pending |
 | T2d | 1d | parallel-safe test isolation — per-run host port + container-name seams; scope `deploy.bats` + `bootstrap.bats:41` cleanup | pending |
@@ -108,6 +108,18 @@ duplicate detail.
 | T4 | 3 | rename all mise tasks `<env>:<domain>:<verb>` / `<domain>:<verb>`; grep-rewrite every `mise run <old>` reference | pending |
 | T5a–d | 4 | **ONE PR** — extract `attestation/`; split `deploy/frontend/` (`frontend-deploy.sh` / `frontend-serve.sh` + `TOOLBOX_ATTESTATION_VERIFY` seam); `openbao-preflight.bats` **5-state** + fix its stale sealed-state advice; cut `cosign-approval.pub` over via `mise run attestation:export-pubkey` | pending |
 | T6 | 5 | docs-accuracy sweep — every `.md` re-verified against the moved code | pending |
+
+**Phase 1a temporary lint exceptions** (CX5 — each carries its removal
+phase in the rule/config file):
+
+- `.ls-lint.yml` ignores `deploy/frontend/run.sh`, `.../scripts/approve.sh`,
+  `.../scripts/consume.sh` — pre-restructure names, renamed in Phase 4 (T5).
+- `rules/boundary-shell-deploy-ref.yml` excludes
+  `scripts/bootstrap-openbao.sh` — it writes `deploy/frontend/cosign-approval.pub`
+  today; Phase 4d (T5d) switches it to `mise run attestation:export-pubkey`.
+- **HCL not covered.** `ast-grep` ships no Terraform grammar, so the tofu
+  unit's forbidden edges are not machine-checked. Folds into the deferred
+  resolved-graph planning session below.
 
 **Merge order:** P2/P3/P4 all edit `mise.toml` + `hk.pkl` + `rules/` —
 serialize. Lane B: P1a→P1b→P1c→P1d→P2→P3. Lane C: P4 after P1c, rebased

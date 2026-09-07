@@ -1,0 +1,31 @@
+# Structure + naming lint — docs/designs/repo-structure.md § Enforcement.
+# Runs via the hk `ls_lint` builtin in the `fast` layer; `mise run check`
+# covers it. ls-lint reads names only, never file contents.
+#
+# Scope today: directory case + shell-script stem naming. The
+# scripts/ <-> tests/ pairing and the *.sh <-> suite check live in
+# tests/check-coverage.sh (Phase 1c), not here — ls-lint has no reliable
+# cross-path existence rule.
+
+ls:
+  # Every directory is kebab-case (single lowercase words included).
+  .dir: kebab-case
+
+  # Shell scripts are <domain>-<verb>: lowercase, at least one hyphen.
+  # The stem is matched — the pattern carries no `\.sh` (repo-structure.md).
+  .sh: regex:^[a-z]+(-[a-z]+)+$
+
+ignore:
+  - .git
+  - .github
+  - .claude
+  - .context
+  - "**/.terraform"
+  # Pre-restructure names. Phase 4 renames these to <domain>-<verb>:
+  #   deploy/frontend/run.sh              -> frontend-serve.sh
+  #   deploy/frontend/scripts/approve.sh  -> attestation-sign.sh
+  #   deploy/frontend/scripts/consume.sh  -> frontend-deploy.sh
+  # Remove these three ignores when Phase 4 (T5) lands.
+  - deploy/frontend/run.sh
+  - deploy/frontend/scripts/approve.sh
+  - deploy/frontend/scripts/consume.sh
