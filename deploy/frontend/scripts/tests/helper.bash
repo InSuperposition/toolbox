@@ -5,8 +5,11 @@
 # scratch deploy/frontend tree with its own pitchfork.toml.
 
 # --- load the shared test lib (per-dir loader, no BATS_LIB_PATH / mise env) -
+# ports.bash first — registry.bash uses free_port.
 _d="$BATS_TEST_DIRNAME"
 while [ "$_d" != "/" ] && [ ! -e "$_d/mise.toml" ]; do _d="$(dirname "$_d")"; done
+# shellcheck source=/dev/null
+. "$_d/tests/lib/ports.bash"
 # shellcheck source=/dev/null
 . "$_d/tests/lib/scratch.bash"
 # shellcheck source=/dev/null
@@ -99,9 +102,14 @@ sign_local() {
 
 # scratch_frontend <scratchdir> -> copies deploy/frontend into <scratchdir>
 # and writes a pitchfork.toml there with only the frontend daemon, so
-# pitchfork commands never touch a real `frontend` daemon.
+# pitchfork commands never touch a real `frontend` daemon. The per-run
+# isolation seams (set by frontend_isolation in setup) are baked into the
+# daemon's env block so a pitchfork-restarted run.sh picks them up — a
+# `pitchfork restart` does NOT inherit the caller's environment.
 scratch_frontend() {
 	local s="$1"
+	local host_port="${TOOLBOX_FRONTEND_HOST_PORT:-44100}"
+	local container="${TOOLBOX_FRONTEND_CONTAINER:-toolbox-frontend}"
 	scratch_copy "$s" "deploy/frontend"
 	rm -rf "$s/deploy/frontend/scripts/tests" "$s/deploy/frontend/current-image.txt"
 	cat >"$s/pitchfork.toml" <<-EOF
@@ -109,6 +117,7 @@ scratch_frontend() {
 		run = "./run.sh"
 		dir = "deploy/frontend"
 		retry = 0
-		ready_port = 44100
+		ready_port = ${host_port}
+		env = { TOOLBOX_FRONTEND_HOST_PORT = "${host_port}", TOOLBOX_FRONTEND_CONTAINER = "${container}" }
 	EOF
 }

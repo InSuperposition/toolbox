@@ -6,18 +6,8 @@
 # TOOLBOX_APPROVE_KEY seam), and tiny `oras push`ed artifacts standing in
 # for a built image. No OpenBao, no network, no GHCR — the openbao:// KMS
 # leg is proved separately (docs/designs/digest-as-source-of-truth.md
-# § Architecture round-trip proof). Loaded through each <tests>/helper.bash.
-
-# free_port — ask the OS for an unused loopback port.
-free_port() {
-	python3 - <<-'PY'
-		import socket
-		s = socket.socket()
-		s.bind(("127.0.0.1", 0))
-		print(s.getsockname()[1])
-		s.close()
-	PY
-}
+# § Architecture round-trip proof). Loaded through each <tests>/helper.bash,
+# after tests/lib/ports.bash (free_port lives there).
 
 # start_registry <dir> -> sets REG (host:port), writes $dir/zot.pid
 start_registry() {

@@ -12,6 +12,7 @@
 #      (the bundle `mise run openbao-snapshot` writes together)
 
 setup() {
+  load helper
   SCRATCH="$(mktemp -d)"
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
 
@@ -23,18 +24,20 @@ setup() {
   cp -r "$REPO_ROOT/modules" "$SCRATCH/modules"
   cp -r "$REPO_ROOT/scripts" "$SCRATCH/scripts"
 
+  local port; port="$(free_port)"
   export TOOLBOX_OPENBAO_STATE_DIR="$SCRATCH/state"
   export TOOLBOX_OPENBAO_DAEMON="openbao-bats-snap-$$"
-  export TOOLBOX_OPENBAO_LISTEN="127.0.0.1:8398"
+  export TOOLBOX_OPENBAO_LISTEN="127.0.0.1:$port"
   export TOOLBOX_OPENBAO_SUPERVISOR="none"
   export TOOLBOX_OPENBAO_RESET_YES=1
-  export VAULT_ADDR="http://127.0.0.1:8398"
+  export VAULT_ADDR="http://127.0.0.1:$port"
   SNAP="$TOOLBOX_OPENBAO_STATE_DIR/snapshots/latest.snap"
 
   cd "$SCRATCH" || return 1
 }
 
 teardown() {
+  load helper
   [ -f "$TOOLBOX_OPENBAO_STATE_DIR/bao.pid" ] &&
     kill "$(cat "$TOOLBOX_OPENBAO_STATE_DIR/bao.pid")" 2>/dev/null || true
   pkill -f "bao server -config=$TOOLBOX_OPENBAO_STATE_DIR" 2>/dev/null || true

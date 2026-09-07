@@ -103,20 +103,26 @@ duplicate detail.
 | T2a | 1a | pin `ls-lint` (`aqua:loeffel-io/ls-lint`) + `ast-grep` (`aqua:ast-grep/ast-grep`); `.ls-lint.yml` + `sgconfig.yml` + `rules/boundary-*.yml` for the **current** tree; wire both into `hk.pkl` fast layer | ✅ done |
 | T2b | 1b | `tests/lib/{scratch,registry}.bash`; per-`tests/`-dir `helper.bash` loader (F2 resolved simpler — no `setup_suite.bash` / `BATS_LIB_PATH`); `deploy/frontend/tests/` → `deploy/frontend/scripts/tests/` | ✅ done |
 | T2c | 1c | `tests/check-coverage.sh` (disk vs `manifest.txt` vs `hk … --plan --json`) + `tests/check-coverage.bats` mutation test; `tofu-init` ordered prereq (`depends`) in `hk.pkl`; clean-checkout validation | ✅ done |
-| T2d | 1d | parallel-safe test isolation — per-run host port + container-name seams; scope `deploy.bats` + `bootstrap.bats:41` cleanup | pending |
+| T2d | 1d | `tests/lib/ports.bash`; OpenBao bats take a free port (was fixed :8397-8399); `run.sh`/`consume.sh` gain `TOOLBOX_FRONTEND_{HOST_PORT,CONTAINER}` seams (baked into `scratch_frontend`'s `pitchfork.toml` env); dropped `bootstrap.bats` machine-wide `pitchfork clean`; scoped `deploy.bats` teardown | ✅ done |
 | T3 | 2 | OpenBao `git mv` → `environments/local/{openbao,scripts}/`, `source = "./openbao"` (label kept), `lib/openbao.sh` + `openbao-snapshot.sh` extracted, widen `hk` tofu globs to `environments/**`, `modules/README.md` | pending |
 | T4 | 3 | rename all mise tasks `<env>:<domain>:<verb>` / `<domain>:<verb>`; grep-rewrite every `mise run <old>` reference | pending |
 | T5a–d | 4 | **ONE PR** — extract `attestation/`; split `deploy/frontend/` (`frontend-deploy.sh` / `frontend-serve.sh` + `TOOLBOX_ATTESTATION_VERIFY` seam); `openbao-preflight.bats` **5-state** + fix its stale sealed-state advice; cut `cosign-approval.pub` over via `mise run attestation:export-pubkey` | pending |
 | T6 | 5 | docs-accuracy sweep — every `.md` re-verified against the moved code | pending |
 
-**Phase 1b/1c carry-overs** (not blockers):
+**Phase 1b–1d carry-overs** (not blockers):
 
-- `environments/local/tests/*.bats` keep their inline `mkdir`+`cp -r`
-  scratch blocks. They adopt `tests/lib/scratch.bash`'s `scratch_copy`
-  in **Phase 2**, when `git mv` moves the dir to
-  `environments/local/scripts/tests/` anyway.
+- `environments/local/tests/*.bats` now `load helper` (a loader for
+  `tests/lib/ports.bash`) but keep their inline `mkdir`+`cp -r` scratch
+  blocks. They adopt `tests/lib/scratch.bash`'s `scratch_copy` in
+  **Phase 2**, when `git mv` moves the dir to
+  `environments/local/scripts/tests/`; `environments/local/tests/helper.bash`
+  moves with them.
 - `tests/lib/assert.bash` not created yet — added when a suite first needs
   a structured assertion. Existing `[ "$status" -eq N ]` checks stay.
+- **C4** (`attestation/` scratch + a default-`TOOLBOX_ATTESTATION_VERIFY`
+  case) lands in **Phase 4**, when the seam and `attestation/` exist.
+- `frontend_isolation` names the container `toolbox-frontend-test-$$-<n>`;
+  the real deploy still defaults to `toolbox-frontend` / host port 44100.
 - **Re-run the clean-checkout check after Phase 2** (C5): `git clone . <tmp>
   && cd <tmp> && mise install && mise run check` — the OpenBao `git mv`
   changes tofu module paths and the `hk` tofu globs.

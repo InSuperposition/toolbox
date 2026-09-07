@@ -13,6 +13,7 @@
 # test exercises the real `pitchfork daemons add --global` path.
 
 setup() {
+  load helper
   SCRATCH="$(mktemp -d)"
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
 
@@ -22,23 +23,28 @@ setup() {
   cp -r "$REPO_ROOT/modules" "$SCRATCH/modules"
   cp -r "$REPO_ROOT/scripts" "$SCRATCH/scripts"
 
+  # a free port per test, not a fixed one — two `mise run check` in
+  # separate worktrees must not fight over the listener.
+  local port; port="$(free_port)"
   export TOOLBOX_OPENBAO_STATE_DIR="$SCRATCH/state"
   export TOOLBOX_OPENBAO_DAEMON="openbao-bats-$$"
-  export TOOLBOX_OPENBAO_LISTEN="127.0.0.1:8399"
+  export TOOLBOX_OPENBAO_LISTEN="127.0.0.1:$port"
   export TOOLBOX_OPENBAO_SUPERVISOR="none"
   export TOOLBOX_OPENBAO_RESET_YES=1
-  export VAULT_ADDR="http://127.0.0.1:8399"
+  export VAULT_ADDR="http://127.0.0.1:$port"
 
   cd "$SCRATCH" || return 1
 }
 
 teardown() {
+  load helper
   [ -f "$TOOLBOX_OPENBAO_STATE_DIR/bao.pid" ] &&
     kill "$(cat "$TOOLBOX_OPENBAO_STATE_DIR/bao.pid")" 2>/dev/null || true
   pkill -f "bao server -config=$TOOLBOX_OPENBAO_STATE_DIR" 2>/dev/null || true
+  # scoped to THIS test's daemon only — never a machine-wide `pitchfork
+  # clean`, which would nuke a concurrent run's daemon (CX #7).
   pitchfork stop "global/$TOOLBOX_OPENBAO_DAEMON" 2>/dev/null || true
   pitchfork daemons remove --global "$TOOLBOX_OPENBAO_DAEMON" 2>/dev/null || true
-  pitchfork clean 2>/dev/null || true
   cd /
   rm -rf "$SCRATCH"
 }
@@ -77,7 +83,7 @@ teardown() {
 
 @test "bootstrap ignores an inherited VAULT_TOKEN — always uses its own root.token" {
   # Under `mise run check` a scratch bootstrap would otherwise carry the
-  # real daemon's token and 403 against :8399.
+  # real daemon's token and 403 against this instance's listener.
   VAULT_TOKEN="hvs.inherited-garbage-not-this-instance" run ./scripts/bootstrap-openbao.sh
   [ "$status" -eq 0 ]
   export VAULT_TOKEN

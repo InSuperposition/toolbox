@@ -223,12 +223,15 @@ non-overlapping claim:
 | Shell scripts | bats | Every script gets one, in `<concern>/scripts/tests/*.bats` beside the script. |
 
 Layout: each concern's `.bats` live in `scripts/tests/` next to the scripts
-they cover. Shared bats primitives (scratch-dir copy, a throwaway zot
-registry, later port allocation and assertions) live in repo-level
+they cover. Shared bats primitives (a free-port / isolation helper, a
+scratch-dir copy, a throwaway zot registry) live in repo-level
 `tests/lib/*.bash`. Each `scripts/tests/` has a `helper.bash` that walks up
 to the checkout root (`mise.toml` marker) and sources them; a `.bats` file
 reaches the lib with `load helper` — no `BATS_LIB_PATH`, no mise `[env]`
-coupling. `tests/check-coverage.sh` (its own `hk` step, runs last in the `check`
+coupling. A suite that binds a port or names a container takes a fresh one
+per test (`free_port`, `frontend_isolation`) and scopes teardown to its own
+daemon/container, so parallel `mise run check` across worktrees never
+collides. `tests/check-coverage.sh` (its own `hk` step, runs last in the `check`
 hook) diffs three views — the suites it finds on disk, the committed
 `tests/manifest.txt` (path + case count), and what `hk check --all --plan
 --json` schedules — so an `hk` glob edit or a moved test file that

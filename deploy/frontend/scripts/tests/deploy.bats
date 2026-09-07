@@ -13,6 +13,9 @@ setup() {
 	FIX="$(mktemp -d)"
 	SCRIPTS="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
 	FRONTEND="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+	# per-run host port + container name so a docker deploy test never
+	# collides with (or tears down) another run's container.
+	frontend_isolation
 }
 
 teardown() {
@@ -24,7 +27,7 @@ teardown() {
 			pitchfork daemons remove frontend >/dev/null 2>&1
 		) || true
 	fi
-	docker rm -f toolbox-frontend >/dev/null 2>&1 || true
+	docker rm -f "${TOOLBOX_FRONTEND_CONTAINER:-toolbox-frontend}" >/dev/null 2>&1 || true
 	if [ -n "${FIX:-}" ]; then
 		stop_docker_registry "$FIX"
 		stop_registry "$FIX"
@@ -103,7 +106,7 @@ state_dir() {
 	[ "$(cat "$sd/current-image.txt")" = "$before" ]
 }
 
-@test "[docker] consume an approved image -> serves on :44100, records both lines" {
+@test "[docker] consume an approved image -> serves on the published port, records both lines" {
 	load helper
 	deploy_docker_available || skip "docker not available"
 	start_docker_registry "$FIX"
@@ -116,10 +119,10 @@ state_dir() {
 
 	run bash -c "cd '$SCRATCH' && ./deploy/frontend/scripts/consume.sh '$img' '$att'"
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"serving on :44100"* ]]
+	[[ "$output" == *"serving on :${TOOLBOX_FRONTEND_HOST_PORT}"* ]]
 	[ "$(sed -n '1p' "$SCRATCH/deploy/frontend/current-image.txt")" = "$img" ]
 	[ "$(sed -n '2p' "$SCRATCH/deploy/frontend/current-image.txt")" = "$att" ]
-	run curl -s http://127.0.0.1:44100/
+	run curl -s "http://127.0.0.1:${TOOLBOX_FRONTEND_HOST_PORT}/"
 	[[ "$output" == *"t5b ok"* ]]
 }
 
@@ -136,17 +139,17 @@ state_dir() {
 
 	( cd "$SCRATCH" && pitchfork start frontend >/dev/null 2>&1 )
 	sleep 3
-	[ "$(docker ps --filter name=toolbox-frontend -q | wc -l | tr -d ' ')" -eq 1 ]
+	[ "$(docker ps --filter "name=${TOOLBOX_FRONTEND_CONTAINER}" -q | wc -l | tr -d ' ')" -eq 1 ]
 
 	( cd "$SCRATCH" && pitchfork stop frontend >/dev/null 2>&1 )
 	sleep 2
-	[ "$(docker ps -a --filter name=toolbox-frontend -q | wc -l | tr -d ' ')" -eq 0 ]
+	[ "$(docker ps -a --filter "name=${TOOLBOX_FRONTEND_CONTAINER}" -q | wc -l | tr -d ' ')" -eq 0 ]
 
 	( cd "$SCRATCH" && pitchfork start frontend >/dev/null 2>&1 )
 	sleep 3
 	( cd "$SCRATCH" && pitchfork start frontend >/dev/null 2>&1 || true )
 	sleep 1
-	[ "$(docker ps --filter name=toolbox-frontend -q | wc -l | tr -d ' ')" -eq 1 ]
+	[ "$(docker ps --filter "name=${TOOLBOX_FRONTEND_CONTAINER}" -q | wc -l | tr -d ' ')" -eq 1 ]
 }
 
 @test "[docker] a rejected attestation after a good deploy leaves the running container alone" {
@@ -162,11 +165,11 @@ state_dir() {
 
 	bash -c "cd '$SCRATCH' && ./deploy/frontend/scripts/consume.sh '$img' '$good'"
 	before="$(cat "$SCRATCH/deploy/frontend/current-image.txt")"
-	cid_before="$(docker ps --filter name=toolbox-frontend -q)"
+	cid_before="$(docker ps --filter "name=${TOOLBOX_FRONTEND_CONTAINER}" -q)"
 
 	run bash -c "cd '$SCRATCH' && ./deploy/frontend/scripts/consume.sh '$img' '$bad'"
 	[ "$status" -eq 1 ]
 	[[ "$output" == *"verdict: rejected"* ]] || [[ "$output" == *"deployment unchanged"* ]]
 	[ "$(cat "$SCRATCH/deploy/frontend/current-image.txt")" = "$before" ]
-	[ "$(docker ps --filter name=toolbox-frontend -q)" = "$cid_before" ]
+	[ "$(docker ps --filter "name=${TOOLBOX_FRONTEND_CONTAINER}" -q)" = "$cid_before" ]
 }

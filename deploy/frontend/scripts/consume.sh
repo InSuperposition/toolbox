@@ -25,7 +25,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 STATE="$FRONTEND_DIR/current-image.txt"
-PORT=44100
+PORT=44100                                          # container port — the image's own contract
+HOST_PORT="${TOOLBOX_FRONTEND_HOST_PORT:-$PORT}"    # host side; a test overrides it for parallel-safety (CX #7)
 DAEMON="frontend"
 READY_TIMEOUT="${TOOLBOX_CONSUME_READY_TIMEOUT:-30}"
 
@@ -52,18 +53,18 @@ echo "consume: recorded $IMAGE_REF"
 # --- 3. Restart the daemon onto the new image. ---
 pitchfork restart "$DAEMON"
 
-# --- 4. Truthful readiness check on :44100. ---
+# --- 4. Truthful readiness check on the published host port. ---
 deadline=$(( $(date +%s) + READY_TIMEOUT ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
-	code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/" 2>/dev/null || true)"
+	code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${HOST_PORT}/" 2>/dev/null || true)"
 	if [ -n "$code" ] && [ "$code" != "000" ]; then
-		echo "consume: frontend serving on :${PORT} (HTTP ${code})"
+		echo "consume: frontend serving on :${HOST_PORT} (HTTP ${code})"
 		exit 0
 	fi
 	sleep 1
 done
 
-echo "consume: frontend did NOT come ready on :${PORT} within ${READY_TIMEOUT}s" >&2
+echo "consume: frontend did NOT come ready on :${HOST_PORT} within ${READY_TIMEOUT}s" >&2
 echo "  the image is recorded and the daemon was restarted — check: pitchfork logs ${DAEMON}" >&2
 echo "  (cv_frontend has a known Remix v3 runtime crash — T5b proves the pipeline, not the app)" >&2
 exit 1

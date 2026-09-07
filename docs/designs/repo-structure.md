@@ -107,9 +107,17 @@ Runtime-only edges (env vars / mise-task calls, not file paths — allowed, not 
 - **Shared test lib:** each `<concern>/scripts/tests/` has a `helper.bash`
   that walks up to the checkout root (the `mise.toml` marker — no fixed
   depth, no `BATS_LIB_PATH`, no `setup_suite.bash` discovery, no mise
-  `[env]` coupling — F2) and sources the repo-level `tests/lib/*.bash`.
-  A `.bats` file reaches the lib with the standard `load helper`. Anything
-  concern-specific stays in that same `helper.bash`.
+  `[env]` coupling — F2) and sources the repo-level `tests/lib/*.bash`
+  (`ports.bash` first — `registry.bash` needs `free_port`). A `.bats` file
+  reaches the lib with the standard `load helper`. Anything concern-specific
+  stays in that same `helper.bash`.
+- **Parallel-safe suites:** a suite that binds a network port or names a
+  container takes a fresh one per test — `free_port` for the OpenBao
+  listener, `frontend_isolation` for the docker deploy (a free host port
+  mapped to the fixed container port 44100, plus a unique container name).
+  Teardown is scoped to the test's own daemon/container — never a
+  machine-wide `pitchfork clean` or a fixed `docker rm`. Two `mise run
+  check` in separate worktrees run without collision.
 - **Runtime shared shell:** `<concern>/scripts/lib/<domain>.sh` —
   self-contained, no repo-level runtime lib. The `SCRIPT_DIR` / `REPO_ROOT`
   idiom stays inline (standard bash, not domain logic).
@@ -157,7 +165,7 @@ toolbox/
 │       ├── scratch.bash        toolbox_repo_root + scratch_copy — caller names the paths to copy (Phase 1b)
 │       ├── registry.bash       free_port + a throwaway zot registry / cosign key / fake image (Phase 1b)
 │       ├── assert.bash         assert_exit / assert_file_mode … — added when a suite first needs it
-│       └── ports.bash          allocate a free host port; host ≠ container mapping             (Phase 1d)
+│       └── ports.bash          free_port + frontend_isolation (per-run host port + container name)  (Phase 1d)
 │
 ├── attestation/                                      consumer-agnostic sign + verify seam
 │   ├── verdict-approved.cue
@@ -266,8 +274,8 @@ lands, the affected files stay at their pre-restructure paths:
 | 0 | this doc + CLAUDE.md rule + 2 ADRs — no code | done |
 | 1a | pin `ls-lint` + `ast-grep`; `.ls-lint.yml` + `sgconfig.yml` + `rules/` for the **current** tree; both wired into `hk.pkl` fast layer | done |
 | 1b | `tests/lib/{scratch,registry}.bash`; `deploy/frontend/tests/` → `deploy/frontend/scripts/tests/` | done |
-| 1c | `tests/check-coverage.sh` + `manifest.txt` + mutation test; `tofu-init` ordered prereq in `hk.pkl` | ← you are here |
-| 1d | parallel-safe test isolation (per-run ports + container names) | pending |
+| 1c | `tests/check-coverage.sh` + `manifest.txt` + mutation test; `tofu-init` ordered prereq in `hk.pkl` | done |
+| 1d | `tests/lib/ports.bash`; every port/container-bound suite takes a free port; `run.sh`/`consume.sh` gain `TOOLBOX_FRONTEND_{HOST_PORT,CONTAINER}` seams | ← you are here |
 | 2 | local-OpenBao → `environments/local/{openbao,scripts}/`; root `scripts/` emptied; `modules/` → README only | pending |
 | 3 | mise task namespacing | pending |
 | 4 | `attestation/` split out of `deploy/frontend/` (one PR) | pending |

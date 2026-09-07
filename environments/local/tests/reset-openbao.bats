@@ -5,13 +5,15 @@
 # live daemon to exit before deleting its raft store.
 
 setup() {
+  load helper
   SCRATCH="$(mktemp -d)"
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   cp -r "$REPO_ROOT/scripts" "$SCRATCH/scripts"
 
+  export OPENBAO_PORT; OPENBAO_PORT="$(free_port)"
   export TOOLBOX_OPENBAO_STATE_DIR="$SCRATCH/state"
   export TOOLBOX_OPENBAO_DAEMON="openbao-bats-reset-$$"
-  export TOOLBOX_OPENBAO_LISTEN="127.0.0.1:8397"
+  export TOOLBOX_OPENBAO_LISTEN="127.0.0.1:$OPENBAO_PORT"
   export TOOLBOX_OPENBAO_SUPERVISOR="none"
 
   mkdir -p "$TOOLBOX_OPENBAO_STATE_DIR/data" "$TOOLBOX_OPENBAO_STATE_DIR/snapshots"
@@ -24,6 +26,7 @@ setup() {
 }
 
 teardown() {
+  load helper
   [ -f "$TOOLBOX_OPENBAO_STATE_DIR/bao.pid" ] &&
     kill "$(cat "$TOOLBOX_OPENBAO_STATE_DIR/bao.pid")" 2>/dev/null || true
   pkill -f "bao server -config=$TOOLBOX_OPENBAO_STATE_DIR" 2>/dev/null || true
@@ -53,16 +56,16 @@ teardown() {
   # a real bao server holding the scratch data dir
   cat > "$TOOLBOX_OPENBAO_STATE_DIR/openbao.hcl" <<EOF
 storage "raft" { path = "$TOOLBOX_OPENBAO_STATE_DIR/data"  node_id = "reset-test" }
-listener "tcp" { address = "127.0.0.1:8397"  cluster_address = "127.0.0.1:0"  tls_disable = true }
+listener "tcp" { address = "127.0.0.1:$OPENBAO_PORT"  cluster_address = "127.0.0.1:0"  tls_disable = true }
 disable_mlock = true
-api_addr = "http://127.0.0.1:8397"
+api_addr = "http://127.0.0.1:$OPENBAO_PORT"
 cluster_addr = "https://127.0.0.1:0"
 EOF
   rm -f "$TOOLBOX_OPENBAO_STATE_DIR/seal.key"   # shamir, stays sealed — fine, we only need the process
   bao server -config="$TOOLBOX_OPENBAO_STATE_DIR/openbao.hcl" >"$TOOLBOX_OPENBAO_STATE_DIR/bao.log" 2>&1 &
   local pid=$!
   echo "$pid" > "$TOOLBOX_OPENBAO_STATE_DIR/bao.pid"
-  for _ in $(seq 1 40); do curl -sf -o /dev/null "http://127.0.0.1:8397/v1/sys/health?uninitcode=200&sealedcode=200" && break; sleep 0.2; done
+  for _ in $(seq 1 40); do curl -sf -o /dev/null "http://127.0.0.1:$OPENBAO_PORT/v1/sys/health?uninitcode=200&sealedcode=200" && break; sleep 0.2; done
 
   export TOOLBOX_OPENBAO_RESET_YES=1
   run ./scripts/reset-openbao.sh

@@ -28,8 +28,9 @@ cd "$(dirname "$0")"
 
 STATE="current-image.txt"
 VERIFY="scripts/verify-approval.sh"
-PORT=44100
-NAME="toolbox-frontend"
+PORT=44100                                            # container port — the image's own contract
+HOST_PORT="${TOOLBOX_FRONTEND_HOST_PORT:-$PORT}"      # host side; a test overrides it for parallel-safety (CX #7)
+NAME="${TOOLBOX_FRONTEND_CONTAINER:-toolbox-frontend}"
 MAX_ATTEMPTS="${TOOLBOX_FRONTEND_VERIFY_ATTEMPTS:-5}"
 
 stopped() { echo "frontend: $1 — not launching" >&2; exit 1; }
@@ -80,7 +81,7 @@ while :; do
 	esac
 done
 
-echo "frontend: $image_ref verified approved — starting on :$PORT" >&2
+echo "frontend: $image_ref verified approved — starting on :$HOST_PORT" >&2
 
 # Run the container as a tracked child, NOT `exec docker run`: pitchfork's
 # stop can SIGKILL the `docker run` CLI without it forwarding to the
@@ -89,7 +90,7 @@ echo "frontend: $image_ref verified approved — starting on :$PORT" >&2
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 NAME_SET=1
 
-docker run --rm --name "$NAME" --platform linux/arm64 -p "${PORT}:${PORT}" "$image_ref" &
+docker run --rm --name "$NAME" --platform linux/arm64 -p "${HOST_PORT}:${PORT}" "$image_ref" &
 child=$!
 set +e
 wait "$child"
