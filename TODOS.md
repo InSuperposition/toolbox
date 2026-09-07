@@ -318,24 +318,30 @@ break-glass ritual the Operational Lifecycle Trace flags as a flaw. CI
 `check` stays advisory. **Revisit trigger:** a second committer joins the
 repo — then a PR-gated `required_status_checks` flow earns its keep.
 
-### T9b — per-commit bisect-safety history gate — P2
+### T9b — per-commit bisect-safety history gate — ✅ RESOLVED BY POLICY (no code)
 
-**What:** `scripts/check-history.sh` — rebuild-in-isolation per commit in
-a pushed range (`git rev-list before..after`): dynamic matrix, per-commit
-`git worktree` + `mise install` + `mise run check`, an aggregate
-`needs`-all status job, a force-push range fallback (`before` unreachable
-→ tip only). Never an `hk` step / inside `mise run check` — it re-invokes
-`mise run check` per commit (recursion; CLAUDE.md no-cycle rule).
+**Outcome:** dropped. The bisect-safety goal is met by a **squash-merge
+policy** instead of a per-commit replay workflow. The repo now allows
+squash merges only (merge-commit + rebase disabled, head branch
+auto-deleted, `gh api` repo settings), so every push to `main` is one
+commit and `check.yml` (T9a) verifying that commit == full per-commit
+`git bisect` safety, for free.
 
-**Why:** keeps `git bisect` clean — every landed commit, not just the push
-tip, has a green suite. Deferred from T9a: heavy for a solo dev pushing
-1–2 commits/push who already runs `mise run check` per phase by hand.
+**Why not build the standing matrix:** ~7 min runner time per intermediate
+commit on every push, redundant with `check.yml` on the tip/merge, low hit
+rate for a solo dev who commits carefully and runs `mise run check` per
+phase by hand, and a 3rd workflow + dynamic matrix + enumerate script +
+aggregate job to keep green. Negative space beats it.
 
-**Scope note:** proves *historical buildability* only ("this commit's
-suite passed with the tool versions pinned at that commit") — it does not
-re-check today's CVE policy against old commits.
+**If bisect through pre-policy merge commits is ever needed** (`4510b1a`
+etc. never ran `mise run check` in isolation): `git bisect run` with a
+predicate that does `mise install && mise run check`, exit 125 to
+`git bisect skip` on an infra/install failure. Pay the cost only when
+actually bisecting; no standing CI. Not built — write it if the need
+appears.
 
-**Priority:** P2 · **Depends on:** T9a shipped.
+**Recorded in:** `CLAUDE.md` § CI check gate & merge policy;
+`docs/designs/digest-as-source-of-truth.md` § Phasing.
 
 ### T10 — VEX hardening — P3, post-T8
 

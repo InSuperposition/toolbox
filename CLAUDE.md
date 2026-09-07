@@ -265,6 +265,22 @@ lint/format per touched filetype. mise exposes an equivalent task
 (`mise run check`) running the identical checks for manual/CI invocation —
 one definition, two entry points, never duplicated logic.
 
+## CI check gate & merge policy
+
+`.github/workflows/check.yml` runs the full `mise run check` matrix on
+every push and every PR to `main` — the same `hk` `check` hook, invoked
+the same one way. **Report-only:** `main` has no branch protection (on a
+solo repo `enforce_admins` is a false choice — off exempts every push, on
+adds a break-glass ritual). A red `check` is a notification.
+
+PRs merge **squash-only** — the repo setting disables merge-commit and
+rebase merges and auto-deletes the head branch. So every push to `main` is
+exactly one commit, and `check.yml` running on that commit *is* full
+per-commit `git bisect` safety, for free. That is why there is **no**
+per-commit history-replay workflow (the former T9b — resolved by policy,
+not tooling). The squash commit takes the **PR title + PR body**, so the
+PR description is the durable commit message — write it as one.
+
 ## pitchfork: Local Daemon Supervision
 
 Dev-only, directory-scoped (e.g. `kubectl port-forward`, a tofu-managed VM

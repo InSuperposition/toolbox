@@ -223,17 +223,17 @@ independently (Gall's Law). The full sequencing lives in `TODOS.md`.
   widen OpenBao's listener past loopback with real TLS so an in-cluster pod
   can reach it.
 
-- **Phase 4 — the CI check gate.** Two halves, independent of Phases 1–3:
-  - **T9a (shipped).** `.github/workflows/check.yml` runs the full
-    `mise run check` matrix (the `hk` `check` hook) on every push and every
-    PR to main — the heavy bats + `tofu test` layer that the pre-push hook
-    skips. One definition (`hk.pkl`), two entry points. Report-only: no
-    branch protection (a solo repo makes `enforce_admins` a false choice),
-    revisited if a second committer joins.
-  - **T9b (P2).** `scripts/check-history.sh` — an `hk.pkl`-declared,
-    `mise run check`-invoked rebuild-in-isolation check *per commit* over a
-    pushed range, run CI-side (async — a full isolated rebuild per commit
-    is too slow for a pre-push hook). Keeps `git bisect` clean.
+- **Phase 4 — the CI check gate (shipped).**
+  `.github/workflows/check.yml` runs the full `mise run check` matrix (the
+  `hk` `check` hook) on every push and every PR to main — the heavy bats +
+  `tofu test` layer the pre-push hook skips. One definition (`hk.pkl`),
+  two entry points. Report-only: no branch protection (a solo repo makes
+  `enforce_admins` a false choice), revisited if a second committer joins.
+  **Per-commit `git bisect` safety** comes from the **squash-merge
+  policy** (`CLAUDE.md` § CI check gate & merge policy), not a
+  history-replay workflow: every push to main is one commit, and
+  `check.yml` on that commit is the per-commit gate. Independent of
+  Phases 1–3.
 
 ## Negative space (deliberately not used)
 
