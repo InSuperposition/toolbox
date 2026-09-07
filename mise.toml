@@ -97,3 +97,17 @@ run = "./attestation/scripts/attestation-verify.sh"
 [tasks."frontend:deploy"]
 description = "Verify a pinned approval attestation and deploy that image to the local pitchfork frontend daemon — args: <registry/repo@sha256:...> <sha256:attestation-digest>"
 run = "./deploy/frontend/scripts/frontend-deploy.sh"
+
+# ci/ concern — reusable Tekton build defs (ADR 0014, TODOS.md T7).
+[tasks."ci:taskrun"]
+description = "T7a: stage a context + Dockerfile into per-run workspaces, apply the buildkit-build Task + a TaskRun on orb k8s, build + push by digest, verify — args: <context-dir> <dockerfile> <image-ref> [--keep|--teardown]"
+run = "./ci/scripts/ci-taskrun.sh"
+
+# Interim platform install — environments/local/ owns vendored-upstream
+# installs (same split as OpenBao), NOT ci/. Replaced by Flux reconciliation
+# in T7c. Pinned to Tekton Pipelines v1.6.0; release.yaml sha256
+# d0f6dc1dc7afe7f8725075ee07f6bf8eb01dd246f41ea404ed32e9ab023425ba
+# (verify before first apply — see environments/local/README.md § Tekton).
+[tasks."local:tekton:install"]
+description = "Interim: install pinned Tekton Pipelines v1.6.0 controllers on orb k8s (kubectl apply --server-side). Replaced by Flux in T7c."
+run = "kubectl --context orbstack apply --server-side -f https://storage.googleapis.com/tekton-releases/pipeline/previous/v1.6.0/release.yaml"

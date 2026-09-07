@@ -1,0 +1,20 @@
+id: boundary-ci-consumer-ref
+language: bash
+severity: error
+message: >-
+  A script in ci/ names a literal deploy/ path. ci/ is a consumer-agnostic
+  seam (like attestation/) — the reusable Tekton defs never name cv_frontend
+  or any other consumer. The per-consumer PipelineRun lives in
+  deploy/<consumer>/ and consumes ci/ bundles by digest. Pass the paths in
+  as script arguments instead. See docs/designs/repo-structure.md § The
+  concerns and ADR 0014.
+files:
+  - "ci/**/*.sh"
+  - "ci/**/*.bash"
+rule:
+  all:
+    - regex: "deploy/"
+    - any:
+        - { kind: string_content }
+        - { kind: word }
+        - { kind: raw_string }

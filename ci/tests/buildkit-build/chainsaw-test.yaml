@@ -1,0 +1,58 @@
+# [k8s]-gated (ci/scripts/ci-chainsaw.sh skips without an orbstack cluster
+# + Tekton). Server-side validation the static kubeconform gate cannot do:
+# the Tekton admission webhook accepts our Task YAML, and the spike-proven
+# securityContext posture has not drifted.
+#
+# The full build → push-by-digest → arm64 → no-privileged-pod assertions
+# need a real registry credential and a ~90s build; they are covered by
+# `mise run ci:taskrun` (manual, [k8s]) and the recorded live spike
+# (TODOS.md T7a). T7b's digest-pinned git-clone Task makes a credential-
+# light chainsaw build feasible — added then.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: buildkit-build
+spec:
+  steps:
+    - name: tekton-accepts-the-task
+      try:
+        - apply:
+            file: ../../tasks/buildkit-build.yaml
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: buildkit-build
+              spec:
+                results:
+                  - name: IMAGE_DIGEST
+                    type: string
+                workspaces:
+                  - name: source
+                  - name: build-defs
+                  - name: dockerconfig
+    - name: security-posture-has-not-drifted
+      try:
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: buildkit-build
+              spec:
+                steps:
+                  - name: build-and-push
+                    securityContext:
+                      runAsUser: 1000
+                      runAsNonRoot: true
+                      allowPrivilegeEscalation: true
+                      seccompProfile:
+                        type: Unconfined
+                      capabilities:
+                        drop: [ALL]
+                        add: [SETUID, SETGID]
+                    # never privileged, never SYS_ADMIN / SYS_PTRACE
+                    (securityContext.privileged || 'unset'): unset
+                    (contains(securityContext.capabilities.add, 'SYS_ADMIN')): false
+                    (contains(securityContext.capabilities.add, 'SYS_PTRACE')): false

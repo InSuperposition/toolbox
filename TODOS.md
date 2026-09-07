@@ -270,13 +270,21 @@ add [SETUID,SETGID]`, `BUILDKITD_FLAGS=--oci-worker-no-process-sandbox`
 (Tekton `podTemplate` has no such field). Full result + proven Task config
 in `~/.claude/plans/t7a-buildkit-in-cluster-proof.md` § "Step 1 — SPIKE
 RESULT". Tekton v1.6.0 kept for Step 2.
-Step 2 (now unblocked): extract to `ci/tasks/buildkit-build.yaml` +
-`ci/runtime/namespace.yaml` (no RBAC, `automountServiceAccountToken: false`)
-+ `ci/scripts/ci-taskrun.sh` + bats/chainsaw + `local:tekton:install` mise
-task + machine-global `orb-k8s` pitchfork daemon (ADR 0010 consistency) +
+**Step 2 ✓ DONE** — `ci/` concern extracted: `ci/tasks/buildkit-build.yaml`
+(spike-proven posture, parameterised, consumer-agnostic) +
+`ci/runtime/namespace.yaml` (no RBAC, `automountServiceAccountToken: false`,
+PSA `privileged`) + `ci/scripts/{ci-taskrun,ci-kubeconform,ci-chainsaw}.sh`
++ `lib/ci.sh` + 20 bats cases + a `[k8s]`-gated chainsaw scenario +
+`rules/boundary-ci.yml` + `hk.pkl` kubeconform (fast) / chainsaw (heavy)
+steps + `mise` tasks `ci:taskrun` & `local:tekton:install` (pinned Tekton
+v1.6.0) + Tekton v1 CRD schema vendored at `ci/tests/crd-schemas/`.
 [ADR 0014](docs/adr/0014-tekton-defs-are-oci-bundles-in-ci.md).
-Answers: rootless viability, in-cluster GHCR push auth, pod privilege
-posture. Effort: spike ~1d + concern ~1-1.5d.
+_Carry-over:_ machine-global `orb-k8s` pitchfork daemon — the stanza is
+**documented** in `environments/local/README.md` § Tekton; auto-registration
+is deferred to a future `local:bootstrap` aggregate (P2). The full
+build→push chainsaw assertions need a registry cred — folded into T7b's
+credential-light `git-clone` Task. Answered: rootless viability, in-cluster
+GHCR push auth, pod privilege posture.
 
 **T7b — the full pipeline as OCI bundles + GHA retirement.**
 `ci/tasks/{trivy-scan,oras-attach}.yaml` (wrap the proven Phase-1 shell) +

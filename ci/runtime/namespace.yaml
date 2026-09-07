@@ -1,0 +1,24 @@
+# The `ci` namespace — nothing else lives here.
+#
+# No Role/RoleBinding on purpose (ADR 0014, T7a plan § RBAC): the build
+# step reads a *mounted* Secret, never the k8s API, so its ServiceAccount
+# needs no verbs. The TaskRun also sets automountServiceAccountToken:false.
+# Granting taskrun-create to the build SA would be an indirect
+# workload-creation path that could sidestep the securityContext posture
+# ci/tasks/buildkit-build.yaml pins.
+#
+# Pod Security Admission: `privileged` is set explicitly, not inherited.
+# Rootless BuildKit needs seccomp Unconfined + SETUID/SETGID +
+# allowPrivilegeEscalation (ci/README.md § Residual privilege surface) —
+# `baseline` would reject the build pod. The real scoping mechanism is a
+# Kyverno policy targeting this namespace (Kyverno-module / T8 concern),
+# not PSA. Blast radius today is the single-user OrbStack VM.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ci
+  labels:
+    app.kubernetes.io/part-of: toolbox-ci
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged

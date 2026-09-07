@@ -1,0 +1,142 @@
+# T7a — daemonless, rootless BuildKit build → push by digest.
+#
+# Consumer-agnostic: params only, never names cv_frontend (ADR 0014,
+# rules/boundary-ci.yml). The per-consumer PipelineRun that binds real
+# values + the pinned bundle digest lives in deploy/<consumer>/ (T7b).
+#
+# Pod posture is the spike-proven minimum for rootless BuildKit on
+# `orb start k8s` with NO privileged pod (TODOS.md T7a, ci/README.md
+# § Residual privilege surface). Do not tighten a field without re-running
+# `mise run ci:taskrun` — each one was found by iteration:
+#   seccomp Unconfined         rootlesskit needs unshare/clone (baseline PSA blocks them)
+#   allowPrivilegeEscalation   this image's newuidmap is file-cap based, not setuid;
+#     : true                   no_new_privs (which `false` forces) makes the caps a no-op
+#   caps add SETUID,SETGID     newuidmap/newgidmap fail "Could not set caps" without both
+#   BUILDKITD_FLAGS            --oci-worker-no-process-sandbox is REQUIRED — without it
+#                             the dockerfile-frontend step fails to solve
+#
+# The one `script:` block is a step body (a fixed, branch-free sequence —
+# the analogue of a container entrypoint), not embedded orchestration:
+# `buildctl` writes the digest into a --metadata-file that needs a jq
+# extraction + a strict-format guard before it can reach the result path,
+# and shell redirection is not expressible in command/args. Every real
+# decision (staging the two repos, verification, teardown) lives in
+# ci/scripts/ci-taskrun.sh — shellcheck-clean, bats-tested. Same carve-out
+# shape as deploy/frontend/Dockerfile (CLAUDE.md § Constraints,
+# ci/README.md § Why a script: step body).
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: buildkit-build
+  labels:
+    app.kubernetes.io/part-of: toolbox-ci
+spec:
+  description: >-
+    Build an OCI image from a Dockerfile with daemonless rootless BuildKit
+    and push it to a registry by digest. Emits the pushed manifest digest
+    as the IMAGE_DIGEST result (strict sha256:<64-hex>).
+  params:
+    - name: IMAGE
+      type: string
+      description: >-
+        Target repository reference with no tag, e.g.
+        registry.example/org/app. push-by-digest is always on, so a tag
+        here is ignored.
+    - name: PLATFORM
+      type: string
+      default: linux/arm64
+      description: Single target platform (ADR 0008 — arm64 only for now).
+    - name: DOCKERFILE
+      type: string
+      default: Dockerfile
+      description: Dockerfile filename within the build-defs workspace root.
+    - name: CONTEXT_SUBPATH
+      type: string
+      default: "."
+      description: >-
+        Build-context directory relative to the source workspace root.
+        "." means the workspace root is the context.
+    - name: BUILDKITD_FLAGS
+      type: string
+      default: "--oci-worker-no-process-sandbox"
+      description: >-
+        Read by buildctl-daemonless.sh. The default is REQUIRED on orb —
+        an empty value makes the build fail to solve (TODOS.md T7a).
+  workspaces:
+    - name: source
+      description: The build context (an app checkout).
+    - name: build-defs
+      description: >-
+        The directory holding the Dockerfile — a separate checkout
+        (toolbox owns deploy/<consumer>/Dockerfile; the app owns the
+        context). This is the two-repo split from ADR 0014 / the T7a plan.
+    - name: dockerconfig
+      description: >-
+        A docker-registry Secret (key `.dockerconfigjson`) with push
+        credentials for IMAGE's registry. Projected read-only; the step
+        copies it to $DOCKER_CONFIG/config.json.
+  results:
+    - name: IMAGE_DIGEST
+      type: string
+      description: The pushed image manifest digest, strict `sha256:<64-hex>`.
+  volumes:
+    - name: scratch
+      emptyDir: {}
+  steps:
+    - name: build-and-push
+      image: docker.io/moby/buildkit:rootless@sha256:80b15f0735e87bab7bf59ec4d695dfb4a7cfb25521cf56dc75d6f256285b63ef
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        seccompProfile:
+          type: Unconfined
+        allowPrivilegeEscalation: true
+        capabilities:
+          drop: ["ALL"]
+          add: ["SETUID", "SETGID"]
+      env:
+        - name: HOME
+          value: /tekton/home
+        - name: DOCKER_CONFIG
+          value: /tekton/home/.docker
+        - name: BUILDKITD_FLAGS
+          value: $(params.BUILDKITD_FLAGS)
+      volumeMounts:
+        - name: scratch
+          mountPath: /scratch
+      script: |
+        #!/bin/sh
+        set -eu
+
+        mkdir -p "$DOCKER_CONFIG"
+        src="$(workspaces.dockerconfig.path)/.dockerconfigjson"
+        if [ ! -f "$src" ]; then
+          echo "buildkit-build: dockerconfig workspace has no .dockerconfigjson" >&2
+          exit 1
+        fi
+        cp "$src" "$DOCKER_CONFIG/config.json"
+        echo "buildkit-build: uid=$(id -u) gid=$(id -g) BUILDKITD_FLAGS=[${BUILDKITD_FLAGS:-none}]"
+
+        buildctl-daemonless.sh build \
+          --frontend dockerfile.v0 \
+          --local context="$(workspaces.source.path)/$(params.CONTEXT_SUBPATH)" \
+          --local dockerfile="$(workspaces.build-defs.path)" \
+          --opt filename="$(params.DOCKERFILE)" \
+          --opt platform="$(params.PLATFORM)" \
+          --output type=image,name="$(params.IMAGE)",push=true,push-by-digest=true \
+          --metadata-file /scratch/meta.json
+
+        digest=$(tr -d '\n ' < /scratch/meta.json \
+          | grep -o '"containerimage.digest":"sha256:[a-f0-9]\{64\}"' \
+          | grep -o 'sha256:[a-f0-9]\{64\}' | head -n1)
+        case "$digest" in
+          sha256:????????????????????????????????????????????????????????????????) ;;
+          *)
+            echo "buildkit-build: no strict sha256 digest in meta.json:" >&2
+            cat /scratch/meta.json >&2
+            exit 1
+            ;;
+        esac
+        printf '%s' "$digest" > "$(results.IMAGE_DIGEST.path)"
+        echo "buildkit-build: IMAGE_DIGEST=$digest"
