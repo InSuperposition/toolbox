@@ -79,18 +79,20 @@ run = "./environments/local/scripts/openbao-snapshot.sh"
 description = "Restore the local OpenBao from a snapshot bundle — args: [-force] <snapshot-file>. The bundle's seal.key + root.token must be in $OPENBAO_STATE_DIR first (see environments/local/README.md § disaster). Use -force into a freshly bootstrapped instance."
 run = "bao operator raft snapshot restore"
 
-[tasks.export-approval-pubkey]
-description = "Re-export deploy/frontend/cosign-approval.pub from openbao://approval-key, then `git add` + commit it (run after a Transit key rotation). Needs OpenBao up."
-run = "cosign public-key --key openbao://approval-key --outfile deploy/frontend/cosign-approval.pub"
+# The attestation sign/verify seam is its own concern (docs/designs/repo-
+# structure.md, ADR 0013) — tasks namespaced attestation:<verb>.
+[tasks."attestation:export-pubkey"]
+description = "Re-export attestation/cosign-approval.pub from openbao://approval-key, then `git add` + commit it (run after a Transit key rotation). Needs OpenBao up."
+run = "cosign public-key --key openbao://approval-key --outfile attestation/cosign-approval.pub"
 
-[tasks.approve]
-description = "Review build evidence and sign an approve/reject decision for an image digest (see deploy/frontend/README.md)"
-run = "./deploy/frontend/scripts/approve.sh"
+[tasks."attestation:sign"]
+description = "Review build evidence and sign an approve/reject decision for an image digest (see attestation/README.md)"
+run = "./attestation/scripts/attestation-sign.sh"
+
+[tasks."attestation:verify"]
+description = "Verify a pinned approval attestation, no deploy — args: <registry/repo@sha256:...> <sha256:attestation-digest>"
+run = "./attestation/scripts/attestation-verify.sh"
 
 [tasks.consume]
 description = "Verify a pinned approval attestation and deploy that image to the local pitchfork frontend daemon — args: <registry/repo@sha256:...> <sha256:attestation-digest>"
 run = "./deploy/frontend/scripts/consume.sh"
-
-[tasks.verify-approval]
-description = "Just verify a pinned approval attestation, no deploy — args: <registry/repo@sha256:...> <sha256:attestation-digest>"
-run = "./deploy/frontend/scripts/verify-approval.sh"

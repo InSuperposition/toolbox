@@ -1,4 +1,4 @@
-// Approval-attestation schema and consume-side gate — ONE file, TWO uses.
+// Approval-attestation schema and consumer-side gate — ONE file, TWO uses.
 //
 // The digest-as-source-of-truth pipeline signs a human's approve/reject
 // decision as an in-toto attestation over the built image digest
@@ -6,20 +6,24 @@
 // schema that decision is checked against before signing AND the policy the
 // consumer checks a pinned attestation against before running the image.
 //
-//   approve.sh          cue vet <predicate>.json  -d '#Predicate'          verdict-approved.cue
-//   verify-approval.sh  cue vet <in-toto-stmt>.json -d '#ApprovedStatement' verdict-approved.cue
+//   attestation-sign.sh    cue vet <predicate>.json    -d '#Predicate'          verdict-approved.cue
+//   attestation-verify.sh  cue vet <in-toto-stmt>.json  -d '#ApprovedStatement' verdict-approved.cue
 //
 // Why two definitions (Codex P1-3):
 //   - #Predicate is PERMISSIVE — it accepts verdict "approved" OR "rejected".
-//     approve.sh vets against it before signing so a reject record is a
-//     well-formed, signed, durable audit entry, never a silent drop.
+//     attestation-sign.sh vets against it before signing so a reject record
+//     is a well-formed, signed, durable audit entry, never a silent drop.
 //   - #ApprovedStatement wraps the WHOLE in-toto statement (not the bare
-//     predicate) and pins verdict to "approved". verify-approval.sh checks a
-//     digest-pinned attestation against it, so a validly-signed "rejected"
+//     predicate) and pins verdict to "approved". attestation-verify.sh checks
+//     a digest-pinned attestation against it, so a validly-signed "rejected"
 //     record that a consumer pins by mistake fails the gate with a clear
 //     "verdict rejected", and a good approval sitting next to a signed reject
 //     still verifies when selected by its own digest (the selection model —
 //     no "any reject poisons the image").
+//
+// See docs/designs/digest-as-source-of-truth.md § Architecture (still uses
+// the pre-restructure `approve.sh` / `verify-approval.sh` names — Phase 5
+// docs sweep re-points it).
 //
 // Not JSON Schema: CUE is a schema language (satisfies this repo's "schemas
 // required for core functionality"), and one CUE file avoids maintaining the
@@ -58,7 +62,7 @@ package approval
 	scanReportRef: =~"^sha256:[0-9a-f]{64}$"
 }
 
-// The consume-side gate. cosign / verify-approval.sh hand this the entire
+// The consumer-side gate. cosign / attestation-verify.sh hand this the entire
 // in-toto statement, so the constraint is expressed at statement level.
 // `...` keeps it open — _type, subject, and any future statement fields pass
 // through untouched; only predicateType and the predicate shape are pinned.

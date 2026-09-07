@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# OpenBao state check for approve.sh — distinguishes the four ways signing
-# can be unavailable and prints the ONE correct fix for each. `bao status`
-# alone is not enough: it proves the server is up and unsealed but says
-# nothing about whether this caller can actually reach the Transit key, so
-# this also does a real authenticated read of the key.
+# OpenBao state check for attestation-sign.sh — distinguishes the ways
+# signing can be unavailable and prints the ONE correct fix for each. `bao
+# status` alone is not enough: it proves the server is up and unsealed but
+# says nothing about whether this caller can actually reach the Transit key,
+# so this also does a real authenticated read of the key.
 #
 # Exit 0  — reachable, unsealed, authorized, key present. Safe to sign.
-# Exit 3  — any of: unreachable / sealed / unauthorized / missing-key.
-#           stderr names which and the fix.
+# Exit 3  — any of: unreachable / uninitialised / sealed / unauthorized /
+#           missing-key. stderr names which and the fix.
 #
-# Consume (verify-approval.sh) NEVER calls this — it verifies against the
+# Verify (attestation-verify.sh) NEVER calls this — it verifies against the
 # committed public key and does not touch OpenBao (Codex P1-7).
 #
 # Usage: openbao-preflight.sh [key-name]   (default: approval-key)

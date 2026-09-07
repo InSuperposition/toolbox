@@ -11,9 +11,9 @@
 #           (docker-gated bats cases are counted here too — they skip at
 #           runtime without docker, they do not vanish from the count)
 
-bats    deploy/frontend/scripts/tests/approve.bats          10
+bats    attestation/scripts/tests/attestation-sign.bats     10
+bats    attestation/scripts/tests/attestation-verify.bats   9
 bats    deploy/frontend/scripts/tests/deploy.bats           9    # 3 [docker] cases skip without docker
-bats    deploy/frontend/scripts/tests/verify-approval.bats  9
 bats    environments/local/scripts/tests/openbao-bootstrap.bats  8
 bats    environments/local/scripts/tests/openbao-reset.bats      3
 bats    environments/local/scripts/tests/openbao-snapshot.bats   3

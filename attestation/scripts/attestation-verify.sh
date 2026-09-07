@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# The consume-side gate — and the one shared seam every consumer goes
-# through (docs/designs/digest-as-source-of-truth.md § Architecture): `mise run
-# consume`, T5b's run.sh launch re-verify, and T10's VEX check all call
-# this. Given an image digest and the digest of a specific approval
-# attestation, it answers one question: is THIS attestation a valid
-# "approved" decision, signed by the approval key, for THIS image?
+# The consumer-side gate — and the one shared seam every consumer goes
+# through (docs/designs/digest-as-source-of-truth.md § Architecture; ADR
+# 0013): the local demo's `mise run frontend:deploy`, the frontend daemon's
+# launch re-verify, and T10's VEX check all call this. Given an image digest
+# and the digest of a specific approval attestation, it answers one
+# question: is THIS attestation a valid "approved" decision, signed by the
+# approval key, for THIS image?
 #
-#   verify-approval.sh <registry/repo@sha256:<image>> <sha256:<attestation>>
+#   attestation-verify.sh <registry/repo@sha256:<image>> <sha256:<attestation>>
 #
 # It NEVER touches OpenBao (Codex P1-7). Verification is against the
-# committed public key (deploy/frontend/cosign-approval.pub), exported once
-# from openbao://approval-key at bootstrap. Losing the OpenBao raft store
-# stops future signing but does not invalidate past approvals.
+# committed public key (attestation/cosign-approval.pub), exported once from
+# openbao://approval-key at bootstrap. Losing the OpenBao raft store stops
+# future signing but does not invalidate past approvals.
 #
 # Selection model: the caller pins ONE attestation by digest. A signed
 # "rejected" record, or a bad-signature record, sitting on the same image is
@@ -26,38 +27,39 @@ set -euo pipefail
 # Exit 2  — bad arguments / missing public key.
 # Exit 3  — RETRYABLE: the attestation or its bundle blob could not be
 #           pulled (not found yet / registry unreachable / rate-limited).
-#           T5b's run.sh retries this with backoff; a human re-runs it.
-
-TYPE="https://insuperposition.github.io/toolbox/attestations/approval/v1"
-BUNDLE_ARTIFACT_TYPE="application/vnd.dev.sigstore.bundle.v0.3+json"
+#           The frontend daemon retries this with backoff; a human re-runs it.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null  # lib is exercised via attestation-verify.bats
+. "$SCRIPT_DIR/lib/attestation.sh"
+
+TYPE="$ATTESTATION_TYPE"
+BUNDLE_ARTIFACT_TYPE="application/vnd.dev.sigstore.bundle.v0.3+json"
+
 POLICY="$SCRIPT_DIR/../verdict-approved.cue"
 PUBKEY="${TOOLBOX_APPROVAL_PUBKEY:-$SCRIPT_DIR/../cosign-approval.pub}"
 
-fail() { echo "verify-approval: $1" >&2; exit 1; }
-retryable() { echo "verify-approval: $1" >&2; exit 3; }
+fail() { echo "attestation-verify: $1" >&2; exit 1; }
+retryable() { echo "attestation-verify: $1" >&2; exit 3; }
 
 if [ $# -ne 2 ]; then
-	echo "usage: verify-approval.sh <registry/repo@sha256:<image>> <sha256:<attestation-digest>>" >&2
+	echo "usage: attestation-verify.sh <registry/repo@sha256:<image>> <sha256:<attestation-digest>>" >&2
 	exit 2
 fi
 IMAGE_REF="$1"
 ATT_DIGEST="$2"
 
-printf '%s' "$IMAGE_REF" | grep -Eq '^[A-Za-z0-9.:_/-]+@sha256:[0-9a-f]{64}$' \
-	|| { echo "verify-approval: '$IMAGE_REF' is not a full digest reference (a tag is not accepted)" >&2; exit 2; }
+attestation_is_digest_ref "$IMAGE_REF" \
+	|| { echo "attestation-verify: '$IMAGE_REF' is not a full digest reference (a tag is not accepted)" >&2; exit 2; }
 printf '%s' "$ATT_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' \
-	|| { echo "verify-approval: '$ATT_DIGEST' is not a sha256 digest" >&2; exit 2; }
-[ -f "$PUBKEY" ] || { echo "verify-approval: approval public key not found at $PUBKEY" >&2; exit 2; }
+	|| { echo "attestation-verify: '$ATT_DIGEST' is not a sha256 digest" >&2; exit 2; }
+[ -f "$PUBKEY" ] || { echo "attestation-verify: approval public key not found at $PUBKEY" >&2; exit 2; }
 
 REPO="${IMAGE_REF%@*}"
 IMAGE_HEX="${IMAGE_REF##*@sha256:}"
 REGISTRY_HOST="${REPO%%/*}"
 ORAS_HTTP=()
-case "$REGISTRY_HOST" in
-127.0.0.1:* | localhost:* | 127.0.0.1 | localhost) ORAS_HTTP=(--plain-http) ;;
-esac
+if attestation_is_local_registry "$REGISTRY_HOST"; then ORAS_HTTP=(--plain-http); fi
 
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT

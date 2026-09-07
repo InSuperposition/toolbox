@@ -1,10 +1,10 @@
 #!/usr/bin/env bats
 
-# approve.sh matrix. The signing paths use a local cosign key via the
-# TOOLBOX_APPROVE_KEY seam (no OpenBao — the openbao:// KMS leg is proved
+# attestation-sign.sh matrix. The signing paths use a local cosign key via
+# the TOOLBOX_APPROVE_KEY seam (no OpenBao — the openbao:// KMS leg is proved
 # separately). The OpenBao-preflight path is exercised against a dead
 # address. Covers docs/designs/digest-as-source-of-truth.md § Architecture
-# (the approve path) and its failure modes.
+# (the sign path) and its failure modes.
 
 setup_file() {
 	load helper
@@ -29,20 +29,20 @@ setup() {
 }
 
 @test "no argument is a usage error (exit 2)" {
-	TOOLBOX_APPROVE_KEY="$FIX/cosign.key" run "$SCRIPTS/approve.sh"
+	TOOLBOX_APPROVE_KEY="$FIX/cosign.key" run "$SCRIPTS/attestation-sign.sh"
 	[ "$status" -eq 2 ]
 	[[ "$output" == *"usage:"* ]]
 }
 
 @test "a tag-only reference is rejected — a tag is mutable (exit 2)" {
-	TOOLBOX_APPROVE_KEY="$FIX/cosign.key" run "$SCRIPTS/approve.sh" "${REG}/img:build"
+	TOOLBOX_APPROVE_KEY="$FIX/cosign.key" run "$SCRIPTS/attestation-sign.sh" "${REG}/img:build"
 	[ "$status" -eq 2 ]
 	[[ "$output" == *"not a full digest reference"* ]]
 }
 
 @test "OpenBao unreachable => exit 3 with the 'mise run local:openbao:start' hint" {
 	# no TOOLBOX_APPROVE_KEY => the real openbao-preflight runs; point it at a dead port
-	VAULT_ADDR="http://127.0.0.1:1" run "$SCRIPTS/approve.sh" "$IMAGE"
+	VAULT_ADDR="http://127.0.0.1:1" run "$SCRIPTS/attestation-sign.sh" "$IMAGE"
 	[ "$status" -eq 3 ]
 	[[ "$output" == *"cannot reach OpenBao"* ]]
 	[[ "$output" == *"mise run local:openbao:start"* ]]
@@ -51,13 +51,13 @@ setup() {
 @test "missing build evidence => exit 4, no attestation" {
 	BARE="$(make_bare_image "$FIX")"
 	printf 'approve\nx\n' >"$FIX/answers"
-	TOOLBOX_APPROVE_KEY="$FIX/cosign.key" COSIGN_PASSWORD="" run "$SCRIPTS/approve.sh" "$BARE" <"$FIX/answers"
+	TOOLBOX_APPROVE_KEY="$FIX/cosign.key" COSIGN_PASSWORD="" run "$SCRIPTS/attestation-sign.sh" "$BARE" <"$FIX/answers"
 	[ "$status" -eq 4 ]
 	[[ "$output" == *"evidence missing"* ]]
 }
 
 @test "EOF at the prompt writes NO attestation (exit 1)" {
-	TOOLBOX_APPROVE_KEY="$FIX/cosign.key" COSIGN_PASSWORD="" run "$SCRIPTS/approve.sh" "$IMAGE" </dev/null
+	TOOLBOX_APPROVE_KEY="$FIX/cosign.key" COSIGN_PASSWORD="" run "$SCRIPTS/attestation-sign.sh" "$IMAGE" </dev/null
 	[ "$status" -eq 1 ]
 	[[ "$output" == *"aborted"* ]]
 	run oras discover --plain-http --format json "$IMAGE"
@@ -66,19 +66,19 @@ setup() {
 
 @test "an empty verdict line aborts, no attestation (exit 1)" {
 	printf '\n' >"$FIX/answers"
-	TOOLBOX_APPROVE_KEY="$FIX/cosign.key" COSIGN_PASSWORD="" run "$SCRIPTS/approve.sh" "$IMAGE" <"$FIX/answers"
+	TOOLBOX_APPROVE_KEY="$FIX/cosign.key" COSIGN_PASSWORD="" run "$SCRIPTS/attestation-sign.sh" "$IMAGE" <"$FIX/answers"
 	[ "$status" -eq 1 ]
 }
 
 @test "an empty reason aborts, no attestation (exit 1)" {
 	printf 'approve\n\n' >"$FIX/answers"
-	TOOLBOX_APPROVE_KEY="$FIX/cosign.key" COSIGN_PASSWORD="" run "$SCRIPTS/approve.sh" "$IMAGE" <"$FIX/answers"
+	TOOLBOX_APPROVE_KEY="$FIX/cosign.key" COSIGN_PASSWORD="" run "$SCRIPTS/attestation-sign.sh" "$IMAGE" <"$FIX/answers"
 	[ "$status" -eq 1 ]
 	[[ "$output" == *"reason is required"* ]]
 }
 
 @test "approve: signs, reads back, prints the attestation digest" {
-	out="$(run_approve "$IMAGE" approve "evidence clean")"
+	out="$(run_sign "$IMAGE" approve "evidence clean")"
 	[[ "$out" == *"APPROVED"* ]]
 	att="$(attestation_digest "$out")"
 	[[ "$att" == sha256:* ]]
@@ -89,16 +89,16 @@ setup() {
 }
 
 @test "reject: still writes a signed record (never silent)" {
-	out="$(run_approve "$IMAGE" reject "CVE too risky")"
+	out="$(run_sign "$IMAGE" reject "CVE too risky")"
 	[[ "$out" == *"REJECTED"* ]]
 	att="$(attestation_digest "$out")"
-	run "$SCRIPTS/verify-approval.sh" "$IMAGE" "$att"
+	run "$SCRIPTS/attestation-verify.sh" "$IMAGE" "$att"
 	[ "$status" -eq 1 ]
 	[[ "$output" == *"verdict: rejected"* ]]
 }
 
 @test "the signed predicate carries the scan-report referrer digest" {
-	out="$(run_approve "$IMAGE" approve "clean")"
+	out="$(run_sign "$IMAGE" approve "clean")"
 	att="$(attestation_digest "$out")"
 	layer="$(oras manifest fetch --plain-http "${IMAGE%@*}@${att}" | jq -r '.layers[0].digest')"
 	oras blob fetch --plain-http --output "$FIX/b.json" "${IMAGE%@*}@${layer}"

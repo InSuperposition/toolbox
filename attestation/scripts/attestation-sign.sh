@@ -6,17 +6,20 @@ set -euo pipefail
 # approve/reject decision, and sign it as an in-toto attestation over the
 # image digest (docs/designs/digest-as-source-of-truth.md § Architecture).
 #
-#   mise run approve -- <registry/repo@sha256:...>
+#   mise run attestation:sign -- <registry/repo@sha256:...>
+#
+# Consumer-agnostic (docs/designs/repo-structure.md, ADR 0013): this seam
+# signs and verifies approval records; it never names a consumer.
 #
 # Signs with openbao://approval-key (OpenBao Transit, key material never
 # leaves OpenBao). ALWAYS writes a signed record — approve OR reject, never
 # silent — EXCEPT when the operator aborts at the prompt (EOF / Ctrl-C /
 # empty), which writes nothing.
 #
-# Selection model: this prints the new attestation's own digest. The
-# consumer pins THAT digest — `mise run consume -- <ref> <attestation-digest>`
-# — so a later reject, or a signed reject sitting next to this approval,
-# does not change what an already-pinned consumer sees.
+# Selection model: this prints the new attestation's own digest. A consumer
+# pins THAT digest — `mise run frontend:deploy -- <ref> <attestation-digest>`
+# for the local demo — so a later reject, or a signed reject sitting next to
+# this approval, does not change what an already-pinned consumer sees.
 #
 # Interim auth (full multi-member design is a separate planning session —
 # TODOS.md "Auth + multi-member DX"): signing authenticates to OpenBao with
@@ -29,7 +32,11 @@ set -euo pipefail
 # (openbao-preflight.sh) · 4 build evidence missing · 5 predicate failed its
 # own schema · 6 signing / registry push failed.
 
-TYPE="https://insuperposition.github.io/toolbox/attestations/approval/v1"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null  # lib is exercised via attestation-sign.bats
+. "$SCRIPT_DIR/lib/attestation.sh"
+
+TYPE="$ATTESTATION_TYPE"
 KEY_NAME="approval-key"
 SBOM_ARTIFACT_TYPE="application/vnd.cyclonedx+json"
 SCAN_ARTIFACT_TYPE="application/vnd.trivy.report+json"
@@ -40,11 +47,10 @@ SCAN_ARTIFACT_TYPE="application/vnd.trivy.report+json"
 # when the override is set. Never set this in real use.
 SIGNING_KEY="${TOOLBOX_APPROVE_KEY:-openbao://$KEY_NAME}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 POLICY="$SCRIPT_DIR/../verdict-approved.cue"
 
 usage() {
-	echo "usage: mise run approve -- <registry/repo@sha256:<64 hex>>" >&2
+	echo "usage: mise run attestation:sign -- <registry/repo@sha256:<64 hex>>" >&2
 	exit 2
 }
 
@@ -53,8 +59,8 @@ IMAGE_REF="$1"
 
 # Full digest reference only — a tag is mutable, which is the whole point of
 # this pipeline. `repo:tag` and `repo` (no digest) are rejected here.
-if ! printf '%s' "$IMAGE_REF" | grep -Eq '^[A-Za-z0-9.:_/-]+@sha256:[0-9a-f]{64}$'; then
-	echo "approve: '$IMAGE_REF' is not a full digest reference" >&2
+if ! attestation_is_digest_ref "$IMAGE_REF"; then
+	echo "attestation-sign: '$IMAGE_REF' is not a full digest reference" >&2
 	echo "  need: registry/repo@sha256:<64 hex>   (a tag is not accepted — it is mutable)" >&2
 	exit 2
 fi
@@ -66,15 +72,12 @@ REGISTRY_HOST="${REPO%%/*}"
 # Local dev registries speak http and need no auth; everything else is GHCR
 # over https with a call-time `gh` token (interim auth).
 ORAS_HTTP=()
-case "$REGISTRY_HOST" in
-127.0.0.1:* | localhost:* | 127.0.0.1 | localhost)
+if attestation_is_local_registry "$REGISTRY_HOST"; then
 	ORAS_HTTP=(--plain-http)
 	LOCAL_REGISTRY=1
-	;;
-*)
+else
 	LOCAL_REGISTRY=0
-	;;
-esac
+fi
 
 WORKDIR="$(mktemp -d)"
 cleanup() { rm -rf "$WORKDIR"; }
@@ -90,12 +93,12 @@ fi
 
 # --- 2. Registry auth (interim: gh token, isolated docker config) ---
 if [ "$LOCAL_REGISTRY" -eq 0 ]; then
-	command -v gh >/dev/null || { echo "approve: gh not on PATH (interim registry auth)" >&2; exit 6; }
+	command -v gh >/dev/null || { echo "attestation-sign: gh not on PATH (interim registry auth)" >&2; exit 6; }
 	export DOCKER_CONFIG="$WORKDIR/docker"
 	mkdir -p "$DOCKER_CONFIG"
 	GH_USER="$(gh api user --jq .login)"
 	if ! gh auth token | cosign login "$REGISTRY_HOST" -u "$GH_USER" --password-stdin >/dev/null 2>&1; then
-		echo "approve: could not log in to $REGISTRY_HOST with the gh token" >&2
+		echo "attestation-sign: could not log in to $REGISTRY_HOST with the gh token" >&2
 		echo "  the token needs write:packages scope (and SSO authorised for the org)" >&2
 		exit 6
 	fi
@@ -116,7 +119,7 @@ missing=""
 [ -n "$sbom_ref" ] || missing="CycloneDX SBOM ($SBOM_ARTIFACT_TYPE)"
 [ -n "$scan_ref" ] || missing="${missing:+$missing, }trivy scan report ($SCAN_ARTIFACT_TYPE)"
 if [ -n "$missing" ]; then
-	echo "approve: build evidence missing on this digest: $missing" >&2
+	echo "attestation-sign: build evidence missing on this digest: $missing" >&2
 	echo "  run the T4 workflow (.github/workflows/build-cv-frontend.yml) for this SHA first" >&2
 	exit 4
 fi
@@ -146,7 +149,7 @@ echo "    (full report: jq . < $WORKDIR/scan.json  — kept until this script ex
 echo
 
 # --- 4. The human decision. EOF / Ctrl-C / empty => nothing is written. ---
-abort() { echo; echo "approve: aborted — no attestation written." >&2; exit 1; }
+abort() { echo; echo "attestation-sign: aborted — no attestation written." >&2; exit 1; }
 
 verdict=""
 read -r -p "verdict [approve / reject]: " answer || abort
@@ -154,11 +157,11 @@ case "$answer" in
 approve | a) verdict="approved" ;;
 reject | r) verdict="rejected" ;;
 "") abort ;;
-*) echo "approve: expected 'approve' or 'reject', got '$answer'" >&2; abort ;;
+*) echo "attestation-sign: expected 'approve' or 'reject', got '$answer'" >&2; abort ;;
 esac
 
 read -r -p "reason (required): " reason || abort
-[ -n "$reason" ] || { echo "approve: a reason is required for both verdicts" >&2; abort; }
+[ -n "$reason" ] || { echo "attestation-sign: a reason is required for both verdicts" >&2; abort; }
 
 APPROVED_BY="${TOOLBOX_APPROVED_BY:-$(gh api user --jq .login 2>/dev/null || echo "${USER:-unknown}")}"
 APPROVED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -176,7 +179,7 @@ jq -n \
 	>"$WORKDIR/predicate.json"
 
 if ! cue vet "$WORKDIR/predicate.json" -d '#Predicate' "$POLICY" 2>"$WORKDIR/cue.err"; then
-	echo "approve: the predicate does not satisfy #Predicate — not signing" >&2
+	echo "attestation-sign: the predicate does not satisfy #Predicate — not signing" >&2
 	sed 's/^/  /' "$WORKDIR/cue.err" >&2
 	exit 5
 fi
@@ -192,7 +195,7 @@ if ! cosign attest \
 	--use-signing-config=false \
 	--tlog-upload=false \
 	"$IMAGE_REF"; then
-	echo "approve: cosign attest failed — no durable record was written" >&2
+	echo "attestation-sign: cosign attest failed — no durable record was written" >&2
 	exit 6
 fi
 
@@ -225,7 +228,7 @@ for cand in $new_bundles; do
 done
 
 if [ -z "$ATT_DIGEST" ]; then
-	echo "approve: cosign attest reported success but this decision's attestation is not discoverable" >&2
+	echo "attestation-sign: cosign attest reported success but this decision's attestation is not discoverable" >&2
 	echo "  the registry push may have failed after signing — treat this digest as NOT approved" >&2
 	exit 6
 fi
@@ -239,4 +242,4 @@ else
 fi
 echo "attestation digest: $ATT_DIGEST"
 echo
-echo "record it:  mise run consume -- $IMAGE_REF $ATT_DIGEST"
+echo "record it:  mise run frontend:deploy -- $IMAGE_REF $ATT_DIGEST"

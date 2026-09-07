@@ -26,11 +26,10 @@ ignore:
   - .claude
   - .context
   - "**/.terraform"
-  # Pre-restructure names. Phase 4 renames these to <domain>-<verb>:
-  #   deploy/frontend/run.sh              -> frontend-serve.sh
-  #   deploy/frontend/scripts/approve.sh  -> attestation-sign.sh
-  #   deploy/frontend/scripts/consume.sh  -> frontend-deploy.sh
-  # Remove these three ignores when Phase 4 (T5) lands.
+  # Pre-restructure names, renamed in Phase 4 (T5):
+  #   deploy/frontend/run.sh              -> frontend-serve.sh   (4b)
+  #   deploy/frontend/scripts/consume.sh  -> frontend-deploy.sh  (4b)
+  # (approve.sh / verify-approval.sh already renamed in 4a → attestation/.)
+  # Remove these when 4b lands.
   - deploy/frontend/run.sh
-  - deploy/frontend/scripts/approve.sh
   - deploy/frontend/scripts/consume.sh
