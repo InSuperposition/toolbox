@@ -95,7 +95,10 @@ local heavy = new Mapping<String, Step> {
   ["bats"] {
     // *.bash (helper.bash) is a fixture, not a suite - excluded
     glob = List("**/tests/*.bats")
-    check = "bats {{files}}"
+    // --print-output-on-failure: on a red case, dump its stdout/stderr so a
+    // CI failure names its cause instead of a bare "assertion failed" (T9a).
+    // No-op when everything passes.
+    check = "bats --print-output-on-failure {{files}}"
   }
   // Silent-coverage-drop guard (F5). Diffs the suites on disk, the
   // committed tests/manifest.txt, and what hk schedules — a mismatch fails

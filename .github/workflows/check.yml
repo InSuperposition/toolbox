@@ -1,0 +1,95 @@
+# Runs the full `mise run check` matrix (the hk `check` hook: shellcheck,
+# pkl, tofu fmt/validate/test, cue fmt, ls-lint, ast-grep, bats,
+# check-coverage) on every push and every PR to main.
+#
+# WHY: `hk`'s pre-push gate runs only `fast + tofu-validate`. The heavy
+# matrix (bats spinning real OpenBao/docker daemons, `tofu test`) runs only
+# when a human types `mise run check`. A push straight to main, or a
+# web-UI commit, otherwise runs nothing. This workflow closes that gap
+# (docs/designs/digest-as-source-of-truth.md § Phasing, T9a).
+#
+# ONE definition, two entry points: this job's body is the single line
+# `mise run check`. Every step it runs is declared in hk.pkl — never
+# copied here (CLAUDE.md § hk, § mise).
+#
+# REPORT-ONLY, BY DESIGN: main has no branch protection and this workflow
+# adds none. On a solo repo `enforce_admins` is a false choice (off =
+# every push exempt; on = a recurring break-glass ritual). A red `check`
+# is a notification. Revisit if a second committer joins the repo.
+#
+# Every third-party action is pinned by commit SHA, not a tag — this
+# repo's digest-over-tag thesis applied to its own CI.
+
+name: check
+
+on:
+  push: {}
+  pull_request:
+    branches: [main]
+
+# A push to main is NEVER cancelled — every commit that lands gets its own
+# full matrix run to completion. Superseded feature-branch runs still
+# cancel (the tip is what matters there).
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    # Native arm64 (docs/adr/0008-arm64-only.md). The GitHub-hosted
+    # ubuntu-24.04-arm image ships docker + buildx, which the [docker] bats
+    # cases need.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    env:
+      # Absolute — YAML does not expand `~`. OpenTofu copies providers here
+      # on `tofu init`; actions/cache below persists it across runs so the
+      # pinned `local` + `vault` provider binaries are not re-downloaded
+      # every run (the .terraform.lock.hcl files pin the versions; this
+      # skips the download, it is not an offline mode).
+      TF_PLUGIN_CACHE_DIR: /home/runner/.terraform.d/plugin-cache
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v7.0.1
+
+      - name: Cache OpenTofu provider plugins
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /home/runner/.terraform.d/plugin-cache
+          key: tofu-plugins-${{ runner.arch }}-${{ hashFiles('**/.terraform.lock.hcl') }}
+          restore-keys: tofu-plugins-${{ runner.arch }}-
+
+      - name: Create the provider plugin-cache dir
+        run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+
+      - name: Install pinned tools (mise.toml [tools])
+        uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+        with:
+          install: true
+          cache: true
+
+      # Assert the heavy matrix CAN run. deploy_docker_available() is
+      # CI-fatal (it exits non-zero when CI is set and docker is absent),
+      # so a runner-image regression that drops docker fails loudly here
+      # instead of silently downgrading the [docker] bats cases to skips.
+      - name: Assert docker is available
+        run: |
+          docker info
+          docker buildx version
+
+      - name: mise run check
+        env:
+          CI: "true"
+        run: mise run check
+
+      # Daemon/container state that `teardown` in the bats suites removes.
+      # Best-effort; never fails the job.
+      - name: Diagnostics on failure
+        if: failure()
+        continue-on-error: true
+        run: |
+          docker ps -a || true
+          pitchfork list || true

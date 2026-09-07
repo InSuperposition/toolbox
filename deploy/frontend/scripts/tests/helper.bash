@@ -45,14 +45,24 @@ sign_image() {
 # rejects docker-built manifests, so this uses `registry:3` (pulled once).
 # All of this is skipped when docker is unavailable.
 
-deploy_docker_available() { command -v docker >/dev/null && docker info >/dev/null 2>&1; }
+# In CI the [docker] bats cases must RUN, not skip — a green run has to mean
+# the heavy matrix executed, not merely got scheduled (T9a). Locally, absent
+# docker still skips as before.
+deploy_docker_available() {
+	if command -v docker >/dev/null && docker info >/dev/null 2>&1; then return 0; fi
+	if [ -n "${CI:-}" ]; then
+		echo "CI: docker required for [docker] bats cases, not available" >&2
+		exit 1
+	fi
+	return 1
+}
 
 # start_docker_registry <dir> -> sets DREG (host:port); writes $dir/dreg.cid
 start_docker_registry() {
 	local dir="$1" port
 	port="$(free_port)"
 	DREG="127.0.0.1:${port}"
-	docker run -d --rm -p "${port}:5000" --name "toolbox-t5b-reg-${port}" registry:3 >"$dir/dreg.cid" 2>/dev/null
+	docker run -d --rm -p "${port}:5000" --name "toolbox-t5b-reg-${port}" registry:3 >"$dir/dreg.cid"
 	local i=0
 	while [ "$i" -lt 50 ]; do
 		curl -sf "http://${DREG}/v2/" >/dev/null 2>&1 && return 0
@@ -83,8 +93,8 @@ make_serving_image() {
 		COPY server.js .
 		CMD ["server.js"]
 	DOCKER
-	docker build --platform linux/arm64 -t "${DREG}/frontend:build" "$dir/img" >/dev/null 2>&1
-	docker push "${DREG}/frontend:build" >/dev/null 2>&1
+	docker build --platform linux/arm64 -t "${DREG}/frontend:build" "$dir/img" >/dev/null
+	docker push "${DREG}/frontend:build" >/dev/null
 	digest="$(oras resolve --plain-http "${DREG}/frontend:build")"
 	local ref="${DREG}/frontend@${digest}"
 	printf '{"bomFormat":"CycloneDX","components":[{"name":"node"}]}' >"$dir/img/sbom.json"

@@ -73,7 +73,7 @@ teardown() {
   # secrets are 0600 files, not keychain
   for f in seal.key root.token recovery.key; do
     [ -s "$TOOLBOX_OPENBAO_STATE_DIR/$f" ]
-    [ "$(stat -f '%A' "$TOOLBOX_OPENBAO_STATE_DIR/$f")" = "600" ]
+    [ "$(file_mode "$TOOLBOX_OPENBAO_STATE_DIR/$f")" = "600" ]   # portable: GNU + BSD stat
   done
 
   export VAULT_TOKEN
@@ -103,15 +103,18 @@ teardown() {
   # Redirecting into an existing file keeps its perms and follows symlinks,
   # so the extracted helper does mktemp+chmod+mv. Test the real lib, not a
   # copy.
+  # the lib call runs in a fresh `bash -c` that sources only lib/openbao.sh —
+  # file_mode (helper.bash) is not visible there, so assert the mode out
+  # here in the bats shell against the now-written scratch-state file.
   run bash -euo pipefail -c '
     . "'"$SCRATCH"'/environments/local/scripts/lib/openbao.sh"
     d="'"$TOOLBOX_OPENBAO_STATE_DIR"'"; mkdir -p "$d"
     printf oldbad > "$d/k"; chmod 666 "$d/k"
     write_secret_file "$d/k" newval
     [ "$(cat "$d/k")" = newval ]
-    [ "$(stat -f "%A" "$d/k")" = 600 ]
   '
   [ "$status" -eq 0 ]
+  [ "$(file_mode "$TOOLBOX_OPENBAO_STATE_DIR/k")" = "600" ]
 }
 
 @test "the daemon auto-unseals on restart with no manual step" {
