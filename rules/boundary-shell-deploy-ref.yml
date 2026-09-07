@@ -6,17 +6,9 @@ message: >-
   consumer — nothing upstream of it (the attestation seam, an environment's
   orchestration scripts) may reference it. Reach it through a task call or an
   env seam instead. See docs/designs/repo-structure.md.
-note: >-
-  TEMPORARY EXCEPTION: environments/local/scripts/openbao-bootstrap.sh is
-  excluded below. It writes deploy/frontend/cosign-approval.pub today;
-  Phase 4d (T5d) changes it to call `mise run attestation:export-pubkey`
-  (--outfile -> attestation/cosign-approval.pub) and the REPO_ROOT climb
-  goes with it. Drop the ignore when that lands.
 files:
   - "environments/**/*.sh"
   - "attestation/**/*.sh"
-ignores:
-  - "environments/local/scripts/openbao-bootstrap.sh"
 rule:
   all:
     - regex: "deploy/"

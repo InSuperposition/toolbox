@@ -279,9 +279,9 @@ lands, the affected files stay at their pre-restructure paths:
 | 1c | `tests/check-coverage.sh` + `manifest.txt` + mutation test; `tofu-init` ordered prereq in `hk.pkl` | done |
 | 1d | `tests/lib/ports.bash`; every port/container-bound suite takes a free port; `run.sh`/`consume.sh` gain `TOOLBOX_FRONTEND_{HOST_PORT,CONTAINER}` seams | done |
 | 2 | local-OpenBao unit → `environments/local/openbao/`; scripts → `environments/local/scripts/` (renamed `openbao-<verb>.sh`), `lib/openbao.sh` + `openbao-snapshot.sh` extracted; root `scripts/` gone; `modules/` → README only | done |
-| 3 | mise task namespacing — the `openbao-*` tasks → `local:openbao:*` (+ new `local:openbao:stop`); every `mise run openbao-*` reference rewritten. `approve` / `consume` / `verify-approval` / `export-approval-pubkey` → `attestation:*` / `frontend:*` land in Phase 4 with their script moves. | ← you are here |
-| 4 | `attestation/` split out of `deploy/frontend/` (one PR) | pending |
-| 5 | docs-accuracy sweep — every `.md` re-verified against the moved code | pending |
+| 3 | mise task namespacing — the `openbao-*` tasks → `local:openbao:*` (+ new `local:openbao:stop`); every `mise run openbao-*` reference rewritten. | done |
+| 4 | `attestation/` split out of `deploy/frontend/` (one PR, 4a–4d): the sign/verify/preflight seam → `attestation/`; `consume.sh`/`run.sh` → `frontend-deploy.sh`/`frontend-serve.sh` + the `TOOLBOX_ATTESTATION_VERIFY` seam; `openbao-preflight.sh` 5-state + corrected static-seal advice; `openbao-bootstrap.sh` calls `mise run attestation:export-pubkey` (all boundary rules now closed, no lint exceptions). | done |
+| 5 | docs-accuracy sweep — every `.md` re-verified against the moved code | ← you are here |
 
 ## Negative space (deliberately not here)
 

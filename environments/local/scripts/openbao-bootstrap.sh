@@ -32,7 +32,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"        # environments/local/scripts
 ENV_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"            # environments/local — the tofu root
-REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"    # repo root — for deploy/frontend (P4 drops this)
 # shellcheck source=/dev/null  # lib is bats-tested directly (openbao-bootstrap.bats)
 . "$SCRIPT_DIR/lib/openbao.sh"
 
@@ -118,19 +117,20 @@ export VAULT_TOKEN
 echo "==> Provisioning Transit engine + keys"
 tofu_apply
 
-# Export the approval key's PUBLIC half into the repo. verify-approval.sh /
-# `mise run consume` verify a pinned approval attestation against THIS file
-# and never call OpenBao (Codex P1-7) -- a raft-store loss stops future
-# signing but leaves every past approval verifiable. Same one line as
-# `mise run export-approval-pubkey` (inlined, not called -- a script must
-# not invoke a mise task that sits on its own call path, CLAUDE.md § mise).
-# cosign 3.1.3: openbao:// and hashivault:// are the same KMS plugin.
-echo "==> Exporting approval public key -> deploy/frontend/cosign-approval.pub"
-mkdir -p "$REPO_ROOT/deploy/frontend"
-cosign public-key --key openbao://approval-key \
-  --outfile "$REPO_ROOT/deploy/frontend/cosign-approval.pub" || {
+# Export the approval key's PUBLIC half into the repo. attestation-verify.sh
+# checks a pinned approval attestation against THAT file and never calls
+# OpenBao (Codex P1-7) -- a raft-store loss stops future signing but leaves
+# every past approval verifiable.
+#
+# The file lives in the attestation/ concern, which environments/local/ must
+# NOT write across the boundary (ADR 0013, repo-structure.md § The
+# concerns). So this CALLS the task that owns the write -- a runtime edge,
+# not a file-path dependency (CX #3). `attestation:export-pubkey` is not on
+# this script's own call path, so there is no mise cycle.
+echo "==> Exporting approval public key -> mise run attestation:export-pubkey"
+mise run attestation:export-pubkey || {
   echo "    WARNING: pubkey export failed -- OpenBao itself is fine." >&2
-  echo "    Re-run: mise run export-approval-pubkey   (before mise run consume)" >&2
+  echo "    Re-run: mise run attestation:export-pubkey   (before mise run frontend:deploy)" >&2
 }
 
 bao secrets list

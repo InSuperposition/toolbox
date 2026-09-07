@@ -22,16 +22,16 @@ teardown() {
 }
 
 @test "fails when a manifest entry is dropped (a suite it can no longer see)" {
-	grep -v 'approve.bats' "$MANIFEST" >"$BROKEN"
+	grep -v 'attestation-sign.bats' "$MANIFEST" >"$BROKEN"
 	run "$ROOT/tests/check-coverage.sh" "$BROKEN"
 	[ "$status" -ne 0 ]
-	[[ "$output" == *"approve.bats"* ]]
+	[[ "$output" == *"attestation-sign.bats"* ]]
 }
 
 @test "fails when a manifest case count no longer matches the suite" {
-	sed 's/approve.bats          10/approve.bats          99/' "$MANIFEST" >"$BROKEN"
+	sed 's/\(attestation-sign\.bats\)  *[0-9][0-9]*/\1 999/' "$MANIFEST" >"$BROKEN"
 	run "$ROOT/tests/check-coverage.sh" "$BROKEN"
 	[ "$status" -ne 0 ]
 	[[ "$output" == *"CASE COUNT drift"* ]]
-	[[ "$output" == *"approve.bats"* ]]
+	[[ "$output" == *"attestation-sign.bats"* ]]
 }

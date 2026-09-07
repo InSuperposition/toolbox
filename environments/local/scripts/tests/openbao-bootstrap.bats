@@ -16,12 +16,15 @@ setup() {
   load helper
   SCRATCH="$(mktemp -d)"
   # the whole environments/local concern — its scripts, the ./openbao tofu
-  # unit, main.tf; the script's REPO_ROOT resolves to $SCRATCH and it
-  # auto-creates deploy/frontend for the pubkey export.
+  # unit, main.tf.
   scratch_copy "$SCRATCH" "environments/local"
   rm -rf "$SCRATCH/environments/local/.terraform" \
          "$SCRATCH/environments/local/openbao/.terraform" \
          "$SCRATCH/environments/local/scripts/tests"
+  # openbao-bootstrap.sh calls `mise run attestation:export-pubkey`; there
+  # is no repo mise.toml above the scratch, so stub it (records the call +
+  # runs the real export against the scratch OpenBao into $SCRATCH/attestation).
+  fake_mise_export "$SCRATCH/attestation"
 
   # a free port per test, not a fixed one — two `mise run check` in
   # separate worktrees must not fight over the listener.
@@ -78,8 +81,10 @@ teardown() {
   run bao secrets list
   [[ "$output" == *"transit/"* ]]
 
-  # the inlined `cosign public-key --key openbao://approval-key` step ran
-  run grep -q "BEGIN PUBLIC KEY" "$SCRATCH/deploy/frontend/cosign-approval.pub"
+  # bootstrap CALLED `mise run attestation:export-pubkey` (never wrote the
+  # pubkey file itself — CX #3), and the task produced the key.
+  [ -f "$SCRATCH/.mise-export-calls" ]
+  run grep -q "BEGIN PUBLIC KEY" "$SCRATCH/attestation/cosign-approval.pub"
   [ "$status" -eq 0 ]
 }
 

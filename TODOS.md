@@ -45,33 +45,33 @@ back deliberately, not left to accrete.
   complexity. Candidate: a `mise` task one-liner; decide whether any
   fallback is actually warranted (it is a design question, not an
   implementation detail).
-- `deploy/frontend/scripts/openbao-preflight.sh` — moves to `attestation/`
-  in Phase 4c (which also corrects its stale sealed-state advice + adds a
-  5th state); the reduction review folds into that.
-- `deploy/frontend/scripts/consume.sh` — the design said "`mise run consume`
+- `attestation/scripts/openbao-preflight.sh` — moved out of `deploy/frontend/`
+  in Phase 4a; Phase 4c corrected the stale sealed-state advice, reordered
+  the init check before the seal check, and added `openbao-preflight.bats`
+  (5 states + healthy). The thin-as-possible reduction review still applies:
+  is `bao status -format=json` + one authed read the minimum?
+- `deploy/frontend/scripts/frontend-deploy.sh` — the design said "`mise run consume`
   writes the new reference, then `pitchfork restart frontend`" (implying a
   task). It became a 69-line script. The atomic write + real readiness poll
   justify *some* script; check whether pitchfork's own `ready_port` +
   `ready_delay` + a thin task covers it, and whether the readiness reporting
   belongs in the script at all.
-- `deploy/frontend/scripts/verify-approval.sh` — error classification is
+- `attestation/scripts/attestation-verify.sh` — error classification is
   done by **string-matching `cosign` stderr** (`*"invalid predicate
   type"*`, `*"accepted signatures do not match threshold"*`, …). Fragile —
   it depends on cosign's unversioned error text (Map-is-not-Territory).
   Check whether `cosign` / `cue` expose distinguishable exit codes, or
   `--output json`, that replace the grep.
-- `deploy/frontend/scripts/openbao-preflight.sh` — 4-way state
-  discrimination. Design-sanctioned in intent; check the implementation is
-  as thin as it can be (is `bao status -format=json` + one authed read the
-  minimum, or is there a `bao` subcommand that answers directly?).
-- `deploy/frontend/run.sh` — design-named; retry/backoff/signal-traps are
+- `deploy/frontend/scripts/frontend-serve.sh` — design-named; retry/backoff/signal-traps are
   genuine logic. Lightest-touch review: is the trap/child-process dance the
   simplest correct shape, or does pitchfork have a supervised-`docker`
   primitive?
-- `deploy/frontend/tests/helper.bash` — ~190-line bats fixture. Acceptable
-  as test infra, but check for duplication and whether `deploy.bats`'s
-  docker path should be a separate opt-in file.
-- `deploy/frontend/scripts/approve.sh` — design's one sanctioned
+- the per-concern `scripts/tests/helper.bash` fixtures — check for
+  duplication across `attestation/` and `deploy/frontend/` (both now spin a
+  zot registry + cosign key via `tests/lib/registry.bash`). The
+  `deploy.bats` docker-path split is **done** (Phase 4b: `frontend-serve.bats`
+  / `frontend-deploy.bats`).
+- `attestation/scripts/attestation-sign.sh` — design's one sanctioned
   "real-logic" script. Lightest review: only that it has not absorbed
   responsibilities that belong elsewhere.
 
@@ -110,8 +110,8 @@ duplicate detail.
 | T2d | 1d | `tests/lib/ports.bash`; OpenBao bats take a free port (was fixed :8397-8399); `run.sh`/`consume.sh` gain `TOOLBOX_FRONTEND_{HOST_PORT,CONTAINER}` seams (baked into `scratch_frontend`'s `pitchfork.toml` env); dropped `bootstrap.bats` machine-wide `pitchfork clean`; scoped `deploy.bats` teardown | ✅ done |
 | T3 | 2 | OpenBao `git mv` → `environments/local/{openbao,scripts}/`, `source = "./openbao"` (label kept — `tofu plan` = No changes), `lib/openbao.sh` + `openbao-snapshot.sh` extracted, `hk` tofu globs widened to `environments/**`, `modules/README.md`, `.ls-lint.yml` `**/scripts/lib` override, openbao bats adopt `scratch_copy` + `pitchfork clean --daemon` | ✅ done |
 | T4 | 3 | `openbao-*` mise tasks → `local:openbao:*` (+ new `local:openbao:stop`); every `mise run openbao-*` ref rewritten (scripts, bats, docs, ADRs, pitchfork.toml). `approve`/`consume`/`verify-approval`/`export-approval-pubkey` → `attestation:*`/`frontend:*` deferred to Phase 4 (renamed with their script moves). | ✅ done |
-| T5a–d | 4 | **ONE PR** — extract `attestation/`; split `deploy/frontend/` (`frontend-deploy.sh` / `frontend-serve.sh` + `TOOLBOX_ATTESTATION_VERIFY` seam); `openbao-preflight.bats` **5-state** + fix its stale sealed-state advice; cut `cosign-approval.pub` over via `mise run attestation:export-pubkey` | pending |
-| T6 | 5 | docs-accuracy sweep — every `.md` re-verified against the moved code | pending |
+| T5a–d | 4 | **ONE PR** (commits 4a→4d) — extract `attestation/` (sign/verify/preflight/cue/pub + `lib/attestation.sh`); split `deploy/frontend/` (`frontend-deploy.sh` / `frontend-serve.sh` + `lib/frontend.sh`'s `TOOLBOX_ATTESTATION_VERIFY` seam, default resolved via the mise.toml marker — no lint exception); `openbao-preflight.bats` **5-state** + corrected static-seal advice (init check before seal check); `openbao-bootstrap.sh` calls `mise run attestation:export-pubkey` (drops the `REPO_ROOT` climb + both ast-grep exceptions). | ✅ done |
+| T6 | 5 | docs-accuracy sweep — every `.md` re-verified against the moved code (`digest-as-source-of-truth.md` still shows pre-restructure `approve.sh`/`verify-approval.sh`/`consume.sh` paths + a "4-way" preflight) | pending |
 
 **Phase 1b–1d carry-overs** (not blockers):
 
@@ -120,8 +120,11 @@ duplicate detail.
   they now use `scratch_copy`).
 - `tests/lib/assert.bash` not created yet — added when a suite first needs
   a structured assertion. Existing `[ "$status" -eq N ]` checks stay.
-- **C4** (`attestation/` scratch + a default-`TOOLBOX_ATTESTATION_VERIFY`
-  case) lands in **Phase 4**, when the seam and `attestation/` exist.
+- ~~**C4** (`attestation/` scratch + a default-`TOOLBOX_ATTESTATION_VERIFY`
+  case)~~ — done in Phase 4b: `scratch_frontend` copies both `attestation/`
+  + `deploy/frontend/` + a `mise.toml` marker, every scratch test runs on
+  the un-overridden seam, and `frontend-serve.bats` has an explicit
+  positive default-seam case.
 - `frontend_isolation` names the container `toolbox-frontend-test-$$-<n>`;
   the real deploy still defaults to `toolbox-frontend` / host port 44100.
 - **Re-run the clean-checkout check after Phase 2** (C5): `git clone . <tmp>
@@ -133,23 +136,24 @@ duplicate detail.
   would pass the count check but fail the disk-vs-manifest diff, so it is
   still caught — just by view 2, not view 3.
 
-**Phase 1a temporary lint exceptions** (CX5 — each carries its removal
-phase in the rule/config file):
+**Lint exceptions — all cleared as of Phase 4d:**
 
-- `.ls-lint.yml` ignores `deploy/frontend/run.sh`, `.../scripts/approve.sh`,
-  `.../scripts/consume.sh` — pre-restructure names, renamed in Phase 4 (T5).
-- `rules/boundary-shell-deploy-ref.yml` + `rules/boundary-shell-concern-climb.yml`
-  both exclude `environments/local/scripts/openbao-bootstrap.sh` — it writes
-  `deploy/frontend/cosign-approval.pub` (and walks to repo root to do it)
-  today; Phase 4d (T5d) switches it to `mise run attestation:export-pubkey`
-  and the climb goes with it.
+- ~~`.ls-lint.yml` ignores `run.sh` / `approve.sh` / `consume.sh`~~ — gone
+  (4a renamed `approve.sh`/`verify-approval.sh` → `attestation-*`; 4b
+  renamed `run.sh`/`consume.sh` → `frontend-serve.sh`/`frontend-deploy.sh`).
+  `.ls-lint.yml` has **no** `ignore:` entries for source files now.
+- ~~`rules/boundary-shell-{deploy-ref,concern-climb}.yml` exclude
+  `openbao-bootstrap.sh`~~ — gone (4d: it calls `mise run
+  attestation:export-pubkey`, no `deploy/` ref, no `REPO_ROOT` climb).
+  `boundary-shell-concern-climb.yml` still ignores `**/tests/**` (test
+  fixtures legitimately reach across concerns); that is permanent, not an
+  exception.
 - **HCL not covered.** `ast-grep` ships no Terraform grammar, so the tofu
   unit's forbidden edges are not machine-checked. Folds into the deferred
   resolved-graph planning session below.
 
-**Merge order:** P2/P3/P4 all edit `mise.toml` + `hk.pkl` + `rules/` —
-serialize. Lane B: P1a→P1b→P1c→P1d→P2→P3. Lane C: P4 after P1c, rebased
-on P3. P5 last, alone.
+**Merge order:** all phases landed as commits on `main` (solo repo). P5
+(docs sweep) remains.
 
 **Effort:** ~1d human total (CC-assisted ~6h). **Priority:** P1.
 **Depends on:** nothing.

@@ -38,8 +38,10 @@ mise run local:openbao:bootstrap
 Renders `openbao.hcl`, generates `seal.key`, registers + starts the global
 pitchfork daemon, `bao operator init` (auto-unseals via the static seal —
 **no `bao operator unseal` step, ever**), writes `root.token` +
-`recovery.key`, provisions the Transit engine + `approval-key`, and exports
-`deploy/frontend/cosign-approval.pub`.
+`recovery.key`, provisions the Transit engine + `approval-key`, and calls
+`mise run attestation:export-pubkey` to write
+`attestation/cosign-approval.pub` (it never writes across the boundary
+itself — ADR 0013).
 
 `VAULT_TOKEN` reaches every `mise run` task and the interactive shell
 through one `mise.toml` line (`{{ exec(command='cat ".../root.token"') }}`).
@@ -89,10 +91,10 @@ Writes a **complete bundle** to `$OPENBAO_STATE_DIR/snapshots/`:
 `snapshots/` directory somewhere durable (or off-machine) for real
 disaster recovery.
 
-Losing `data/` does **not** invalidate past approvals — `verify-approval.sh`
-/ `mise run consume` check against the committed
-`deploy/frontend/cosign-approval.pub`, not OpenBao. A snapshot lets you
-resume *signing* without minting a new `approval-key`.
+Losing `data/` does **not** invalidate past approvals —
+`attestation-verify.sh` / `mise run attestation:verify` check against the
+committed `attestation/cosign-approval.pub`, not OpenBao. A snapshot lets
+you resume *signing* without minting a new `approval-key`.
 
 ### Roll back a change (daemon up)
 
