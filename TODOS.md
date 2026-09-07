@@ -90,7 +90,7 @@ a rewrite.
 
 ## Infrastructure
 
-### Repo restructure — strict ownership boundaries — IN PROGRESS
+### Repo restructure — strict ownership boundaries — P0–P4 DONE, P5 (docs sweep) LEFT
 
 **What:** Apply the file-placement rule (`docs/designs/repo-structure.md`,
 ADR 0012/0013) repo-wide in phased typed PRs. Each phase = one PR (P1 = up
@@ -110,7 +110,7 @@ duplicate detail.
 | T2d | 1d | `tests/lib/ports.bash`; OpenBao bats take a free port (was fixed :8397-8399); `run.sh`/`consume.sh` gain `TOOLBOX_FRONTEND_{HOST_PORT,CONTAINER}` seams (baked into `scratch_frontend`'s `pitchfork.toml` env); dropped `bootstrap.bats` machine-wide `pitchfork clean`; scoped `deploy.bats` teardown | ✅ done |
 | T3 | 2 | OpenBao `git mv` → `environments/local/{openbao,scripts}/`, `source = "./openbao"` (label kept — `tofu plan` = No changes), `lib/openbao.sh` + `openbao-snapshot.sh` extracted, `hk` tofu globs widened to `environments/**`, `modules/README.md`, `.ls-lint.yml` `**/scripts/lib` override, openbao bats adopt `scratch_copy` + `pitchfork clean --daemon` | ✅ done |
 | T4 | 3 | `openbao-*` mise tasks → `local:openbao:*` (+ new `local:openbao:stop`); every `mise run openbao-*` ref rewritten (scripts, bats, docs, ADRs, pitchfork.toml). `approve`/`consume`/`verify-approval`/`export-approval-pubkey` → `attestation:*`/`frontend:*` deferred to Phase 4 (renamed with their script moves). | ✅ done |
-| T5a–d | 4 | **ONE PR** (commits 4a→4d) — extract `attestation/` (sign/verify/preflight/cue/pub + `lib/attestation.sh`); split `deploy/frontend/` (`frontend-deploy.sh` / `frontend-serve.sh` + `lib/frontend.sh`'s `TOOLBOX_ATTESTATION_VERIFY` seam, default resolved via the mise.toml marker — no lint exception); `openbao-preflight.bats` **5-state** + corrected static-seal advice (init check before seal check); `openbao-bootstrap.sh` calls `mise run attestation:export-pubkey` (drops the `REPO_ROOT` climb + both ast-grep exceptions). | ✅ done |
+| T5a–d | 4 | **ONE PR** (commits 4a→4d) — extract `attestation/` (sign/verify/preflight/cue/pub + `lib/attestation.sh`); split `deploy/frontend/` (`frontend-deploy.sh` / `frontend-serve.sh` + `lib/frontend.sh`'s `TOOLBOX_ATTESTATION_VERIFY` seam, default resolved via the mise.toml marker — no lint exception); `openbao-preflight.bats` **5-state** + corrected static-seal advice (init check before seal check); `openbao-bootstrap.sh` calls `mise run attestation:export-pubkey` (drops the `REPO_ROOT` climb + both ast-grep exceptions). Real CI run 34127037520 green (21/21). | ✅ done |
 | T6 | 5 | docs-accuracy sweep — every `.md` re-verified against the moved code (`digest-as-source-of-truth.md` still shows pre-restructure `approve.sh`/`verify-approval.sh`/`consume.sh` paths + a "4-way" preflight) | pending |
 
 **Phase 1b–1d carry-overs** (not blockers):
