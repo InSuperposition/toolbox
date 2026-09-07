@@ -28,3 +28,40 @@ run_sign() {
 attestation_digest() {
 	printf '%s' "$1" | sed -n 's/^attestation digest: //p'
 }
+
+# --- openbao-preflight.sh fake `bao` --------------------------------------
+# openbao-preflight.sh only branches on `bao status` / `bao read` output, so
+# a stub `bao` on PATH tests every state deterministically without a real
+# server (the real server round-trip is proved by openbao-bootstrap.bats).
+# jq stays real — only `bao` is shadowed.
+#
+# fake_bao <state> — state in: unreachable uninitialised sealed unauthorized
+#                    missing-key healthy
+fake_bao() {
+	local dir="$FIX/fakebin"
+	mkdir -p "$dir"
+	{
+		printf '#!/usr/bin/env bash\nstate=%q\n' "$1"
+		cat <<'EOF'
+case "$1" in
+status)
+	case "$state" in
+	unreachable)   exit 1 ;;
+	uninitialised) echo '{"initialized":false,"sealed":true,"type":"static"}'; exit 2 ;;
+	sealed)        echo '{"initialized":true,"sealed":true,"type":"static"}';  exit 2 ;;
+	*)             echo '{"initialized":true,"sealed":false,"type":"static"}'; exit 0 ;;
+	esac ;;
+read)
+	case "$state" in
+	unauthorized) echo "Error reading transit/keys/approval-key: permission denied" >&2; exit 2 ;;
+	missing-key)  echo "Error reading transit/keys/approval-key: no value found at transit/keys/approval-key" >&2; exit 2 ;;
+	healthy)      echo '{"data":{"name":"approval-key"}}'; exit 0 ;;
+	*)            echo "fake bao: unexpected 'read' in state $state" >&2; exit 1 ;;
+	esac ;;
+*) echo "fake bao: unknown subcommand $1" >&2; exit 1 ;;
+esac
+EOF
+	} >"$dir/bao"
+	chmod +x "$dir/bao"
+	export PATH="$dir:$PATH"
+}

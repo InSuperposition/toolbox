@@ -39,14 +39,22 @@ if [ -z "$status_json" ]; then
 		"mise run local:openbao:start   (then: mise run local:openbao:bootstrap if never initialised)"
 fi
 
-# --- sealed? ---
-if [ "$status_rc" -eq 2 ] || [ "$(echo "$status_json" | jq -r '.sealed')" = "true" ]; then
-	die "OpenBao is sealed" \
-		"bao operator unseal   (the unseal key was printed once at bootstrap and stored out-of-band)"
+# --- initialised? ---
+# Check this BEFORE sealed: a never-initialised instance also reports
+# sealed=true, and the fix (bootstrap) is different from a genuine reseal.
+if [ "$(echo "$status_json" | jq -r '.initialized')" != "true" ]; then
+	die "OpenBao is reachable but never initialised" \
+		"mise run local:openbao:bootstrap"
 fi
 
-if [ "$(echo "$status_json" | jq -r '.initialized')" != "true" ]; then
-	die "OpenBao is not initialised" "mise run local:openbao:bootstrap"
+# --- sealed? ---
+# Static-seal auto-unseal (ADR 0010/0011): the daemon unseals itself from
+# $OPENBAO_STATE_DIR/seal.key on every start — there is NO printed unseal
+# key. A sealed initialised instance means seal.key is missing/unreadable
+# or the daemon has not restarted since it went away.
+if [ "$status_rc" -eq 2 ] || [ "$(echo "$status_json" | jq -r '.sealed')" = "true" ]; then
+	die "OpenBao is sealed (static seal did not auto-unseal)" \
+		"check \$OPENBAO_STATE_DIR/seal.key exists and is readable, then: mise run local:openbao:start   (if seal.key is lost the raft data is unrecoverable — restore a snapshot bundle: mise run local:openbao:snapshot-restore)"
 fi
 
 # --- authorized + key present? ---
