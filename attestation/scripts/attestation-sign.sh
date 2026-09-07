@@ -40,6 +40,7 @@ TYPE="$ATTESTATION_TYPE"
 KEY_NAME="approval-key"
 SBOM_ARTIFACT_TYPE="application/vnd.cyclonedx+json"
 SCAN_ARTIFACT_TYPE="application/vnd.trivy.report+json"
+BUNDLE_ARTIFACT_TYPE="application/vnd.dev.sigstore.bundle.v0.3+json"  # matches attestation-verify.sh
 
 # Signing key. The real value is openbao://approval-key (OpenBao Transit).
 # TOOLBOX_APPROVE_KEY overrides it with a local cosign key file for the bats
@@ -184,52 +185,40 @@ if ! cue vet "$WORKDIR/predicate.json" -d '#Predicate' "$POLICY" 2>"$WORKDIR/cue
 	exit 5
 fi
 
-# --- 6. Sign. openbao:// => OpenBao Transit; no signing-config / no tlog so
-#        nothing is published to a public transparency log (Codex P1-4). ---
-before_digests="$(printf '%s' "$referrers" | jq -c '[.referrers[].digest]')"
-
+# --- 6. Sign, but do NOT upload. We push the bundle as a referrer
+#        ourselves in step 7, so `oras` reports the exact digest the
+#        consumer must pin. cosign's own push gives no digest back, which is
+#        why this used to re-`oras discover` and match the new referrer by
+#        predicate contents (~35 lines, and fragile — registries differ on
+#        which annotations they echo). openbao:// => OpenBao Transit; no
+#        signing-config / no tlog so nothing hits a public transparency log
+#        (Codex P1-4). ---
 if ! cosign attest \
 	--predicate "$WORKDIR/predicate.json" \
 	--type "$TYPE" \
 	--key "$SIGNING_KEY" \
 	--use-signing-config=false \
 	--tlog-upload=false \
+	--no-upload \
+	--bundle "$WORKDIR/att.bundle" \
 	"$IMAGE_REF"; then
 	echo "attestation-sign: cosign attest failed — no durable record was written" >&2
 	exit 6
 fi
 
-# --- 7. Read the attestation back and identify its digest. New bundle
-#        referrers only, then match the one carrying THIS decision by its
-#        predicate contents — registries differ on which referrer
-#        annotations they echo back (GHCR omits the predicateType one), so
-#        the predicate itself is the only reliable discriminator. ---
-after_json="$(oras discover "${ORAS_HTTP[@]}" --format json "$IMAGE_REF")"
-new_bundles="$(printf '%s' "$after_json" | jq -r --argjson before "$before_digests" '
-  .referrers[]
-  | select(.artifactType == "application/vnd.dev.sigstore.bundle.v0.3+json")
-  | select(.digest as $d | ($before | index($d)) | not)
-  | .digest
-')"
-
-ATT_DIGEST=""
-# shellcheck disable=SC2086  # one digest per line, deliberate word-split
-for cand in $new_bundles; do
-	cand_mf="$(oras manifest fetch "${ORAS_HTTP[@]}" "${REPO}@${cand}")"
-	cand_layer="$(printf '%s' "$cand_mf" | jq -r '.layers[0].digest')"
-	oras blob fetch "${ORAS_HTTP[@]}" --output "$WORKDIR/cand.json" "${REPO}@${cand_layer}"
-	pred="$(jq -r '.dsseEnvelope.payload' "$WORKDIR/cand.json" | base64 -d | jq -c '.predicate')"
-	if [ "$(printf '%s' "$pred" | jq -r '.verdict')" = "$verdict" ] &&
-		[ "$(printf '%s' "$pred" | jq -r '.digest')" = "$IMAGE_DIGEST" ] &&
-		[ "$(printf '%s' "$pred" | jq -r '.approvedAt')" = "$APPROVED_AT" ]; then
-		ATT_DIGEST="$cand"
-		break
-	fi
-done
-
-if [ -z "$ATT_DIGEST" ]; then
-	echo "attestation-sign: cosign attest reported success but this decision's attestation is not discoverable" >&2
-	echo "  the registry push may have failed after signing — treat this digest as NOT approved" >&2
+# --- 7. Push the signed bundle as an OCI 1.1 referrer of the image; oras
+#        prints the referrer manifest digest — that is ATT_DIGEST. The
+#        assignment gets its own `if !` branch: a bare `ATT_DIGEST=$(...)`
+#        would exit under `set -e` on push failure, before the check runs.
+#        --disable-path-validation: att.bundle is our own mktemp workdir,
+#        deliberately an absolute path (oras rejects those by default). ---
+if ! ATT_DIGEST="$(oras attach "${ORAS_HTTP[@]}" \
+		--artifact-type "$BUNDLE_ARTIFACT_TYPE" \
+		--disable-path-validation \
+		--format go-template --template '{{.digest}}' \
+		"$IMAGE_REF" "$WORKDIR/att.bundle:$BUNDLE_ARTIFACT_TYPE")" ||
+	[ -z "$ATT_DIGEST" ]; then
+	echo "attestation-sign: signed OK but the referrer push failed — treat this digest as NOT approved" >&2
 	exit 6
 fi
 

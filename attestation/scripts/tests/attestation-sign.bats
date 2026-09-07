@@ -77,15 +77,26 @@ setup() {
 	[[ "$output" == *"reason is required"* ]]
 }
 
-@test "approve: signs, reads back, prints the attestation digest" {
+@test "approve: signs, pushes the referrer, prints its digest" {
 	out="$(run_sign "$IMAGE" approve "evidence clean")"
 	[[ "$out" == *"APPROVED"* ]]
 	att="$(attestation_digest "$out")"
 	[[ "$att" == sha256:* ]]
-	# the printed digest is a real, discoverable referrer of our type
+	# the printed digest (from `oras attach`, not a discover-and-match loop)
+	# is a real referrer manifest of our artifact type ...
 	run oras manifest fetch --plain-http "${IMAGE%@*}@${att}"
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"insuperposition.github.io/toolbox/attestations/approval/v1"* ]]
+	[[ "$output" == *"application/vnd.dev.sigstore.bundle.v0.3+json"* ]]
+	# ... whose bundle carries our predicate type in the SIGNED statement
+	# (the referrer manifest itself does not annotate predicateType — neither
+	# did cosign's own push reliably; the consumer reads the statement).
+	layer="$(printf '%s' "$output" | jq -r '.layers[0].digest')"
+	oras blob fetch --plain-http --output "$FIX/att.json" "${IMAGE%@*}@${layer}"
+	ptype="$(jq -r '.dsseEnvelope.payload' "$FIX/att.json" | base64 -d | jq -r '.predicateType')"
+	[ "$ptype" = "https://insuperposition.github.io/toolbox/attestations/approval/v1" ]
+	# and it verifies end to end (new signer -> the shipped verifier)
+	run "$SCRIPTS/attestation-verify.sh" "$IMAGE" "$att"
+	[ "$status" -eq 0 ]
 }
 
 @test "reject: still writes a signed record (never silent)" {
