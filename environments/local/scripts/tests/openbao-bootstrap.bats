@@ -144,6 +144,20 @@ teardown() {
   [[ "$output" == *"Already initialized"* ]]
 }
 
+@test "an initialised bao whose root.token does not authenticate is rejected, not adopted" {
+  # Stands in for a foreign 'bao server' / stale per-worktree daemon on
+  # $LISTEN: the instance is up and initialised, but our root.token is not
+  # its token. Bootstrap must stop before the 2nd tofu apply, not run it
+  # against the wrong instance.
+  ./environments/local/scripts/openbao-bootstrap.sh
+  printf 'hvs.not-this-instances-token' >"$TOOLBOX_OPENBAO_STATE_DIR/root.token"
+
+  run ./environments/local/scripts/openbao-bootstrap.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"not the toolbox daemon"* ]]
+  [[ "$output" != *"Provisioning Transit"* ]]
+}
+
 @test "reset then re-bootstrap starts fully fresh" {
   ./environments/local/scripts/openbao-bootstrap.sh
   run ./environments/local/scripts/openbao-reset.sh
