@@ -80,16 +80,28 @@ jobs:
           docker info
           docker buildx version
 
+      # Start the pitchfork supervisor daemon HERE, with its stdin/stdout/
+      # stderr bound to this step (closed when the step ends) and never to a
+      # later step. Left lazy, it is spawned by the first `pitchfork` call
+      # inside a bats case — inheriting the `hk` step's output pipe, which
+      # `hk` then waits on for EOF forever after bats exits (a 25-min hang,
+      # first CI run 34142628643).
+      - name: Pre-start the pitchfork supervisor with clean fds
+        run: mise exec -- pitchfork supervisor start </dev/null >/tmp/pitchfork-supervisor.log 2>&1 || true
+
       - name: mise run check
         env:
           CI: "true"
         run: mise run check
 
       # Daemon/container state that `teardown` in the bats suites removes.
-      # Best-effort; never fails the job.
-      - name: Diagnostics on failure
-        if: failure()
+      # `!success()` so it also runs on a timeout/cancel (a plain `failure()`
+      # does not fire when the job is cancelled). Best-effort.
+      - name: Diagnostics on non-success
+        if: ${{ !success() }}
         continue-on-error: true
         run: |
           docker ps -a || true
           pitchfork list || true
+          pitchfork supervisor status || true
+          cat /tmp/pitchfork-supervisor.log || true
