@@ -151,20 +151,50 @@ Rules:
   trade-off — not every choice.
 - Task status lives in `TODOS.md` and git history, not in the design doc.
 
+## File Placement
+
+Full spec, the concern DAG, the target tree, and the migration status:
+`docs/designs/repo-structure.md` (ADR 0012, 0013).
+
+The rule:
+
+1. Every top-level concern directory has **one owner** and a declared list
+   of the concerns it **may depend on**.
+2. A file lives with the concern that **owns** it — not by "lowest
+   containing directory".
+3. Allowed dependency edges are explicit and machine-checked in
+   `mise run check` (`ls-lint` + `ast-grep`, an honestly-scoped lint —
+   literal path strings, relative climbs, `source`/exec of a literal — not
+   graph analysis).
+
+The concerns: `tests/` (repo-level shared test support, leaf) · `attestation/`
+(the sign/verify seam — never names a consumer) · `deploy/frontend/` (one
+image consumer) · `environments/local/` (one deployment target — owns its
+`openbao/` tofu unit and the scripts that bring it up) · `modules/`
+(reusable, versioned, URL-consumed OpenTofu modules only — empty + README
+today).
+
+The rule is in force now; the tree is migrated to match it in phased typed
+PRs (`TODOS.md` T1–T6). Until a phase lands, its files stay at their
+pre-restructure paths — so verify a path against disk, not against this
+list.
+
 ## Module Structure & Naming
 
-Naming: `modules/<type>-<tool>` — existing: `vm-orbstack`, `cluster-k0sctl`,
-`secret-openbao`, `secret-openbao-local`, plus the Tekton catalog pieces
-below.
+`modules/` holds **reusable, versioned, URL-consumed OpenTofu modules
+only** — nothing else. It is empty today (a README states the rule); the
+deferred production `secret-openbao` is the first candidate. The local dev
+OpenBao is **not** a `modules/` entry — it is a tofu unit under
+`environments/local/openbao/`, owned by that environment (ADR 0012).
 
-Standard per-module layout — `main.tf`, `variables.tf`, `outputs.tf`,
-`versions.tf`, `README.md`, `tests/*.tftest.hcl` — applies to **OpenTofu
-modules specifically**: `vm-orbstack`, `cluster-k0sctl`, `secret-openbao`,
-`secret-openbao-local` are OpenTofu modules and get this skeleton.
-`secret-openbao-local` is deliberately a sibling of `secret-openbao`, not
-a variant of it — one provisions a real cluster secret store (deferred),
-the other a disposable local dev daemon consumed by the root composition
-today (see `modules/secret-openbao-local/README.md`).
+A published module's standard layout is `main.tf`, `variables.tf`,
+`outputs.tf`, `versions.tf`, `README.md`, `tests/*.tftest.hcl`. A tofu
+unit nested in an environment gets the same skeleton minus the version
+pin.
+
+Script files are named `<domain>-<verb>.sh` where `<domain>` is the tool
+(`openbao-bootstrap.sh`), never the directory — see § File Placement and
+§ Scripts Policy.
 
 **Resolved exception:** `modules/task-kaniko-build` (was
 `task-buildpacks-build` before the 2026-09-06 pivot),
@@ -189,8 +219,17 @@ non-overlapping claim:
 |---|---|---|
 | k8s manifests, static | kubeconform | Schema validation, no cluster needed, fast pre-merge gate. |
 | k8s manifests, live behavior/policy | chainsaw | End-to-end in a real/test cluster; runs after kubeconform passes. |
-| OpenTofu modules | `tofu test` (`.tftest.hcl`) | Native test framework. |
-| Shell scripts | bats | Every script gets one. |
+| OpenTofu units | `tofu test` (`.tftest.hcl`) | Native framework; tests in `<unit>/tests/`. |
+| Shell scripts | bats | Every script gets one, in `<concern>/scripts/tests/*.bats` beside the script. |
+
+Layout: each concern's `.bats` live in `scripts/tests/` next to the scripts
+they cover. Shared bats primitives (scratch dir, assertions, port
+allocation, fake registry) live in repo-level `tests/lib/*.bash`, loaded
+bats-native via `tests/setup_suite.bash`. `tests/check-coverage.sh` (its
+own `hk` step) parses `hk check --format jsonl` and diffs the suites `hk`
+actually scheduled + their case counts against a committed
+`tests/manifest.txt` — so an `hk` glob edit that silently drops a suite
+fails the gate. Full spec: `docs/designs/repo-structure.md`.
 
 Harness prerequisites (isolated test cluster, rendered-manifest source, CRD
 schema fetch for kubeconform, controllers/policies installed + readiness
@@ -247,6 +286,18 @@ Before writing a script: check for an existing tool in the stack, then a
 `mise.toml` task, only then write a script. One script = one file, one job.
 `#!/usr/bin/env bash` + `set -euo pipefail`, shellcheck-clean, bats-tested.
 Config files reference scripts by path — never embed them.
+
+- A script lives in its concern's `scripts/` directory, never loose at a
+  concern root or the repo root (§ File Placement).
+- Named `<domain>-<verb>.sh`, `<domain>` = the tool, not the folder
+  (`openbao-bootstrap.sh`, `attestation-sign.sh`). Stem matches
+  `^[a-z]+(-[a-z]+)+$`.
+- A `mise` task body stays a single inline command **unless** it has a
+  loop, a conditional, error classification, or a multi-step sequence with
+  an invariant — only then does it get a script.
+- Shared runtime shell → `<concern>/scripts/lib/<domain>.sh`,
+  self-contained. No repo-level runtime lib. A production script never
+  sources from a `tests/` path.
 
 ## CI Build/Scan/Approve Pipeline
 

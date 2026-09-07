@@ -86,6 +86,66 @@ a rewrite.
 
 ## Infrastructure
 
+### Repo restructure — strict ownership boundaries — IN PROGRESS
+
+**What:** Apply the file-placement rule (`docs/designs/repo-structure.md`,
+ADR 0012/0013) repo-wide in phased typed PRs. Each phase = one PR (P1 = up
+to 4), `mise run check` green on its own.
+
+Reviewed plan (eng review + 2 codex passes, `NO UNRESOLVED DECISIONS`):
+`~/.claude/plans/repo-restructure-boundaries.md` — the authority for
+per-task files, verification, and rationale. Summary here; do not
+duplicate detail.
+
+| task | phase | what | status |
+|---|---|---|---|
+| T1 | 0 | `repo-structure.md` + CLAUDE.md § File Placement + ADR 0012/0013 — no code | ✅ done |
+| T2a | 1a | pin `ls-lint` (`aqua:loeffel-io/ls-lint`) + `ast-grep` (`aqua:ast-grep/ast-grep`); `.ls-lint.yml` + `sgconfig.yml` + `rules/boundary-*.yml` for the **current** tree; wire both into `hk.pkl` fast layer | pending |
+| T2b | 1b | `tests/lib/{scratch,assert,registry}.bash` + `tests/setup_suite.bash` + `load_lib`; move `deploy/frontend/tests/` → `scripts/tests/` | pending |
+| T2c | 1c | `tests/check-coverage.sh` + `tests/manifest.txt` (parse `hk check --format jsonl`); `tofu init` as an ordered prereq in `hk.pkl`; clean-checkout validation | pending |
+| T2d | 1d | parallel-safe test isolation — per-run host port + container-name seams; scope `deploy.bats` + `bootstrap.bats:41` cleanup | pending |
+| T3 | 2 | OpenBao `git mv` → `environments/local/{openbao,scripts}/`, `source = "./openbao"` (label kept), `lib/openbao.sh` + `openbao-snapshot.sh` extracted, widen `hk` tofu globs to `environments/**`, `modules/README.md` | pending |
+| T4 | 3 | rename all mise tasks `<env>:<domain>:<verb>` / `<domain>:<verb>`; grep-rewrite every `mise run <old>` reference | pending |
+| T5a–d | 4 | **ONE PR** — extract `attestation/`; split `deploy/frontend/` (`frontend-deploy.sh` / `frontend-serve.sh` + `TOOLBOX_ATTESTATION_VERIFY` seam); `openbao-preflight.bats` **5-state** + fix its stale sealed-state advice; cut `cosign-approval.pub` over via `mise run attestation:export-pubkey` | pending |
+| T6 | 5 | docs-accuracy sweep — every `.md` re-verified against the moved code | pending |
+
+**Merge order:** P2/P3/P4 all edit `mise.toml` + `hk.pkl` + `rules/` —
+serialize. Lane B: P1a→P1b→P1c→P1d→P2→P3. Lane C: P4 after P1c, rebased
+on P3. P5 last, alone.
+
+**Effort:** ~1d human total (CC-assisted ~6h). **Priority:** P1.
+**Depends on:** nothing.
+
+### A real resolved-dependency-graph boundary check — planning session
+
+**What:** Run `/plan-eng-review` on replacing (or backstopping) the
+`ls-lint` + `ast-grep` boundary **lint** with a check that validates the
+allowed-edge set against a **resolved** dependency graph, not literal path
+strings.
+
+**Why:** the lint shipped in the restructure (T2a) is honestly scoped — it
+catches literal path strings, relative climbs, and `source`/exec of a
+literal. It does **not** catch a path assembled from variables,
+`source "$x"` resolution, or cross-language task references (its `ast-grep`
+rules are per-language; TOML/Pkl task refs are uncovered). A boundary
+violation built from a variable passes the gate today.
+
+**Candidates to evaluate:** a generated manifest validated by
+`conftest`/OPA (Rego); `tofu graph` for the HCL layer; whether CUE or
+Timoni (already in the stack) can express and validate the edge set; a
+purpose-built resolver. Weigh each against "one more tool" — the lint may
+be enough paired with review.
+
+**Context:** Codex 2nd-pass finding CX2, user decision CX1=A (ship the
+scoped lint + documented limits + this deferred session).
+`docs/designs/repo-structure.md` § Enforcement / Honest scope.
+
+**Effort:** planning ~1 session; implementation unknown until the approach
+is chosen.
+**Priority:** P3
+**Depends on:** the restructure landed (the lint is the thing being
+backstopped).
+
 ### How to rotate the T5 `approval-key` (procedure — done once, 2026-09-06)
 
 The first `approval-key` was rotated on 2026-09-06 (commit `bcbb862`)
