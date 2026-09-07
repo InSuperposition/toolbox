@@ -106,8 +106,10 @@ duplicate detail.
 - ~~`environments/local/tests/*.bats` adopt `scratch_copy` in Phase 2~~ —
   done (Phase 2 moved the dir to `environments/local/scripts/tests/` and
   they now use `scratch_copy`).
-- `tests/lib/assert.bash` not created yet — added when a suite first needs
-  a structured assertion. Existing `[ "$status" -eq N ]` checks stay.
+- ~~`tests/lib/assert.bash` not created yet~~ — created in T9a
+  (`file_mode()`, GNU+BSD `stat`), sourced by
+  `environments/local/scripts/tests/helper.bash`. Other `[ "$status" -eq
+  N ]` checks stay as-is.
 - ~~**C4** (`attestation/` scratch + a default-`TOOLBOX_ATTESTATION_VERIFY`
   case)~~ — done in Phase 4b: `scratch_frontend` copies both `attestation/`
   + `deploy/frontend/` + a `mise.toml` marker, every scratch test runs on
@@ -115,9 +117,9 @@ duplicate detail.
   positive default-seam case.
 - `frontend_isolation` names the container `toolbox-frontend-test-$$-<n>`;
   the real deploy still defaults to `toolbox-frontend` / host port 44100.
-- **Re-run the clean-checkout check after Phase 2** (C5): `git clone . <tmp>
-  && cd <tmp> && mise install && mise run check` — the OpenBao `git mv`
-  changes tofu module paths and the `hk` tofu globs.
+- ~~**Re-run the clean-checkout check after Phase 2** (C5)~~ — T9a's
+  `.github/workflows/check.yml` runs `mise install && mise run check` on a
+  fresh runner checkout every push/PR; run 34144986089 green covers this.
 - `check-coverage.sh` cross-checks `hk`'s scheduled **count** of `.bats`
   files, not the exact filenames (hk's `--plan --json` gives `fileCount`,
   not a file list). A same-count swap (drop A, add B, no manifest edit)
@@ -140,8 +142,7 @@ duplicate detail.
   unit's forbidden edges are not machine-checked. Folds into the deferred
   resolved-graph planning session below.
 
-**Merge order:** all phases landed as commits on `main` (solo repo). P5
-(docs sweep) remains.
+**Merge order:** all phases (P0–P5) landed on `main` (solo repo). Done.
 
 **Effort:** ~1d human total (CC-assisted ~6h). **Priority:** P1.
 **Depends on:** nothing.
@@ -294,7 +295,7 @@ same time.
 
 **Priority:** P2 · **Depends on:** T7 (Phase 2) shipped.
 
-### T9a — `mise run check` in CI — DONE (feat/ci-check-workflow)
+### T9a — `mise run check` in CI — ✅ DONE (merged, PR #7, `7ae5ad0`)
 
 **What:** `.github/workflows/check.yml` — every push and every PR to main
 runs `mise run check` (the hk `check` hook: shellcheck, pkl, tofu
@@ -302,8 +303,13 @@ fmt/validate/test, cue fmt, ls-lint, ast-grep, bats, check-coverage). One
 definition (`hk.pkl`), two entry points. Report-only (no branch
 protection). Also fixed the one Linux portability break (`stat -f '%A'` →
 `tests/lib/assert.bash` `file_mode()`), made the `[docker]` bats cases
-CI-fatal instead of skip-on-no-docker, and added failure diagnostics
-(`bats --print-output-on-failure`, un-silenced docker fixtures).
+CI-fatal instead of skip-on-no-docker, added failure diagnostics
+(`bats --print-output-on-failure`, un-silenced docker fixtures), and a
+pitchfork-supervisor pre-start step (the lazily-spawned supervisor
+inherited `hk`'s output pipe and hung it for 25 min — run 34142628643).
+
+**Verified:** warm run 34144986089 green (4m); negative test 34145802826
+red naming the suite; `[docker]` cases execute (no silent skip).
 
 **Branch protection — deliberately NOT added.** Solo repo: the only admin
 is the maintainer, so `enforce_admins=false` exempts every ordinary push
