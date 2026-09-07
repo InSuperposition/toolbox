@@ -2,8 +2,9 @@
 
 Every secret the local dev OpenBao needs — the static-seal key, the root
 token, the recovery key — is a `0600` file in `$STATE_DIR`
-(`~/.local/state/toolbox/openbao/`), written by `bootstrap-openbao.sh` with
-an atomic `mktemp`+`chmod`+`mv`. `VAULT_TOKEN` reaches every `mise run` task
+(`~/.local/state/toolbox/openbao/`), written by
+`environments/local/scripts/openbao-bootstrap.sh` with an atomic
+`mktemp`+`chmod`+`mv`. `VAULT_TOKEN` reaches every `mise run` task
 and the interactive shell through one `mise.toml` line —
 `VAULT_TOKEN = "{{ exec(command='cat "$OPENBAO_STATE_DIR/root.token" …') }}"` —
 no shell hook. `fnox` is removed from the stack entirely (`mise.toml`
@@ -14,7 +15,7 @@ decision): `fnox` + keychain caused three concrete failures — `fnox remove`
 and `fnox set` both silently rewrite the committed `fnox.toml`, and a
 keychain item created by one binary and read by another triggers a blocking
 GUI password prompt that fired inside `bats` and would fire on every dev's
-first `mise run approve`. The static-seal key was *already* a `0600` file
+first `mise run attestation:sign`. The static-seal key was *already* a `0600` file
 (ADR 0010, forced by `--boot-start` needing it before the login keychain
 unlocks); putting the root token in the keychain while the seal key sits on
 disk is inconsistent — whoever can read `seal.key` + `data/` can decrypt

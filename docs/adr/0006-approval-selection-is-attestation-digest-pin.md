@@ -1,9 +1,9 @@
 # The consumer pins one approval attestation by its own digest
 
-`approve.sh` prints the new attestation's own digest; the consumer records
-it and passes it to `mise run consume -- <image-ref> <attestation-digest>`.
-`verify-approval.sh` fetches *that specific attestation* and verifies it —
-it does not scan all referrers on the image.
+`attestation-sign.sh` prints the new attestation's own digest; the consumer
+records it and passes it to `mise run frontend:deploy -- <image-ref>
+<attestation-digest>`. `attestation-verify.sh` fetches *that specific
+attestation* and verifies it — it does not scan all referrers on the image.
 
 Why: `cosign verify-attestation --policy` fails if *any* attestation of the
 type on the image fails the policy (verified against cosign 3.1.3 source),

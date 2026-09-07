@@ -90,7 +90,7 @@ a rewrite.
 
 ## Infrastructure
 
-### Repo restructure — strict ownership boundaries — P0–P4 DONE, P5 (docs sweep) LEFT
+### Repo restructure — strict ownership boundaries — ✅ DONE (P0–P5)
 
 **What:** Apply the file-placement rule (`docs/designs/repo-structure.md`,
 ADR 0012/0013) repo-wide in phased typed PRs. Each phase = one PR (P1 = up
@@ -111,7 +111,7 @@ duplicate detail.
 | T3 | 2 | OpenBao `git mv` → `environments/local/{openbao,scripts}/`, `source = "./openbao"` (label kept — `tofu plan` = No changes), `lib/openbao.sh` + `openbao-snapshot.sh` extracted, `hk` tofu globs widened to `environments/**`, `modules/README.md`, `.ls-lint.yml` `**/scripts/lib` override, openbao bats adopt `scratch_copy` + `pitchfork clean --daemon` | ✅ done |
 | T4 | 3 | `openbao-*` mise tasks → `local:openbao:*` (+ new `local:openbao:stop`); every `mise run openbao-*` ref rewritten (scripts, bats, docs, ADRs, pitchfork.toml). `approve`/`consume`/`verify-approval`/`export-approval-pubkey` → `attestation:*`/`frontend:*` deferred to Phase 4 (renamed with their script moves). | ✅ done |
 | T5a–d | 4 | **ONE PR** (commits 4a→4d) — extract `attestation/` (sign/verify/preflight/cue/pub + `lib/attestation.sh`); split `deploy/frontend/` (`frontend-deploy.sh` / `frontend-serve.sh` + `lib/frontend.sh`'s `TOOLBOX_ATTESTATION_VERIFY` seam, default resolved via the mise.toml marker — no lint exception); `openbao-preflight.bats` **5-state** + corrected static-seal advice (init check before seal check); `openbao-bootstrap.sh` calls `mise run attestation:export-pubkey` (drops the `REPO_ROOT` climb + both ast-grep exceptions). Real CI run 34127037520 green (21/21). | ✅ done |
-| T6 | 5 | docs-accuracy sweep — every `.md` re-verified against the moved code (`digest-as-source-of-truth.md` still shows pre-restructure `approve.sh`/`verify-approval.sh`/`consume.sh` paths + a "4-way" preflight) | pending |
+| T6 | 5 | docs-accuracy sweep — `digest-as-source-of-truth.md` (paths, task names, the machine-global-daemon layout, 5-state preflight, the `TOOLBOX_ATTESTATION_VERIFY` seam, no-keychain honesty); ADRs 0004/0005/0006/0009/0011 name refs; `main.tf` comments (`openbao-bootstrap.sh`); link-check clean. | ✅ done |
 
 **Phase 1b–1d carry-overs** (not blockers):
 
@@ -197,11 +197,11 @@ transcript-visible. Procedure for any future rotation:
 mise run local:openbao:reset            # stops daemon, wipes raft store + 0600 secret files + tfstate
 mise run local:openbao:bootstrap        # fresh approval-key; regenerates seal.key / root.token /
                                   #   recovery.key (all 0600); rewrites cosign-approval.pub
-git add deploy/frontend/cosign-approval.pub && git commit
+git add attestation/cosign-approval.pub && git commit
 ```
 No `fnox.toml` / keychain step — the secrets are `0600` files (ADR 0011).
 Every attestation signed with the old key stops verifying against the new
-`cosign-approval.pub` — re-run `mise run approve` for any image whose
+`cosign-approval.pub` — re-run `mise run attestation:sign` for any image whose
 approval must persist. `.../rotate` on the same key would keep old versions
 verifiable but the *exported* public key still changes, so a full reset is
 simpler while nothing real depends on the key.
@@ -215,14 +215,14 @@ The full design covers: per-member OpenBao identity (an auth method +
 per-member scoped policies so `transit/sign` on `approval-key` isn't the
 root token), per-member registry auth (GHCR now, `zot` after T7c), the
 `approval` Transit policy (which T8/Chains also needs), and a clean
-`git clone → mise run approve` bootstrap for a new team member.
+`git clone → mise run attestation:sign` bootstrap for a new team member.
 
 **Why:** The design's zero-trust claim is "possession of the private key is
 the access control." In T5's interim form that collapses to "possession of
 the OpenBao root token as a `0600` file on one person's machine." Anyone with it can
 sign any `approvedBy` — there is no cryptographic per-approver identity.
 That's acceptable for a solo proof; it is not acceptable once a second
-person needs to approve, and building `approve.sh`'s auth twice is waste,
+person needs to approve, and building `attestation-sign.sh`'s auth twice is waste,
 so the shape should be designed before hardening.
 
 **Design lenses:** security (per-identity least privilege, no shared
@@ -240,7 +240,7 @@ for the scoped policy. See `docs/designs/digest-as-source-of-truth.md`
 **Effort:** planning ~1 session; implementation ~1-2d human
 **Priority:** P2
 **Depends on:** ~~T5 shipped~~ — **UNBLOCKED 2026-09-06.** T5 shipped its
-interim auth: `approve.sh` signs with the root `VAULT_TOKEN` (the `0600`
+interim auth: `attestation-sign.sh` signs with the root `VAULT_TOKEN` (the `0600`
 `root.token` file, ADR 0011) and, for a
 non-local registry, `gh auth token | cosign login` into an isolated
 `DOCKER_CONFIG`; `approvedBy` is self-asserted. The `write:packages` scope
@@ -332,7 +332,7 @@ nothing.
 **What:** Promote the scan-clean-first posture to an enforced mechanism:
 `.openvex.json` statement(s) → `vexctl attest` (signed via an OpenBao
 Transit key, same custody as approval/provenance) → attached as an OCI
-referrer → `mise run consume` re-runs `trivy image --vex <referrer>
+referrer → `mise run frontend:deploy` re-runs `trivy image --vex <referrer>
 --severity CRITICAL --exit-code 1` against the SBOM referrer before
 accepting a digest.
 

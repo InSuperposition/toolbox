@@ -8,7 +8,7 @@ locals {
   # The local OpenBao is ONE daemon per developer machine, not one per git
   # worktree/checkout (ADR 0010). Its rendered config, raft store and
   # snapshots therefore live in the XDG state dir, not under this worktree.
-  # `bootstrap-openbao.sh` keeps tofu state next to them
+  # `scripts/openbao-bootstrap.sh` keeps tofu state next to them
   # (`tofu apply -state=<state_dir>/tofu.tfstate`), so any worktree's
   # bootstrap operates on the same instance.
   #
@@ -36,6 +36,6 @@ module "secret_openbao_local" {
 
   # Auto-unseal via a static seal key (ADR 0010/0011). The id is a stable
   # label; the key itself is a 0600 file ($state_dir/seal.key) that
-  # openbao.hcl reads via file://, written by bootstrap-openbao.sh.
+  # openbao.hcl reads via file://, written by scripts/openbao-bootstrap.sh.
   static_seal_key_id = "toolbox-local"
 }

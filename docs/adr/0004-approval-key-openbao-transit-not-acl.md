@@ -3,9 +3,9 @@
 Possession of a dedicated `cosign` keypair — the *approval key*, private
 half in OpenBao Transit (`approval-key`, `exportable=false`), never in the
 Pipeline's cluster environment — is what distinguishes a real approval
-referrer from the automated SBOM/provenance ones. `approve.sh` signs via
-`cosign attest --key openbao://approval-key`; the consumer trusts only a
-referrer that verifies against that key.
+referrer from the automated SBOM/provenance ones. `attestation-sign.sh`
+signs via `cosign attest --key openbao://approval-key`; the consumer trusts
+only a referrer that verifies against that key.
 
 Considered and rejected: a registry ACL restricting who can push an
 approval-typed referrer (zot's ACL is identity + repo-path + action scoped,

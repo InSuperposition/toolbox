@@ -1,11 +1,11 @@
 # The demo consumer is a local pitchfork-supervised container, not a k8s Deployment
 
 The approved image runs as a standalone `pitchfork`-supervised Docker
-container on the dev Mac (`[daemons.frontend]` → `deploy/frontend/run.sh`),
-not a Kubernetes Deployment. `mise run consume` verifies the pinned
-approval, records the image + attestation digest in `current-image.txt`
-(git-ignored, atomic write), and restarts the daemon; `run.sh` re-verifies
-at launch.
+container on the dev Mac (`[daemons.frontend]` →
+`deploy/frontend/scripts/frontend-serve.sh`), not a Kubernetes Deployment.
+`mise run frontend:deploy` verifies the pinned approval, records the image +
+attestation digest in `current-image.txt` (git-ignored, atomic write), and
+restarts the daemon; `frontend-serve.sh` re-verifies at launch.
 
 Why: Tekton's k8s dependency is about the *build engine*, not a requirement
 that the deployed app live in-cluster — the same separation the design

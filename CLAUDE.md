@@ -174,10 +174,11 @@ image consumer) · `environments/local/` (one deployment target — owns its
 (reusable, versioned, URL-consumed OpenTofu modules only — empty + README
 today).
 
-The rule is in force now; the tree is migrated to match it in phased typed
-PRs (`TODOS.md` T1–T6). Until a phase lands, its files stay at their
-pre-restructure paths — so verify a path against disk, not against this
-list.
+The rule is in force and the tree matches it — the phased restructure
+(`TODOS.md` T1–T6, `docs/designs/repo-structure.md` § Migration status) is
+complete. `ls-lint` + `ast-grep` enforce the placement + edge rules with
+**zero exceptions** (only `**/tests/**` is exempt from the concern-climb
+rule — fixtures reach across concerns by design).
 
 ## Module Structure & Naming
 

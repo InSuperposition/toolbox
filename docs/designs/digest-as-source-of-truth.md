@@ -41,9 +41,9 @@ work lives in [`../../TODOS.md`](../../TODOS.md).
 - `deploy/frontend/Dockerfile` is the one hand-authored Dockerfile — a
   named carve-out to "no code in configuration files" (two `RUN` lines, no
   shell logic; see CLAUDE.md).
-- Interim auth only: `approve.sh` authenticates to OpenBao with the root
-  token in `$VAULT_TOKEN` (a `0600` file, ADR 0011) and pushes with a
-  call-time `gh` token. Per-member cryptographic identity is a separate
+- Interim auth only: `attestation-sign.sh` authenticates to OpenBao with
+  the root token in `$VAULT_TOKEN` (a `0600` file, ADR 0011) and pushes with
+  a call-time `gh` token. Per-member cryptographic identity is a separate
   planning task (`TODOS.md`).
 - Public-trust signing (Fulcio/keyless, a published key) is deferred — the
   cosign key is mechanically required, carries no public-trust claim.
@@ -75,13 +75,13 @@ build ─▶ scan+gate ─▶ evidence referrers ─▶ human approval ─▶ co
    attestation). These are evidence a reviewer reads; none of them is the
    gate.
 
-4. **Human approval** — `mise run approve -- <registry/repo@sha256:...>`
-   (`deploy/frontend/scripts/approve.sh`) runs an OpenBao preflight
-   (`openbao-preflight.sh` — distinguishes unreachable / sealed /
-   unauthorized / missing-key, exit 3), pulls and summarises the evidence,
-   prompts approve/reject + a reason, `cue vet`s the predicate against
-   `#Predicate` in `verdict-approved.cue`, then signs it as an in-toto
-   attestation:
+4. **Human approval** — `mise run attestation:sign -- <registry/repo@sha256:...>`
+   (`attestation/scripts/attestation-sign.sh`) runs an OpenBao preflight
+   (`attestation/scripts/openbao-preflight.sh` — distinguishes unreachable /
+   uninitialised / sealed / unauthorized / missing-key, exit 3), pulls and
+   summarises the evidence, prompts approve/reject + a reason, `cue vet`s the
+   predicate against `#Predicate` in `attestation/verdict-approved.cue`, then
+   signs it as an in-toto attestation:
 
    ```
    cosign attest --predicate <file> --type <URI> \
@@ -93,15 +93,18 @@ build ─▶ scan+gate ─▶ evidence referrers ─▶ human approval ─▶ co
    config and uploads to the public Rekor tlog. The attestation is stored
    as an `application/vnd.dev.sigstore.bundle.v0.3+json` referrer. Every
    completed decision is signed — approve *and* reject, never silent —
-   except an EOF / Ctrl-C / empty prompt, which writes nothing. `approve.sh`
-   prints the new attestation's own digest; that digest is the selection
-   key ([ADR 0006](../adr/0006-approval-selection-is-attestation-digest-pin.md)).
+   except an EOF / Ctrl-C / empty prompt, which writes nothing.
+   `attestation-sign.sh` prints the new attestation's own digest; that
+   digest is the selection key ([ADR 0006](../adr/0006-approval-selection-is-attestation-digest-pin.md)).
 
 5. **Consume gate** —
-   `mise run consume -- <ref> <attestation-digest>`
-   (`deploy/frontend/scripts/consume.sh`) calls the shared
-   `verify-approval.sh`, which fetches *that specific attestation*, verifies
-   its signature against the committed `deploy/frontend/cosign-approval.pub`
+   `mise run frontend:deploy -- <ref> <attestation-digest>`
+   (`deploy/frontend/scripts/frontend-deploy.sh`) reaches the shared
+   `attestation/scripts/attestation-verify.sh` through the
+   `TOOLBOX_ATTESTATION_VERIFY` env seam (`lib/frontend.sh`; the one allowed
+   `deploy/frontend ▶ attestation` edge, ADR 0013). It fetches *that specific
+   attestation*, verifies its signature against the committed
+   `attestation/cosign-approval.pub`
    ([ADR 0005](../adr/0005-consume-verifies-against-committed-pubkey.md)),
    checks the subject digest and predicate type with `cosign
    verify-blob-attestation`, then `cue vet`s the statement against
@@ -115,7 +118,7 @@ build ─▶ scan+gate ─▶ evidence referrers ─▶ human approval ─▶ co
 
 ### The approval schema
 
-`deploy/frontend/verdict-approved.cue` is one file with two definitions:
+`attestation/verdict-approved.cue` is one file with two definitions:
 `#Predicate` is permissive (both verdicts) for the sign-side `cue vet`;
 `#ApprovedStatement` wraps the whole in-toto statement and pins `verdict:
 "approved"` for the consume-side check. CUE is a schema language (satisfies
@@ -133,51 +136,61 @@ consumer trusts only a referrer that verifies against the committed public
 key; mere referrer presence is not enough.
 
 **Interim-auth honesty:** today "the private key" means "the OpenBao root
-token in the OS keychain" — anyone with it can sign any `approvedBy`.
+token in a `0600` file" (`$OPENBAO_STATE_DIR/root.token`, ADR 0011 — no
+keychain, no `fnox`) — anyone with it can sign any `approvedBy`.
 `approvedAt` is self-asserted (no trusted timestamp) — an audit field, never
 a trust input. Per-member identity is a `TODOS.md` planning task.
 
 ## File layout
 
-Extends the repo's own Repo Role pattern (`modules/*` reusable, a root
-composition applies them) to Tekton content, mirroring
-[tektoncd/catalog](https://github.com/tektoncd/catalog)'s kind-first,
-versioned convention for the reusable pieces:
+Each top-level concern owns its files and declares which other concerns it
+may name (`docs/designs/repo-structure.md`, ADR 0012/0013). The Tekton
+pieces (deferred, Phase 2) extend the repo's own Repo Role pattern and
+mirror [tektoncd/catalog](https://github.com/tektoncd/catalog)'s
+kind-first, versioned convention.
 
 ```
-modules/task-<builder>-build/        # reusable Task: build an app image (builder TBD — TODOS.md T7a)
-modules/task-trivy-scan/             # reusable Task: scan, emit CycloneDX SBOM, block on CRITICAL
-modules/task-oras-attach/            # reusable Task: attach an OCI referrer to a digest
-modules/pipeline-build-scan-approve/ # reusable Pipeline: build -> scan+SBOM -> attach SBOM
-                                     #   ("approve" is the Pipeline's PURPOSE — approval runs outside Tekton)
-modules/secret-openbao-local/        # reusable: Transit engine + N signing keys + N policies + rendered openbao.hcl
-environments/local/                  # the ONE instance of secret-openbao-local (main.tf)
+attestation/                         # the consumer-agnostic sign+verify seam (ADR 0013)
+  verdict-approved.cue                  #   the approval schema (#Predicate / #ApprovedStatement)
+  cosign-approval.pub                   #   committed public key — what verify checks against (ADR 0005)
+  scripts/attestation-sign.sh           #   mise run attestation:sign  — evidence -> human decision -> signed attestation
+  scripts/attestation-verify.sh         #   mise run attestation:verify — the shared verify seam; no OpenBao
+  scripts/openbao-preflight.sh          #   5-state OpenBao check (unreachable/uninitialised/sealed/unauthorized/missing-key), exit 3
+  scripts/lib/attestation.sh            #   shared: predicate type, digest-ref check, local-registry detection
+  scripts/tests/*.bats + helper.bash
+
 deploy/frontend/                     # the per-consumer instantiation for cv_frontend:
   Dockerfile, Dockerfile.dockerignore   #   the distroless build (ADR 0007)
-  verdict-approved.cue                   #   the approval schema
-  cosign-approval.pub                    #   committed public key — what consume verifies against (ADR 0005)
-  scripts/approve.sh                     #   mise run approve — evidence -> human decision -> signed attestation
-  scripts/verify-approval.sh             #   the shared verify seam (consume.sh, run.sh); no OpenBao
-  scripts/consume.sh                     #   mise run consume — verify + record + restart + readiness check
-  scripts/openbao-preflight.sh           #   4-way OpenBao state check, exit 3
-  run.sh                                 #   pitchfork frontend daemon entrypoint (ADR 0009)
-  tests/*.bats + tests/helper.bash       #   the test matrix
+  scripts/frontend-deploy.sh            #   mise run frontend:deploy — verify + record + restart + readiness check
+  scripts/frontend-serve.sh            #   pitchfork frontend daemon entrypoint (ADR 0009)
+  scripts/lib/frontend.sh               #   frontend_repo_root + the TOOLBOX_ATTESTATION_VERIFY seam
+  scripts/tests/*.bats + helper.bash
+
+environments/local/                  # the ONE deployment target — owns its OpenBao unit + orchestration
+  main.tf                               #   applies module "secret_openbao_local" { source = "./openbao" }
+  openbao/                              #   the local-OpenBao tofu unit (ADR 0012) — *.tf, templates/, tests/*.tftest.hcl
+  scripts/openbao-{bootstrap,reset,snapshot}.sh + lib/openbao.sh + tests/
+
+modules/                             # reusable, versioned, URL-consumed OpenTofu modules only — README today
+                                     # (deferred: task-<builder>-build, task-trivy-scan, task-oras-attach,
+                                     #  pipeline-build-scan-approve — Tekton Task/Pipeline YAML, Phase 2, TODOS.md T7)
 ```
 
 OpenBao/Transit is not per-consumer: `approval-key` and a future
 `chains-provenance-key` are two entries in one `transit_keys` list in
-`environments/local/main.tf`, not two instances. `pitchfork.toml` stays at
-the repo root (pitchfork only discovers the nearest one searching *upward*);
-its `openbao` daemon's `dir = "environments/local"` points `bao server` at
-the right cwd. `deploy/frontend/` only ever names a key
+`environments/local/main.tf` (input to the `./openbao` unit), not two
+instances. The local OpenBao daemon is machine-global — registered in
+`~/.config/pitchfork/config.toml` with `dir = $OPENBAO_STATE_DIR`
+(`~/.local/state/toolbox/openbao/`), **not** in the repo `pitchfork.toml`
+(ADR 0010). `attestation/` only ever names a key
 (`openbao://approval-key`) — it never provisions OpenBao. See
 `environments/local/README.md` for the bootstrap/reset/snapshot runbook.
 
 **No embedded scripts in Tekton YAML** — every Task step is a single pinned
-CLI invocation via Kubernetes' native `command`/`args`. `approve.sh` (the
-one place with real go/no-go logic) is not part of any Task or Pipeline —
-it is a plain script the repo owner runs, exactly as a required-reviewer
-click is "manual" in any CI system.
+CLI invocation via Kubernetes' native `command`/`args`. `attestation-sign.sh`
+(the one place with real go/no-go logic) is not part of any Task or
+Pipeline — it is a plain script the repo owner runs, exactly as a
+required-reviewer click is "manual" in any CI system.
 
 ## Phasing
 
@@ -187,11 +200,12 @@ independently (Gall's Law). The full sequencing lives in `TODOS.md`.
 - **Phase 1 — shipped (T1–T6).** `mise.toml` pinned; the distroless build
   runs as a GitHub Actions workflow to GHCR; `trivy` scan + CRITICAL gate +
   CycloneDX SBOM + scan-report referrers; OpenBao Transit (`approval-key`)
-  provisioned by `modules/secret-openbao-local` + `environments/local/`,
-  supervised by `pitchfork`; `approve.sh` / `verify-approval.sh` /
-  `consume.sh` proven live against real GHCR; the demo consumer is a local
-  `pitchfork` container ([ADR 0009](../adr/0009-demo-consumer-is-local-container-not-k8s.md));
-  `mise run local:openbao:snapshot` / `openbao-snapshot-restore` for backup.
+  provisioned by `environments/local/openbao/` (applied by
+  `environments/local/main.tf`), supervised by `pitchfork`;
+  `attestation-sign.sh` / `attestation-verify.sh` / `frontend-deploy.sh`
+  proven live against real GHCR; the demo consumer is a local `pitchfork`
+  container ([ADR 0009](../adr/0009-demo-consumer-is-local-container-not-k8s.md));
+  `mise run local:openbao:snapshot` / `local:openbao:snapshot-restore` for backup.
   Registry is **GHCR** — hosted, zero-ops, unmetered on public repos.
 
 - **Phase 2 — Tekton (deferred, T7a/T7b/T7c).** Move the build/scan/attach
@@ -238,8 +252,8 @@ independently (Gall's Law). The full sequencing lives in `TODOS.md`.
 ```
 GitHub Actions (public repo, unmetered)          Local (repo owner's machine)
 ┌────────────────────────────────────┐           ┌───────────────────────────┐
-│ checkout cv_frontend@pinned-SHA    │           │ pitchfork: openbao        │
-│            │                       │           │  (raft storage)           │
+│ checkout cv_frontend@pinned-SHA    │           │ machine-global pitchfork  │
+│            │                       │           │  daemon: openbao (raft)   │
 │            ▼                       │           │   Transit: approval-key   │
 │ docker buildx build                │           │     └─ never leaves       │
 │   --platform linux/arm64 --push    │           │        OpenBao            │
@@ -248,20 +262,20 @@ GitHub Actions (public repo, unmetered)          Local (repo owner's machine)
 │            ▼                       │                        │ cosign attest
 │ trivy scan --format json          │                        │ --key openbao://
 │   └─ oras attach scan.json         │                        │   approval-key
-│            ▼                       │            ┌───────────┴───────────────┐
-│ trivy --format cyclonedx          │            │ mise run approve -- <ref> │
-│   └─ oras attach sbom.cdx.json     │            │  show SBOM + scan report  │
-│            ▼                       │            │  human: approve / reject  │
-│ trivy image --severity CRITICAL   │            │  ALWAYS signs, either way  │
-│   --exit-code 1   (blocking, LAST) │◀───────────┤  prints attestation digest│
-└─────────────┬──────────────────────┘            └───────────────────────────┘
+│            ▼                       │        ┌───────────────┴───────────────┐
+│ trivy --format cyclonedx          │        │ mise run attestation:sign     │
+│   └─ oras attach sbom.cdx.json     │        │   -- <ref>                    │
+│            ▼                       │        │  show SBOM + scan report      │
+│ trivy image --severity CRITICAL   │        │  human: approve / reject      │
+│   --exit-code 1   (blocking, LAST) │◀───────┤  ALWAYS signs; prints att-dig │
+└─────────────┬──────────────────────┘        └───────────────────────────────┘
               │ image + SBOM + scan.json + approval referrers
               ▼
    ┌─────────────────────────────────────────────────────────────────┐
-   │ mise run consume -- <registry/repo@sha256:...> <attestation-dig> │
-   │   verify-approval.sh:  fetch THAT attestation (by digest)         │
+   │ mise run frontend:deploy -- <ref> <attestation-digest>           │
+   │   attestation-verify.sh  (via $TOOLBOX_ATTESTATION_VERIFY seam):  │
    │     cosign verify-blob-attestation --bundle <blob>                │
-   │       --key cosign-approval.pub  (committed; NO OpenBao call)     │
+   │       --key attestation/cosign-approval.pub  (committed; no bao)  │
    │       --type <URI> --check-claims --insecure-ignore-tlog          │
    │     then: cue vet <statement> -d '#ApprovedStatement'             │
    │       ├── valid sig + approved ──▶ exit 0                          │
@@ -281,13 +295,13 @@ GitHub Actions (public repo, unmetered)          Local (repo owner's machine)
 | Distroless: no shell | a later script assumes `docker exec … sh` | fails immediately; design uses HTTP readiness, not `docker exec` |
 | trivy scan | CRITICAL finding (zero suppressions) | blocks *after* the scan-report referrer is attached |
 | GHCR push | `GITHUB_TOKEN` missing `packages: write` | push fails loudly; documented, not tested |
-| `mise run approve` | OpenBao unreachable / sealed / unauthorized / missing-key | `openbao-preflight.sh` distinguishes all four, exit 3, names the fix |
-| `mise run approve` | Ctrl-C / EOF / empty at the prompt | no signed record written, clean abort |
-| `mise run approve` | `cosign attest` signs but the registry push fails | read-back check fails loudly, non-zero; no false "approved" |
-| `mise run consume` / launch re-verify | attestation missing / bad sig / wrong subject / verdict rejected | `verify-approval.sh` exit 1, distinct stderr per case |
-| launch re-verify | GHCR transient failure | `verify-approval.sh` exit 3 → `run.sh` bounded retry + backoff → visible stopped state, never a hang |
-| `verify-approval.sh` | OpenBao down | not applicable — consume never touches OpenBao |
-| OpenBao Transit | raft store lost | past approvals still verify (pubkey in-repo); `openbao-snapshot-restore` restores signing ability |
+| `mise run attestation:sign` | OpenBao unreachable / uninitialised / sealed / unauthorized / missing-key | `openbao-preflight.sh` distinguishes all five, exit 3, names the fix |
+| `mise run attestation:sign` | Ctrl-C / EOF / empty at the prompt | no signed record written, clean abort |
+| `mise run attestation:sign` | `cosign attest` signs but the registry push fails | read-back check fails loudly, non-zero; no false "approved" |
+| `mise run frontend:deploy` / launch re-verify | attestation missing / bad sig / wrong subject / verdict rejected | `attestation-verify.sh` exit 1, distinct stderr per case |
+| launch re-verify | GHCR transient failure | `attestation-verify.sh` exit 3 → `frontend-serve.sh` bounded retry + backoff → visible stopped state, never a hang |
+| `attestation-verify.sh` | OpenBao down | not applicable — verify never touches OpenBao |
+| OpenBao Transit | raft store lost | past approvals still verify (pubkey in-repo); `mise run local:openbao:snapshot-restore` restores signing ability |
 
 ---
 

@@ -30,10 +30,10 @@ The allowed dependency edges are explicit and machine-checked in
 
 ## Constraints
 
-- The rule is normative now; the tree is migrated to match it in phases
-  (see Migration status below). A reader must not assume every path in
-  this document already exists on disk.
-- `mise run check` stays green after every phase.
+- The rule is normative and the tree matches it (see Migration status
+  below). The `modules/*` Tekton entries in the Target tree are still
+  planned (Phase 2 of the CI pipeline, `TODOS.md` T7) — not yet on disk.
+- `mise run check` stayed green after every phase; it still gates every change.
 - `git mv` and a logic change never land in the same commit — refactor,
   then change.
 - `hk` stays the only git-hook gate; its config gains steps, is never
@@ -266,10 +266,9 @@ session, tracked in [`TODOS.md`](../../TODOS.md).
 
 ## Migration status
 
-The rule is in force now. The tree is moved to match it in phased,
-typed PRs, each green on its own — full phase list and per-phase
-verification in [`TODOS.md`](../../TODOS.md) (tasks T1–T6). Until a phase
-lands, the affected files stay at their pre-restructure paths:
+**Complete.** The tree matches the rule; every phase landed green (full
+phase list and per-phase verification in [`TODOS.md`](../../TODOS.md),
+tasks T1–T6). This table is kept as the record of what moved.
 
 | phase | moves | status |
 |---|---|---|
@@ -281,7 +280,7 @@ lands, the affected files stay at their pre-restructure paths:
 | 2 | local-OpenBao unit → `environments/local/openbao/`; scripts → `environments/local/scripts/` (renamed `openbao-<verb>.sh`), `lib/openbao.sh` + `openbao-snapshot.sh` extracted; root `scripts/` gone; `modules/` → README only | done |
 | 3 | mise task namespacing — the `openbao-*` tasks → `local:openbao:*` (+ new `local:openbao:stop`); every `mise run openbao-*` reference rewritten. | done |
 | 4 | `attestation/` split out of `deploy/frontend/` (one PR, 4a–4d): the sign/verify/preflight seam → `attestation/`; `consume.sh`/`run.sh` → `frontend-deploy.sh`/`frontend-serve.sh` + the `TOOLBOX_ATTESTATION_VERIFY` seam; `openbao-preflight.sh` 5-state + corrected static-seal advice; `openbao-bootstrap.sh` calls `mise run attestation:export-pubkey` (all boundary rules now closed, no lint exceptions). | done |
-| 5 | docs-accuracy sweep — every `.md` re-verified against the moved code | ← you are here |
+| 5 | docs-accuracy sweep — `digest-as-source-of-truth.md`, ADRs 0004/0005/0006/0009/0011, `main.tf` comments re-verified against the moved code; link-check clean | done |
 
 ## Negative space (deliberately not here)
 
