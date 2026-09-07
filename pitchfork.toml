@@ -1,10 +1,12 @@
-[daemons.openbao]
-run = "bao server -config=openbao/openbao.hcl"
-dir = "environments/local"
-auto = ["start", "stop"]
-retry = 0
-ready_delay = 2
-ready_port = 8200
+# The local OpenBao daemon is NOT defined here. It is a machine-global
+# pitchfork daemon (~/.config/pitchfork/config.toml), registered once by
+# `mise run openbao-bootstrap` — one `bao server` per developer machine,
+# not one per git worktree (ADR 0010). pitchfork namespaces project
+# daemons by directory, so an entry here would start a second `bao server`
+# per worktree and lock-conflict on the shared raft store.
+#
+#   mise run openbao-up        -> pitchfork start -g openbao
+#   pitchfork logs -g openbao  -> daemon logs
 
 # Local cv_frontend demo deploy (docs/adr/0009-demo-consumer-is-local-
 # container-not-k8s.md). `run.sh` is a FIXED indirection — never repoint it; `mise run

@@ -123,8 +123,9 @@ design — per-member OpenBao identity, per-member registry auth, a clean
 
 Interim, `approve.sh`:
 
-- authenticates to OpenBao with the **root token** from fnox
-  (`VAULT_TOKEN`). Anyone holding it can sign any `approvedBy` value —
+- authenticates to OpenBao with the **root token** in `$VAULT_TOKEN`
+  (`mise [env]` reads the `0600` `root.token` file, ADR 0011). Anyone
+  holding it can sign any `approvedBy` value —
   there is no per-approver cryptographic identity yet, so `approvedBy` is
   self-asserted audit text.
 - pushes the attestation to GHCR with a **call-time `gh auth token`**. That
@@ -147,7 +148,7 @@ never a trust input.
 | `run.sh` | pitchfork `frontend` daemon entrypoint — re-verify + run the container in the foreground |
 | `scripts/openbao-preflight.sh` | distinguishes unreachable / sealed / unauthorized / missing-key, exit 3 |
 | `verdict-approved.cue` | `#Predicate` (permissive, sign side) + `#ApprovedStatement` (verdict==approved, consume side) |
-| `cosign-approval.pub` | committed public half of `openbao://approval-key` — what verify checks against; written by `../../scripts/export-approval-pubkey.sh` (also `mise run export-approval-pubkey`), re-run after a key rotation |
+| `cosign-approval.pub` | committed public half of `openbao://approval-key` — what verify checks against; written by `mise run export-approval-pubkey` (one `cosign public-key` line; `mise run openbao-bootstrap` also writes it), re-run + commit after a Transit key rotation |
 | `current-image.txt` | git-ignored, per-machine — the image ref + attestation digest `run.sh` deploys |
 | `tests/{approve,verify-approval,deploy}.bats`, `tests/helper.bash` | the test matrix (local zot + a throwaway cosign key via the `TOOLBOX_APPROVE_KEY` seam; `deploy.bats`'s container cases also need docker) |
 

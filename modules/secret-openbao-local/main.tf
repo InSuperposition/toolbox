@@ -64,9 +64,14 @@ resource "local_file" "openbao_config" {
   file_permission = "0644"
 
   content = templatefile("${path.module}/templates/openbao.hcl.tftpl", {
-    data_path        = var.openbao_data_path
-    node_id          = var.node_id
-    listener_address = var.listener_address
-    cluster_address  = var.cluster_address
+    data_path          = var.openbao_data_path
+    node_id            = var.node_id
+    listener_address   = var.listener_address
+    cluster_address    = var.cluster_address
+    static_seal_key_id = var.static_seal_key_id
+    # The static-seal key file sits beside the rendered config. bootstrap-
+    # openbao.sh writes it (raw 32 bytes, 0600); this module never sees the
+    # key, only where it lives.
+    seal_key_path = "${dirname(var.openbao_config_path)}/seal.key"
   })
 }

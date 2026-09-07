@@ -1,20 +1,15 @@
 #!/usr/bin/env bats
 
 # T6 — raft snapshot save/restore for the local OpenBao. Integration test
-# against a disposable scratch copy (never the real environments/local/ or
-# the real keychain), same pattern as bootstrap.bats.
-#
-# The scratch instance runs on a spare port (127.0.0.1:8399), so it does
-# NOT disturb the real :8200 daemon — unlike bootstrap.bats, this suite is
-# safe to run with your OpenBao up.
+# against a disposable scratch copy (scratch state dir, spare port), same
+# pattern as bootstrap.bats — never the real daemon or state dir. All
+# secrets are 0600 files (ADR 0011) — no keychain, no fnox.
 #
 # Proves the two documented restore paths in environments/local/README.md:
-#   1. restore into the running daemon rolls back a change
-#   2. `-force` restore into a freshly bootstrapped instance recovers the
-#      original approval-key (verified by cosign against openbao://) —
-#      given the original unseal key + root token
-
-SNAP="environments/local/openbao/snapshots/latest.snap"
+#   1. restore into the running daemon rolls a change back (auto-unseal)
+#   2. `-force` restore into a fresh instance recovers the original
+#      approval-key — given the snapshot's own seal.key + root.token
+#      (the bundle `mise run openbao-snapshot` writes together)
 
 setup() {
   SCRATCH="$(mktemp -d)"
@@ -22,126 +17,126 @@ setup() {
 
   mkdir -p "$SCRATCH/environments"
   cp -r "$REPO_ROOT/environments/local" "$SCRATCH/environments/local"
-  # a real bootstrap leaves runtime state in environments/local/ — scratch
-  # must start pristine or `tofu apply` operates on state for resources that
-  # don't exist in the fresh scratch OpenBao.
-  rm -rf "$SCRATCH/environments/local/openbao" \
-    "$SCRATCH/environments/local/.terraform" \
+  rm -rf "$SCRATCH/environments/local/.terraform" \
     "$SCRATCH/environments/local/.terraform.lock.hcl" \
     "$SCRATCH/environments/local/tests"
-  rm -f "$SCRATCH"/environments/local/terraform.tfstate*
   cp -r "$REPO_ROOT/modules" "$SCRATCH/modules"
   cp -r "$REPO_ROOT/scripts" "$SCRATCH/scripts"
 
-  # Spare port — the real daemon owns :8200/:8201. The module renders
-  # openbao.hcl (listener + api_addr) from these, and bootstrap-openbao.sh
-  # honours a pre-set VAULT_ADDR.
-  cat > "$SCRATCH/environments/local/main.tf" <<'EOF'
-module "secret_openbao_local" {
-  source              = "../../modules/secret-openbao-local"
-  transit_keys        = [{ name = "approval-key", type = "ecdsa-p256" }]
-  openbao_config_path = "openbao/openbao.hcl"
-  listener_address    = "127.0.0.1:8399"
-  cluster_address     = "127.0.0.1:8398"
-}
-EOF
-  # point the vault provider at the scratch port too (auto-loaded)
-  echo 'openbao_addr = "http://127.0.0.1:8399"' > "$SCRATCH/environments/local/terraform.tfvars"
-  cat > "$SCRATCH/pitchfork.toml" <<'EOF'
-[daemons.openbao]
-run = "bao server -config=openbao/openbao.hcl"
-dir = "environments/local"
-retry = 0
-ready_delay = 2
-ready_port = 8399
-EOF
+  export TOOLBOX_OPENBAO_STATE_DIR="$SCRATCH/state"
+  export TOOLBOX_OPENBAO_DAEMON="openbao-bats-snap-$$"
+  export TOOLBOX_OPENBAO_LISTEN="127.0.0.1:8398"
+  export TOOLBOX_OPENBAO_SUPERVISOR="none"
+  export TOOLBOX_OPENBAO_RESET_YES=1
+  export VAULT_ADDR="http://127.0.0.1:8398"
+  SNAP="$TOOLBOX_OPENBAO_STATE_DIR/snapshots/latest.snap"
 
-  cat > "$SCRATCH/fnox.toml" <<'EOF'
-[providers.keychain]
-type = "keychain"
-service = "toolbox-openbao-bats-test"
-
-[secrets]
-VAULT_TOKEN = { provider = "keychain", value = "VAULT_TOKEN" }
-EOF
-
-  export VAULT_ADDR=http://127.0.0.1:8399
   cd "$SCRATCH" || return 1
 }
 
 teardown() {
-  pitchfork stop openbao 2>/dev/null || true
-  pitchfork daemons remove openbao 2>/dev/null || true
-  fnox remove VAULT_TOKEN 2>/dev/null || true
+  [ -f "$TOOLBOX_OPENBAO_STATE_DIR/bao.pid" ] &&
+    kill "$(cat "$TOOLBOX_OPENBAO_STATE_DIR/bao.pid")" 2>/dev/null || true
+  pkill -f "bao server -config=$TOOLBOX_OPENBAO_STATE_DIR" 2>/dev/null || true
   cd /
   rm -rf "$SCRATCH"
 }
 
-# bootstrap + echo "<unseal-key> <root-token>" (both captured from output / fnox)
+# bootstrap (static seal auto-unseals) + echo the root token
 _bootstrap() {
-  local out unseal token
-  out="$(./scripts/bootstrap-openbao.sh 2>&1)"
-  unseal="$(printf '%s\n' "$out" | grep -A1 'UNSEAL KEY' | tail -1 | tr -d '[:space:]')"
-  token="$(fnox get VAULT_TOKEN)"
-  printf '%s %s\n' "$unseal" "$token"
+  ./scripts/bootstrap-openbao.sh >/dev/null 2>&1
+  cat "$TOOLBOX_OPENBAO_STATE_DIR/root.token"
 }
 
-_unseal_if_needed() {
-  if ! bao status -format=json 2>/dev/null | jq -e '.sealed == false' >/dev/null 2>&1; then
-    bao operator unseal "$1" >/dev/null
-  fi
+# The bundle `mise run openbao-snapshot` writes: snap + seal.key + root.token.
+_snapshot_bundle() {
+  bao operator raft snapshot save "$SNAP"
+  cp -f "$TOOLBOX_OPENBAO_STATE_DIR/seal.key" \
+    "$TOOLBOX_OPENBAO_STATE_DIR/root.token" \
+    "$TOOLBOX_OPENBAO_STATE_DIR/snapshots/"
+}
+
+# Static seal: the daemon auto-unseals on every start AND after a restore
+# (same seal.key). If it is ever still sealed here, that is a real bug to
+# surface, not paper over.
+_assert_unsealed() {
+  bao status -format=json 2>/dev/null | jq -e '.sealed == false' >/dev/null
 }
 
 _pubkey() { cosign public-key --key openbao://approval-key 2>/dev/null; }
 
-@test "the module creates the snapshot directory so the save works on a fresh checkout" {
-  _bootstrap >/dev/null
-  [ -d environments/local/openbao/snapshots ]
-  VAULT_TOKEN="$(fnox get VAULT_TOKEN)"
-  export VAULT_TOKEN
-  run bao operator raft snapshot save "$SNAP"
-  [ "$status" -eq 0 ]
-  [ -s "$SNAP" ]
+_restart_daemon() {
+  local pid
+  pid="$(cat "$TOOLBOX_OPENBAO_STATE_DIR/bao.pid" 2>/dev/null || true)"
+  [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+  # Wait for the process to actually exit and release the raft bolt lock,
+  # otherwise the new one dies with "failed to open bolt file: timeout".
+  for _ in $(seq 1 50); do
+    [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || break
+    sleep 0.2
+  done
+  bao server -config="$TOOLBOX_OPENBAO_STATE_DIR/openbao.hcl" \
+    >"$TOOLBOX_OPENBAO_STATE_DIR/bao.log" 2>&1 &
+  echo $! >"$TOOLBOX_OPENBAO_STATE_DIR/bao.pid"
+  # Poll for auto-unseal directly (up to ~20s) rather than the health
+  # endpoint -- a -force restore can take a few seconds to settle.
+  for _ in $(seq 1 100); do
+    bao status -format=json 2>/dev/null | jq -e '.sealed == false' >/dev/null 2>&1 && return 0
+    sleep 0.2
+  done
+  echo "daemon did not auto-unseal after restart:" >&2
+  tail -20 "$TOOLBOX_OPENBAO_STATE_DIR/bao.log" >&2
+  return 1
 }
 
-@test "restore into the running daemon rolls a key rotation back" {
-  read -r unseal token < <(_bootstrap)
-  export VAULT_TOKEN="$token"
+@test "openbao-snapshot writes a complete bundle: snap + seal.key + root.token" {
+  VAULT_TOKEN="$(_bootstrap)"
+  export VAULT_TOKEN
+  [ -d "$TOOLBOX_OPENBAO_STATE_DIR/snapshots" ]
+  run _snapshot_bundle
+  [ "$status" -eq 0 ]
+  [ -s "$SNAP" ]
+  [ -s "$TOOLBOX_OPENBAO_STATE_DIR/snapshots/seal.key" ]
+  [ -s "$TOOLBOX_OPENBAO_STATE_DIR/snapshots/root.token" ]
+}
+
+@test "restore into the running daemon rolls a key rotation back, auto-unsealed" {
+  VAULT_TOKEN="$(_bootstrap)"
+  export VAULT_TOKEN
 
   before="$(_pubkey)"
   [ -n "$before" ]
   bao operator raft snapshot save "$SNAP"
 
   bao write -f transit/keys/approval-key/rotate >/dev/null
-  rotated="$(_pubkey)"
-  [ "$rotated" != "$before" ]   # sanity: rotation moved the exported key
+  [ "$(_pubkey)" != "$before" ]
 
   run bao operator raft snapshot restore -force "$SNAP"
   [ "$status" -eq 0 ]
-  _unseal_if_needed "$unseal"
-
-  [ "$(_pubkey)" = "$before" ]  # rolled back to the snapshot's key version
+  _assert_unsealed                       # same seal.key -> no manual step
+  [ "$(_pubkey)" = "$before" ]
 }
 
-@test "-force restore into a fresh instance recovers the original approval-key" {
-  read -r unseal token < <(_bootstrap)
-  export VAULT_TOKEN="$token"
+@test "disaster: -force restore into a fresh instance from the snapshots/ bundle recovers the original key" {
+  orig_token="$(_bootstrap)"
+  export VAULT_TOKEN="$orig_token"
   before="$(_pubkey)"
-  bao operator raft snapshot save "$SNAP"
-  cp "$SNAP" "$BATS_TEST_TMPDIR/saved.snap"
+  _snapshot_bundle                                     # snap + seal.key + root.token in snapshots/
 
-  run ./scripts/reset-openbao.sh
-  [ "$status" -eq 0 ]
-  [ -f "$SNAP" ] || [ -d environments/local/openbao/snapshots ]   # reset kept snapshots/
+  ./scripts/reset-openbao.sh
+  [ -d "$TOOLBOX_OPENBAO_STATE_DIR/snapshots" ]        # reset kept the bundle
 
-  read -r _ fresh_token < <(_bootstrap)
+  fresh_token="$(_bootstrap)"
   export VAULT_TOKEN="$fresh_token"
-  [ "$(_pubkey)" != "$before" ]   # genuinely a different instance/key now
+  [ "$(_pubkey)" != "$before" ]                        # genuinely a new instance
 
-  run bao operator raft snapshot restore -force "$BATS_TEST_TMPDIR/saved.snap"
+  run bao operator raft snapshot restore -force "$TOOLBOX_OPENBAO_STATE_DIR/snapshots/latest.snap"
   [ "$status" -eq 0 ]
-  _unseal_if_needed "$unseal"          # ORIGINAL unseal key
-  export VAULT_TOKEN="$token"          # ORIGINAL root token
-
-  [ "$(_pubkey)" = "$before" ]         # original key is back and readable via openbao://
+  # The restored data is sealed by the bundle's ORIGINAL seal.key -> put it
+  # back and restart; auth with the bundle's ORIGINAL root.token.
+  cp -f "$TOOLBOX_OPENBAO_STATE_DIR/snapshots/seal.key" "$TOOLBOX_OPENBAO_STATE_DIR/seal.key"
+  _restart_daemon
+  _assert_unsealed
+  export VAULT_TOKEN="$(cat "$TOOLBOX_OPENBAO_STATE_DIR/snapshots/root.token")"
+  [ "$(_pubkey)" = "$before" ]
 }

@@ -36,7 +36,7 @@ set -e
 
 if [ -z "$status_json" ]; then
 	die "cannot reach OpenBao at $VAULT_ADDR" \
-		"pitchfork start openbao   (then: mise run openbao-bootstrap if never initialised)"
+		"mise run openbao-up   (then: mise run openbao-bootstrap if never initialised)"
 fi
 
 # --- sealed? ---
@@ -53,9 +53,8 @@ fi
 # One authenticated read tells both apart: a permission error is auth, a
 # 404-shaped error is a missing key.
 if [ -z "${VAULT_TOKEN:-}" ]; then
-	# shellcheck disable=SC2016  # the $(...) is literal advice for the operator, not for this shell
 	die "no VAULT_TOKEN in the environment" \
-		'eval "$(fnox activate zsh)"   (the bootstrap stored the root token in the OS keychain)'
+		"mise run openbao-bootstrap   (then open a new shell — mise [env] reads \$OPENBAO_STATE_DIR/root.token)"
 fi
 export VAULT_TOKEN
 
@@ -68,7 +67,7 @@ if [ "$read_rc" -ne 0 ]; then
 	case "$read_err" in
 	*[Pp]ermission\ denied* | *403*)
 		die "VAULT_TOKEN cannot read transit/keys/${KEY_NAME}" \
-			'check the token: fnox get VAULT_TOKEN — re-run mise run openbao-bootstrap if it is stale'
+			"the token is \$OPENBAO_STATE_DIR/root.token — re-run mise run openbao-bootstrap if stale, or 'bao operator generate-root' with \$OPENBAO_STATE_DIR/recovery.key if it is corrupt"
 		;;
 	*)
 		die "Transit key '${KEY_NAME}' does not exist" \

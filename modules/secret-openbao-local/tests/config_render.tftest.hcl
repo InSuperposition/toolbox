@@ -40,6 +40,41 @@ run "renders_raft_config_with_given_inputs" {
     condition     = !strcontains(local_file.openbao_config.content, "disable_mlock =")
     error_message = "disable_mlock is an obsolete no-op as of OpenBao >=2.0 (GH-363) — must not appear as a config directive"
   }
+
+  assert {
+    condition     = !strcontains(local_file.openbao_config.content, "seal \"static\"")
+    error_message = "no seal stanza by default (static_seal_key_id unset) — Shamir/manual unseal"
+  }
+}
+
+run "renders_the_static_seal_stanza_when_configured" {
+  command = apply
+
+  variables {
+    static_seal_key_id = "test-seal-1"
+  }
+
+  assert {
+    condition     = strcontains(local_file.openbao_config.content, "seal \"static\"")
+    error_message = "static_seal_key_id set — a seal \"static\" stanza must be rendered"
+  }
+
+  assert {
+    condition     = strcontains(local_file.openbao_config.content, "current_key    = \"file://tests/tmp/seal.key\"")
+    error_message = "the seal key must be a file:// path next to the config (the key itself is never in the rendered file)"
+  }
+
+  assert {
+    condition     = strcontains(local_file.openbao_config.content, "current_key_id = \"test-seal-1\"")
+    error_message = "the seal stanza must carry the given key id"
+  }
+
+  assert {
+    # Static seal needs raft clustering active — the ephemeral :0 cluster
+    # listener + cluster_addr are rendered only in this mode.
+    condition     = strcontains(local_file.openbao_config.content, "cluster_address = \"127.0.0.1:0\"")
+    error_message = "static seal requires the ephemeral :0 cluster listener"
+  }
 }
 
 run "creates_the_raft_data_directory" {

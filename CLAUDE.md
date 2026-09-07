@@ -68,8 +68,8 @@ each row links to.
 | **Crossplane** | *Negative space* — pinned, not active. | Would sit at the self-service in-cluster provisioning layer (rival to OpenTofu, not to Timoni) if a concrete need appears. None does yet. |
 | **Kyverno** | Admission policy. | Enforcement mechanics (scope, exceptions, webhook-failure mode) not yet defined — design at Kyverno module build time, not asserted here as a slogan. |
 | **Cilium** | Network policy, default-deny between workloads, explicit allow only. | Bootstrap allow-list (DNS, API server, git/OCI pulls, OpenBao) needed before default-deny can reconcile anything — defined at Cilium module build time. |
-| **OpenBao** | Secret store of record — for anything created *after* OpenBao exists and is unsealed. | The *root token* that first authenticates to OpenBao is machine-held (fnox → OS keychain, shipped in T3). The *unseal key* is currently human-held — **under review**: for the single-operator local dev daemon (which reseals on every process restart) a memorized/hand-copied key is friction with little threat-model benefit (the machine is the trust boundary; the root token already lives on it; the sibling `infra` repo stores its unseal key). Storing it machine-side + auto-unseal is a planning task (§ Deferred). The out-of-band requirement is real for the *deferred production* `secret-openbao` module, not asserted for the local one. |
-| **fnox** | Local dev secret access layer, once OpenBao exists. Backend = OpenBao. | Never an independent store of record. fnox→OpenBao is the steady-state direction, not the bootstrap path. |
+| **OpenBao** | Secret store of record — for anything created *after* OpenBao exists and is unsealed. | Local dev daemon (ADR 0010/0011): one machine-global pitchfork daemon that auto-unseals from a static seal key. Its bootstrap secrets — seal key, root token, recovery key — are `0600` files in `~/.local/state/toolbox/openbao/`, beside the raft store. `mise [env]` injects `VAULT_TOKEN` by reading `root.token`. The out-of-band requirement is real for the *deferred production* `secret-openbao` module, not the local one. |
+| ~~**fnox**~~ | **Removed 2026-09-07 (ADR 0011).** Was the local dev secret access layer (backend = OpenBao). `fnox set`/`fnox remove` silently rewrite `fnox.toml`, and its keychain items trigger a GUI password prompt when read by another binary. The one bootstrap secret it held (the root token) is now a `0600` file. | — |
 | **pitchfork** | Local dev daemon supervision only (directory-scoped autostart/autostop). | Repo-policy choice — pitchfork itself can run production daemons; we simply don't use it that way here. |
 | **hk** | Sole git-hook gate — concurrent, file-locked, three-way-merge stash-safe. | Config in `hk.pkl`. |
 | **mise** | Bootstrap + task runner. | Call graph is one direction only: `mise run check` → `hk check` → individual linters/formatters. `hk.pkl` never calls back into a mise task. |
@@ -93,13 +93,13 @@ each row links to.
 
 ## Zero Trust
 
-- **Secrets** — no plaintext secret in repo or state. OpenBao is the source
-  of truth once it exists. The first secret that authenticates to it (the
-  root token) is machine-held (fnox → OS keychain). Whether the *unseal
-  key* is human-held or machine-held for the **local dev** daemon is under
-  review — see § Tool Boundaries (OpenBao) and § Deferred. "Out-of-band by
+- **Secrets** — no plaintext secret in **repo or tofu state**. OpenBao is
+  the source of truth once it exists. For the **local dev** daemon its
+  bootstrap secrets (root token, recovery key, static-seal key) are `0600`
+  files in `~/.local/state/toolbox/openbao/`, beside the raft store they
+  protect — the machine is the trust boundary (ADR 0011). "Out-of-band by
   necessity" holds for the deferred production `secret-openbao` module, not
-  automatically for the local one.
+  the local one.
 - **Network** — Cilium default-deny between workloads, explicit allow only.
   Bootstrap allow-list needs are defined at Cilium module build time.
 - **Admission** — Kyverno policy intended on every manifest. Enforcement
@@ -124,11 +124,10 @@ For each stage name **who holds what** and **every recurring manual step**.
 A recurring manual step, or a memorized secret with no machine-side
 storage, is a **flaw to fix in the plan** — not a feature to document —
 *unless* there is a stated threat-model reason (production, multi-operator,
-a deferred module with a different lifecycle). The
-"§ Deferred — Local OpenBao unseal-key storage" entry exists because this
-trace was skipped for T3/T6: the daemon reseals on every restart and the
-unseal key was left human-held, which reads as "memorize a key, re-enter
-it after every reboot".
+a deferred module with a different lifecycle). The local OpenBao daemon
+(ADR 0010/0011) traces clean: all three secrets are `0600` files, restart
+and reboot auto-unseal, and the only manual case (disaster `-force`
+restore) uses the snapshot's own bundle.
 
 ## Docs layout
 
@@ -219,21 +218,28 @@ watcher). Declarative process definitions, autostart/autostop on `cd` into
 the repo. Never a production workload — that's a repo-policy choice, not a
 tool limitation.
 
-## Secrets: fnox vs OpenBao
+## Secrets: the local OpenBao daemon (ADR 0010/0011)
 
-OpenBao is the backend/source of truth. fnox is configured (`fnox.toml`) to
-read from it, injecting secrets into the local shell/mise environment for
-dev use. fnox is a client, never a store of record. fnox→OpenBao is the
-steady-state direction, not the bootstrap path.
+The local dev daemon's bootstrap secrets are **`0600` files** in
+`$OPENBAO_STATE_DIR` (`~/.local/state/toolbox/openbao/`), written atomically
+by `scripts/bootstrap-openbao.sh`, beside the raft store they protect:
 
-**Bootstrap secrets (local dev daemon):** the root token is stored via fnox
-(OS keychain) by `scripts/bootstrap-openbao.sh` — steady-state, not a
-manual `export`. The unseal key is currently *not* stored (printed once,
-hand-copied), which means a memorized key on every daemon restart — a known
-friction flaw, tracked in § Deferred. Do not add a design that assumes the
-operator has the unseal key to hand for routine operations; the disaster
-`-force` snapshot restore is the one legitimate exception (it needs the
-snapshot's *own* original unseal key, kept with the snapshot).
+| file | role | held by |
+|---|---|---|
+| `seal.key` | static-seal key — daemon auto-unseals from it every start (`file://`) | the machine (0600) |
+| `root.token` | root token — `mise [env]` injects it as `VAULT_TOKEN`, no shell hook | the machine (0600) |
+| `recovery.key` | break-glass only (`bao operator generate-root` if `root.token` is lost) | the machine (0600) |
+
+No keychain, no `fnox` (removed — it rewrote `fnox.toml` and its keychain
+items prompted for a password). There is **no memorized secret and no
+recurring manual step**: restart and reboot auto-unseal. The one manual
+case is the disaster `-force` snapshot restore, which needs the snapshot's
+*own* `seal.key` + `root.token` — `mise run openbao-snapshot` writes all
+three together as a bundle in `snapshots/`, which `openbao-reset` keeps.
+
+For app secrets created *after* OpenBao is up, OpenBao is the store of
+record; a client that reads them into the dev env is a future concern
+(none exists yet).
 
 ## Scripts Policy
 
@@ -272,18 +278,10 @@ Stated explicitly rather than guessed:
   (operator install + first `FluxInstance` apply + deploy-key/git
   write-back setup). Flux Operator replaces the *ongoing* config path only.
 - **pitchfork in production** — not used here; dev-only by policy.
-- **fnox as a store of record** — not used; OpenBao only.
-- **Local OpenBao unseal-key storage** — T3 shipped the root token
-  machine-held (fnox) but the unseal key printed-once-and-hand-copied, so
-  every daemon restart needs a memorized key. A real friction flaw (missed
-  during T6 planning). Direction: store it machine-side + auto-unseal (the
-  `infra` repo already does this) — for a single-operator local box the
-  machine is the trust boundary and the root token is already on it, so
-  separate custody buys ~nothing. Needs a planning session: CLAUDE.md
-  wording carve-out, storage mechanism (fnox vs a raw `security` item),
-  and the interaction with the disaster `-force` snapshot restore (which
-  legitimately still needs the snapshot's own original unseal key). The
-  production `secret-openbao` module keeps the out-of-band requirement.
+- **Local OpenBao unseal-key storage** — RESOLVED (ADR 0010/0011): static
+  seal auto-unseal from a `0600` `seal.key` file; the root + recovery keys
+  are `0600` files too; `fnox` and the keychain are gone. The production
+  `secret-openbao` module keeps the out-of-band requirement.
 - **Kyverno/Cilium enforcement mechanics** — scope, exceptions,
   webhook-failure mode, and default-deny bootstrap allow-list are undefined
   until those modules are built.

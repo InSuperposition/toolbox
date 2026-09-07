@@ -64,6 +64,6 @@ package approval
 // through untouched; only predicateType and the predicate shape are pinned.
 #ApprovedStatement: {
 	predicateType: "https://insuperposition.github.io/toolbox/attestations/approval/v1"
-	predicate:     #Predicate & {verdict: "approved"}
+	predicate: #Predicate & {verdict: "approved"}
 	...
 }
