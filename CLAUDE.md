@@ -73,7 +73,7 @@ each row links to.
 | **pitchfork** | Local dev daemon supervision only (directory-scoped autostart/autostop). | Repo-policy choice — pitchfork itself can run production daemons; we simply don't use it that way here. |
 | **hk** | Sole git-hook gate — concurrent, file-locked, three-way-merge stash-safe. | Config in `hk.pkl`. |
 | **mise** | Bootstrap + task runner. | Call graph is one direction only: `mise run check` → `hk check` → individual linters/formatters. `hk.pkl` never calls back into a mise task. |
-| **CI build/scan/approve pipeline** | Digest-pinned build → scan+SBOM → cosign-signed approval gate for app repos consumed by this stack (e.g. `cv_frontend`). | Build is a **distroless Node image** from `deploy/frontend/Dockerfile` (`docker buildx` in Phase-1 CI; the Phase-2 Tekton in-cluster builder is an open spike — `TODOS.md`). `docs/adr/0007`. Reusable pieces: `modules/task-<builder>-build`, `modules/task-trivy-scan`, `modules/task-oras-attach`, `modules/pipeline-build-scan-approve` (Tekton Tasks/Pipeline, parameterized — not app-specific); a per-consumer instance lives in `deploy/<consumer>/` (e.g. `deploy/frontend/`). Full design: `docs/designs/digest-as-source-of-truth.md`. |
+| **CI build/scan/approve pipeline** | Digest-pinned build → scan+SBOM → cosign-signed approval gate for app repos consumed by this stack (e.g. `cv_frontend`). | Build is a **distroless Node image** from `deploy/frontend/Dockerfile` (`docker buildx` in Phase-1 CI; Phase-2 is **daemonless rootless BuildKit** in-cluster — `buildctl-daemonless.sh`, ADR 0014, `TODOS.md` T7). `docs/adr/0007`. Reusable pieces: `ci/tasks/{buildkit-build,trivy-scan,oras-attach}.yaml` + `ci/pipelines/build-scan-approve.yaml`, distributed as digest-pinned OCI bundles (ADR 0014, parameterized — not app-specific); a per-consumer `PipelineRun` lives in `deploy/<consumer>/` (e.g. `deploy/frontend/`). Full design: `docs/designs/digest-as-source-of-truth.md`. |
 | ~~**buildpacks**~~ | **Removed 2026-09-06.** Was the image build tool; the pivot replaced it with a hand-authored distroless Dockerfile (carve-out above). No longer pinned in `mise.toml`. | — |
 | **chainsaw / kubeconform** | Primary test tools for k8s manifests — not strictly exclusive. | See Testing Strategy (§9). |
 
@@ -168,11 +168,12 @@ The rule:
    graph analysis).
 
 The concerns: `tests/` (repo-level shared test support, leaf) · `attestation/`
-(the sign/verify seam — never names a consumer) · `deploy/frontend/` (one
-image consumer) · `environments/local/` (one deployment target — owns its
-`openbao/` tofu unit and the scripts that bring it up) · `modules/`
-(reusable, versioned, URL-consumed OpenTofu modules only — empty + README
-today).
+(the sign/verify seam — never names a consumer) · `ci/` (reusable Tekton
+defs → digest-pinned OCI bundles — never names a consumer; ADR 0014,
+Phase 2) · `deploy/frontend/` (one image consumer) · `environments/local/`
+(one deployment target — owns its `openbao/` tofu unit and the scripts that
+bring it up) · `modules/` (reusable, versioned, URL-consumed OpenTofu
+modules only — empty + README today).
 
 The rule is in force and the tree matches it — the phased restructure
 (`TODOS.md` T1–T6, `docs/designs/repo-structure.md` § Migration status) is
@@ -197,19 +198,18 @@ Script files are named `<domain>-<verb>.sh` where `<domain>` is the tool
 (`openbao-bootstrap.sh`), never the directory — see § File Placement and
 § Scripts Policy.
 
-**Resolved exception:** `modules/task-kaniko-build` (was
-`task-buildpacks-build` before the 2026-09-06 pivot),
-`modules/task-trivy-scan`, `modules/task-oras-attach`,
-`modules/pipeline-build-scan-approve` are Tekton Task/Pipeline YAML, not
-OpenTofu — they mirror [tektoncd/catalog](https://github.com/tektoncd/catalog)'s
-kind-first, versioned convention instead (`<kind>/<name>/<version>/`),
-parameterized so they're reusable across any future app, not one consumer.
-A per-consumer instantiation (PipelineRun binding + consumer-specific
-scripts/tests) lives in `deploy/<consumer>/` (e.g. `deploy/frontend/`),
-matching this repo's own Repo Role split (`modules/` reusable, a root
-composition applies them) extended to a new resource kind rather than
-inventing a separate pattern. Full design:
-`docs/designs/digest-as-source-of-truth.md`.
+**Tekton definitions are NOT `modules/` entries** (ADR 0014, supersedes an
+earlier carve-out). The reusable Task/Pipeline defs live in the `ci/`
+concern (`ci/tasks/`, `ci/pipelines/`, `ci/runtime/`) and are distributed
+as **digest-pinned OCI bundles** (`tkn bundle push` → registry digest; a
+`PipelineRun` references them through the bundles resolver, `@sha256:`
+pinned; cosign-signable like any artifact). Version is the OCI digest, not
+a path segment. The per-consumer `PipelineRun` (binding one consumer's
+params + the pinned bundle digests) lives in `deploy/<consumer>/`. The
+Tekton *controller* install and `zot` are vendored upstreams →
+`environments/local/` (a Flux `OCIRepository`/`Kustomization`), not `ci/`.
+Full design: `docs/designs/digest-as-source-of-truth.md`; phasing:
+`TODOS.md` T7a–T7d.
 
 ## Testing Strategy
 

@@ -146,10 +146,10 @@ a trust input. Per-member identity is a `TODOS.md` planning task.
 ## File layout
 
 Each top-level concern owns its files and declares which other concerns it
-may name (`docs/designs/repo-structure.md`, ADR 0012/0013). The Tekton
-pieces (deferred, Phase 2) extend the repo's own Repo Role pattern and
-mirror [tektoncd/catalog](https://github.com/tektoncd/catalog)'s
-kind-first, versioned convention.
+may name (`docs/designs/repo-structure.md`, ADR 0012/0013). The reusable
+Tekton definitions live in a `ci/` concern (Phase 2, deferred) and are
+distributed as **digest-pinned OCI bundles**, not versioned directories
+(ADR 0014).
 
 ```
 attestation/                         # the consumer-agnostic sign+verify seam (ADR 0013)
@@ -168,14 +168,22 @@ deploy/frontend/                     # the per-consumer instantiation for cv_fro
   scripts/lib/frontend.sh               #   frontend_repo_root + the TOOLBOX_ATTESTATION_VERIFY seam
   scripts/tests/*.bats + helper.bash
 
+ci/                                  # reusable Tekton defs → digest-pinned OCI bundles (Phase 2, deferred — ADR 0014)
+  tasks/buildkit-build.yaml            #   T7a — buildctl-daemonless rootless build → push by digest
+  tasks/{trivy-scan,oras-attach}.yaml  #   T7b — wrap the proven Phase-1 shell steps
+  pipelines/build-scan-approve.yaml    #   T7b — wires the tasks; human approval stays attestation-sign.sh
+  runtime/namespace.yaml               #   the `ci` namespace (no RBAC — the build SA needs none)
+  scripts/ci-taskrun.sh + lib/ci.sh + pipeline-bundle-push.sh + tests/
+
 environments/local/                  # the ONE deployment target — owns its OpenBao unit + orchestration
   main.tf                               #   applies module "secret_openbao_local" { source = "./openbao" }
   openbao/                              #   the local-OpenBao tofu unit (ADR 0012) — *.tf, templates/, tests/*.tftest.hcl
+  tekton/, zot/                         #   Phase 2 (T7c/T7d) — Flux OCIRepository/Kustomization for the pinned upstream installs
   scripts/openbao-{bootstrap,reset,snapshot}.sh + lib/openbao.sh + tests/
 
 modules/                             # reusable, versioned, URL-consumed OpenTofu modules only — README today
-                                     # (deferred: task-<builder>-build, task-trivy-scan, task-oras-attach,
-                                     #  pipeline-build-scan-approve — Tekton Task/Pipeline YAML, Phase 2, TODOS.md T7)
+                                     # (the deferred production secret-openbao is the first candidate; Tekton
+                                     #  defs are NOT here — they are OCI bundles in ci/, see ADR 0014)
 ```
 
 OpenBao/Transit is not per-consumer: `approval-key` and a future
@@ -210,12 +218,18 @@ independently (Gall's Law). The full sequencing lives in `TODOS.md`.
   `mise run local:openbao:snapshot` / `local:openbao:snapshot-restore` for backup.
   Registry is **GHCR** — hosted, zero-ops, unmetered on public repos.
 
-- **Phase 2 — Tekton (deferred, T7a/T7b/T7c).** Move the build/scan/attach
-  path into reusable Tekton Tasks + a Pipeline on `orb start k8s`
-  ([ADR 0003](../adr/0003-tekton-pipelines-on-orbstack-k8s.md)); build the
-  kubeconform + chainsaw test harness; migrate GHCR → `zot`. The in-cluster
-  daemonless builder (BuildKit-k8s-driver vs a kaniko fork vs buildah) is
-  an open spike. Each sub-task needs its own planning session — `TODOS.md`.
+- **Phase 2 — Tekton (deferred, T7a–T7d — planned 2026-09-08).** Move the
+  build/scan/attach path into reusable Tekton Tasks + a Pipeline on
+  `orb start k8s` ([ADR 0003](../adr/0003-tekton-pipelines-on-orbstack-k8s.md)),
+  packaged as **digest-pinned OCI bundles** in the `ci/` concern
+  ([ADR 0014](../adr/0014-tekton-defs-are-oci-bundles-in-ci.md)). Builder is
+  **daemonless rootless BuildKit** (`buildctl-daemonless.sh` in the TaskRun
+  pod). **T7a** — feasibility spike (rootless build + in-cluster GHCR push +
+  pod privilege posture), then the `ci/` skeleton. **T7b** — the full
+  pipeline as bundles, `deploy/frontend/` `PipelineRun` with bundles-resolver
+  digest pins, kubeconform + chainsaw harness; retires
+  `build-cv-frontend.yml`. **T7c** — local Flux reconciles `ci/**` +
+  `environments/local/`. **T7d** — GHCR → `zot`. Full detail in `TODOS.md`.
 
 - **Phase 3 — Tekton Chains (T8).** Install Chains; a second OpenBao Transit
   key (`chains-provenance-key`) with an access policy denying it
@@ -247,6 +261,18 @@ independently (Gall's Law). The full sequencing lives in `TODOS.md`.
   deferred to a real amd64 consumer.
 - **`buildx --sbom` / `--provenance`** — emit SPDX in the image index, not a
   Referrers-API referrer.
+- **`docker buildx --driver=kubernetes`** — manages a standing buildkitd
+  pod; heavier than `buildctl-daemonless.sh` (rootless buildkitd inside the
+  TaskRun pod) for no gain here. Rejected in the T7 planning
+  ([ADR 0014](../adr/0014-tekton-defs-are-oci-bundles-in-ci.md), `TODOS.md`).
+- **Standing buildkitd Deployment + KEDA scale-to-zero** — daemonless
+  removes the standing service, so there is nothing to scale; the build
+  cache goes to the registry, not a PVC. Revisit only on measured
+  warm-build latency pain.
+- **Path-encoded Tekton catalog versions** (`task/<name>/<version>/`) —
+  contradicts digest-as-the-pin ([ADR 0001](../adr/0001-digest-is-the-trust-boundary.md));
+  Tekton bundles are OCI artifacts pinned by digest
+  ([ADR 0014](../adr/0014-tekton-defs-are-oci-bundles-in-ci.md)).
 - **Public-trust signing** (Fulcio/keyless, a published key) — the cosign
   key stays mechanically-required-only. Tracked: `TODOS.md`.
 - **Pipelines-as-Code webhook triggering** — the pipeline runs on-demand;

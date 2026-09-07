@@ -235,45 +235,70 @@ non-local registry, `gh auth token | cosign login` into an isolated
 on the `gh` token is currently the operator's to arrange — this session
 designs the real per-member story.
 
-### T7 Phase-2 (Tekton) — full planning session before any code
+### T7 Phase-2 (Tekton) — re-cut, planned 2026-09-08
 
-**What:** Run `/office-hours` then `/plan-eng-review` on Phase 2 of
-`docs/designs/digest-as-source-of-truth.md` (§ Phasing) and
-`docs/adr/0003-tekton-pipelines-on-orbstack-k8s.md` before implementing
-T7a/T7b/T7c. Phase 2 is deferred after T5/T5b; it is NOT
-implementation-ready.
+**Planning done.** `/plan-eng-review` (2026-09-08) + Codex outside voice
+re-cut the whole arc around a **composable `ci/` concern** and
+**digest-pinned OCI bundles**. Plan file:
+`~/.claude/plans/t7a-buildkit-in-cluster-proof.md`. Key decisions
+([ADR 0014](docs/adr/0014-tekton-defs-are-oci-bundles-in-ci.md)):
 
-**Why:** The 2026-09-06 `/plan-eng-review` scope-reduction pass found T7 as
-written bundled the cluster, Tekton install, the builder-choice spike, the
-full pipeline, the test harness, and the GHCR→zot migration into one task
-(8+ files, 3+ new services) — too much for one design pass. `kaniko` was
-carried in as an unvetted candidate (it was never in the original design);
-the builder is genuinely undecided.
+- Builder = **BuildKit, daemonless, rootless** (`buildctl-daemonless.sh` in
+  the TaskRun pod — no buildkitd Deployment/Service). Chosen over
+  `docker buildx --driver=kubernetes` (heavier — manages a pod) and
+  kaniko/buildah. Registry cache, not a PVC. **KEDA scale-to-zero dropped** —
+  no standing builder to scale.
+- Reusable Tekton defs live in a new top-level **`ci/`** concern, **not
+  `modules/`**. Distributed as OCI bundles (`tkn bundle push` → digest,
+  bundles resolver, cosign-signable). Version = digest, no version-in-path.
+  Per-consumer `PipelineRun` stays in `deploy/<consumer>/`.
+- Tekton controller + `zot` installs are `environments/local/` concerns
+  (Flux `OCIRepository`/`Kustomization`), not `ci/`.
+- byte-level build reproducibility → **T8** (with Chains provenance).
+- `deploy/frontend/Dockerfile` line 1 `# syntax=` gets **pinned by digest**
+  in T7a (Codex: unpinned frontend = input-trust hole, distinct from
+  timestamp reproducibility).
 
-**Design lenses to apply in that session (owner-specified):**
-- **Security** — rootless build, pod privilege model, supply-chain posture.
-- **BuildKit-remote** — leading builder candidate; one engine across Phase 1
-  (`docker buildx`) and Phase 2 (`docker buildx create --driver=kubernetes
-  --driver-opt=rootless=true`). Alternatives: `chainguard-forks/kaniko` /
-  `osscontainertools/kaniko`, `buildah`.
-- **Scaling** — evaluate **KEDA** for scale-to-zero on the BuildKit builder,
-  and on Tekton controllers, `zot`, and any other idle-most-of-the-time
-  service.
-- **Simplicity + negative space** — keep the stack as small as possible;
-  every added component must justify itself against what's NOT added.
-- **Innovation** — combine proven pieces in a simpler way where possible.
-- **Existing-stack fit** — check Kyverno, Cilium, Flux, OpenBao first before
-  adding anything new. Cross-ref the "Kyverno ImageValidatingPolicy" TODO
-  below — admission-time enforcement may belong in this same design.
+**T7a — rootless BuildKit feasibility spike, then the `ci/` concern.**
+_Prove first._ Step 1: smallest hand-applied rootless daemonless BuildKit
+TaskRun on `orb start k8s`, 6-point verification (Succeeded, strict
+`sha256:` result, `oras` manifest + arm64 config, `docker pull` works, pod
+has no `privileged`/`SYS_ADMIN`, broken-build writes no result). Disposable.
+Step 2 (only if it passes): extract to `ci/tasks/buildkit-build.yaml` +
+`ci/runtime/namespace.yaml` (no RBAC, `automountServiceAccountToken: false`)
++ `ci/scripts/ci-taskrun.sh` + bats/chainsaw + `local:tekton:install` mise
+task + machine-global `orb-k8s` pitchfork daemon (ADR 0010 consistency) +
+[ADR 0014](docs/adr/0014-tekton-defs-are-oci-bundles-in-ci.md).
+Answers: rootless viability, in-cluster GHCR push auth, pod privilege
+posture. Effort: spike ~1d + concern ~1-1.5d.
 
-**Context:** T7a = builder spike (live probe on `orb start k8s`, push to
-GHCR). T7b = wrap `build→scan→oras-attach` as Tekton Tasks + Pipeline +
-kubeconform/chainsaw harness. T7c = GHCR→zot migration. See the
-architecture doc § Phasing (Phase 2).
+**T7b — the full pipeline as OCI bundles + GHA retirement.**
+`ci/tasks/{trivy-scan,oras-attach}.yaml` (wrap the proven Phase-1 shell) +
+`ci/pipelines/build-scan-approve.yaml` + `ci/scripts/pipeline-bundle-push.sh`
+(`tkn bundle push` → digest) + `deploy/frontend/` `PipelineRun` (bundles
+resolver `@sha256:` pins) + a digest-pinned `git-clone` step (two repos:
+cv_frontend context, toolbox Dockerfile) + the registry cache + full
+kubeconform/chainsaw harness. **Deletes
+`.github/workflows/build-cv-frontend.yml`** only once build + evidence +
+approval + consumption are demonstrated in-cluster end to end.
+_T7b gaps to resolve in that session:_ in-cluster trivy DB strategy (PVC /
+`--db-repository` OCI mirror / `--download-db-only` init); Task-step image
+pins vs `mise.toml` host pins (drift); the two-repo `git-clone`.
+Effort: ~2-3d.
 
-**Effort:** planning ~1-2 sessions; build T7a/T7b/T7c ~3-5d human total
-**Priority:** P2
-**Depends on:** T5 + T5b shipped and proven
+**T7c — local Flux.** flux2 + flux-operator (already pinned) reconciles
+`ci/**` + `environments/local/` Kustomizations. Retires the interim
+`local:tekton:install`. This lands **before** T7d so the zot install has a
+reconciler. Effort: ~1-2d (includes the one-time Flux bootstrap:
+operator install + first `FluxInstance` + deploy-key).
+
+**T7d — GHCR → zot.** zot on orb via the now-present Flux (vendored upstream
+in `environments/local/tekton/`… `environments/local/zot/`). Repoint the
+pipeline + `deploy/frontend/` consumer + the bundle registry at zot.
+Effort: ~1d.
+
+**Priority:** P2 · **Depends on:** ~~T5 + T5b~~ done. T7a→T7b→T7c→T7d in
+order (T7c's Flux precedes T7d's zot install).
 
 ### T8 — Tekton Chains provenance — P2, planning session
 
@@ -292,7 +317,34 @@ OpenBao listens on `127.0.0.1:8200`. Pods reach the host at
 loopback — which means `tls_disable = true` has to become real TLS at the
 same time.
 
-**Priority:** P2 · **Depends on:** T7 (Phase 2) shipped.
+**Also in T8:** sign the `ci/` OCI bundles with a dedicated key
+([ADR 0014](docs/adr/0014-tekton-defs-are-oci-bundles-in-ci.md)); land
+byte-level build reproducibility (`SOURCE_DATE_EPOCH`,
+`--output rewrite-timestamp=true`) alongside provenance + independent
+rebuild verification.
+
+**Priority:** P2 · **Depends on:** T7 (all of T7a–T7d) shipped.
+
+### Tekton Dashboard — P3, deferred
+
+**What:** Install the read-only Tekton Dashboard on `orb start k8s` for
+TaskRun/PipelineRun visibility during T7b+ development.
+
+**Ceiling (deliberate):** local-only, accessed **only** via `kubectl
+port-forward` — no Service exposure, no ingress. Image digest-pinned.
+
+**Why:** faster than `tkn` CLI + `kubectl describe` when debugging pipeline
+runs. Owner-requested, explicitly no rush.
+
+**Prereq before it touches the k0s production cluster:** a
+`CiliumNetworkPolicy` (ingress from the port-forward path only, egress to
+kube-apiserver only) + a Kyverno least-privilege-RBAC exception for the
+Dashboard's broad-read ClusterRole. The Dashboard ships **no auth** — an
+unauthenticated endpoint on a cluster that also runs untrusted build steps
+is a lateral-movement target without a network policy.
+
+**Priority:** P3 · **Depends on:** T7a (Tekton installed). Blocked for
+production on the Cilium + Kyverno module builds.
 
 ### T9a — `mise run check` in CI — ✅ DONE (merged, PR #7, `7ae5ad0`)
 

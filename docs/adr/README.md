@@ -21,5 +21,6 @@ superseded.
 | [0011](0011-local-openbao-secrets-are-files-no-fnox.md) | Local OpenBao's secrets are 0600 files beside its data — no fnox, no keychain (supersedes T3) |
 | [0012](0012-local-openbao-is-environment-nested.md) | The local-OpenBao tofu unit lives under `environments/local/`, not `modules/` (breaks the sibling symmetry deliberately) |
 | [0013](0013-attestation-seam-is-consumer-agnostic.md) | The attestation sign/verify seam is its own `attestation/` concern, not part of `deploy/frontend/` |
+| [0014](0014-tekton-defs-are-oci-bundles-in-ci.md) | Tekton Task/Pipeline defs are digest-pinned OCI bundles in a `ci/` concern, not versioned dirs in `modules/` (supersedes the CLAUDE.md carve-out) |
 
 Architecture: `docs/designs/`. Open work: `TODOS.md`.

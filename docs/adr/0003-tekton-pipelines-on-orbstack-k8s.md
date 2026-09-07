@@ -3,8 +3,11 @@
 The automated build → scan → SBOM path runs as a real Tekton Pipeline on
 `orb start k8s` (OrbStack's single-command dev cluster), not `cluster-k0sctl`.
 Tekton Chains observes each TaskRun and attaches a signed SLSA provenance
-referrer. The Pipeline is instantiated per consumer from reusable
-`modules/task-*` + `modules/pipeline-*` (architecture doc § File layout).
+referrer. The Pipeline is instantiated per consumer from reusable Task /
+Pipeline definitions — since superseded on *placement*: those defs live in
+the `ci/` concern as digest-pinned OCI bundles, not `modules/task-*` /
+`modules/pipeline-*` ([ADR 0014](0014-tekton-defs-are-oci-bundles-in-ci.md)).
+The engine choice below stands.
 
 Considered and rejected:
 

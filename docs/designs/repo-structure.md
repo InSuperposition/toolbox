@@ -31,8 +31,10 @@ The allowed dependency edges are explicit and machine-checked in
 ## Constraints
 
 - The rule is normative and the tree matches it (see Migration status
-  below). The `modules/*` Tekton entries in the Target tree are still
+  below). The `ci/` concern (reusable Tekton defs → digest-pinned OCI
+  bundles, [ADR 0014](../adr/0014-tekton-defs-are-oci-bundles-in-ci.md)) is
   planned (Phase 2 of the CI pipeline, `TODOS.md` T7) — not yet on disk.
+  Tekton defs are **not** `modules/*` entries.
 - `mise run check` stayed green after every phase; it still gates every change.
 - `git mv` and a logic change never land in the same commit — refactor,
   then change.
@@ -93,6 +95,7 @@ Runtime-only edges (env vars / mise-task calls, not file paths — allowed, not 
 | `deploy/frontend/` | one consumer of an approved image: build, deploy, serve | `attestation` (the verify seam, via env), `tests/lib` |
 | `environments/local/` | one deployment target: the tofu composition, the orchestration scripts that bring its units up | its own `openbao/` unit, `tests/lib`; calls `attestation:export-pubkey` as a task |
 | `environments/local/openbao/` | the local-OpenBao **tofu unit** only | `tests/lib` (for its `.tftest.hcl`) — leaf |
+| `ci/` _(planned, Phase 2 — ADR 0014)_ | reusable Tekton Task/Pipeline defs → digest-pinned OCI bundles; `ci/runtime/` namespace; the bundle-push + taskrun scripts | `tests/lib`. **Never names a consumer** (like `attestation/`). `deploy/<consumer>/` consumes `ci/` bundles by digest via a pinned `PipelineRun`. Tekton controller + `zot` installs are `environments/local/`, not `ci/`. |
 | `modules/` | reusable, versioned, URL-consumed OpenTofu modules only | — (empty today; a README states the rule) |
 
 ## Naming
