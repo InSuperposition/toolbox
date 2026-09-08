@@ -473,6 +473,53 @@ Tekton image refs as params from one manifest — then iterate + innovate, rathe
 than reflexively adding another `mise run check` step. Pins move ~quarterly.
 **Depends on:** T7b2.
 
+### Cilium — planning session needed — P2
+
+**What:** a design session for the Cilium module before it is built — CLAUDE.md
+§ Tool Boundaries pins Cilium for "network policy, default-deny between
+workloads, explicit allow only" but the mechanics are undefined (§ Deferred).
+
+**Why now:** the T7b1 investigation (2026-09-08) surfaced a cluster-networking
+defect that Cilium's datapath choices directly bear on. Findings to carry into
+the session:
+
+- **The defect.** On this OrbStack k8s cluster, every pod gets a working
+  `AF_INET6` stack + IPv6 interface addresses (`fe80::` link-local, `::1`) and
+  kube-dns returns AAAA records — but there is **no routable IPv6 egress** (no v6
+  default route in pods; the node's only v6 address is the non-routable ULA
+  `fd07:b51a:cc66::2`). CoreDNS's `loadbalance` plugin shuffles the merged
+  A/AAAA answer, so any Go registry client that resolves a dual-stack host
+  (buildkit / containerd remotes, and zot's own `regclient` — both verified
+  live) can pick the AAAA and hard-fail `connect: network is unreachable`
+  instead of falling back to the reachable A. ~50% per external image fetch.
+- **How Cilium bears on it.** Cilium replaces the CNI. It exposes an explicit
+  IPv6 datapath toggle (`ipv6.enabled`), an L7 DNS proxy (`ToFQDNs` policies
+  that observe/rewrite A/AAAA), and its own IPAM. Whatever the module decides
+  about single- vs dual-stack, and about the DNS proxy, determines whether this
+  defect is eliminated, inherited, or papered over. **Open question for the
+  session — not a decision here:** should the local (and eventual production)
+  Cilium run IPv4-only, dual-stack with real v6 egress, or dual-stack with the
+  DNS proxy filtering AAAA? Each has different blast radius, and production may
+  genuinely want v6. Do not pre-commit.
+- **The `ToFQDNs` angle.** Default-deny egress means `docker.io`, `github.com`,
+  `gcr.io`, `ghcr.io`, the OpenBao listener, and the API server all need
+  explicit `ToFQDNs` / CIDR allow rules. The A/AAAA set a policy must allow is
+  entangled with the single/dual-stack choice above — design them together.
+- **Interim (pre-Cilium) is being handled in T7b** via a zot pull-through /
+  seed strategy so the pipeline stops touching docker.io/gcr.io at build time
+  (`~/.claude/plans/t7b-pipeline-recut.md`, T7b2 / T7b-followup). That interim
+  choice should be revisited once Cilium lands — a v4-only datapath would make
+  much of it unnecessary; a dual-stack one would keep it load-bearing.
+
+**Design lenses:** the CNI datapath (single/dual-stack, IPAM, kube-proxy
+replacement), the L7 DNS proxy, the default-deny bootstrap allow-list (DNS, API
+server, git/OCI pulls, OpenBao — CLAUDE.md § Zero Trust), Hubble observability,
+existing-stack fit (OrbStack's current CNI, Flux-reconciled install), and
+whether Kyverno's admission webhook and Cilium's policy engine overlap.
+
+**Depends on:** T7c (local Flux — Cilium installs through it). **Priority:** P2
+· runs after the T7 arc, likely alongside the Kyverno module design.
+
 ### T8 — Tekton Chains provenance — P2, planning session
 
 **What:** Install Tekton Chains on the Phase-2 cluster; add a second OpenBao
