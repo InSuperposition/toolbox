@@ -354,18 +354,19 @@ distribution and `build-cv-frontend.yml` retirement are **deferred to a phase
 after the T7c pre-plan** (that pre-plan decides the reconciler, which owns the
 pin mechanism). Sub-phased, each ships + tests on its own:
 
-- **T7b0** — interim **zot** on orb (pulled forward from T7d). ✅ **manifests +
-  tasks + static tests shipped** (`environments/local/zot/zot.yaml` — one
-  multi-doc manifest, pinned by image digest `sha256:56230c…`, credential-free,
-  **GC off** which subsumes `deleteUntagged: false`; `mise run local:zot:{install,wait,uninstall}`;
-  `zot-manifests.bats` + a `kubeconform-zot` hk step; `environments/local/README.md`
-  § zot with the manual verify runbook). `zot.zot.svc:5000` in-cluster,
-  `localhost:30500` (NodePort) from the host. **Live-cluster verify still owed:**
-  the real-client checklist in the README (`oras` push/pull + Referrers round-trip
-  via the NodePort and from an in-cluster pod; NodePort-only exposure) — run once
-  on `orb start k8s`, and the `buildctl registry.insecure=true` push proof rides
-  with T7b1. Threat model: single-user VM, all cluster writers trusted; the P2
-  "zot registry auth" TODO opens real auth.
+- **T7b0** — interim **zot** on orb (pulled forward from T7d). ✅ **DONE.**
+  `environments/local/zot/zot.yaml` (one multi-doc manifest, image pinned by
+  digest `sha256:56230c…`, credential-free, **GC off** which subsumes
+  `deleteUntagged: false`) + `mise run local:zot:{install,wait,uninstall}` +
+  `zot-manifests.bats` (7) + a `kubeconform-zot` hk step + `environments/local/README.md`
+  § zot. **Live verify passed 2026-09-08** on `orb start k8s` (v1.35.6): host
+  NodePort reach `localhost:30500/v2/` → HTTP 200; host + in-cluster
+  (`zot.zot.svc.cluster.local:5000`) `oras` push/pull round-trips; native OCI 1.1
+  Referrers (`oras discover` tree); exposure is the NodePort only (no
+  Ingress/LoadBalancer). The `buildctl registry.insecure=true` push proof rides
+  with T7b1 (buildkit runs only in the build Task). Threat model: single-user VM,
+  all cluster writers trusted; the P2 "zot registry auth" TODO opens real auth.
+  **zot left running** for T7b1.
 - **T7b1** — `ci/tasks/git-clone.yaml` (anonymous clone of both public repos —
   `cv_frontend` + `toolbox` — at pinned SHAs, `mkdir -p` the subPath dirs) +
   modify `buildkit-build.yaml` (drop `TAG` + the per-run `gh` Secret + the
