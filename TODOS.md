@@ -194,46 +194,68 @@ approval must persist. `.../rotate` on the same key would keep old versions
 verifiable but the *exported* public key still changes, so a full reset is
 simpler while nothing real depends on the key.
 
-### Auth + multi-member DX — planning session before T5 hardens
+### Auth + multi-member DX — DEFERRED, no trigger yet
 
-**What:** Run `/office-hours` then `/plan-eng-review` on the auth story for
-the approval pipeline. T5 ships an *interim* auth (OpenBao root token for
-signing, `gh auth token` for GHCR push) that works for a solo operator.
-The full design covers: per-member OpenBao identity (an auth method +
-per-member scoped policies so `transit/sign` on `approval-key` isn't the
-root token), per-member registry auth (GHCR now, `zot` after T7c), the
-`approval` Transit policy (which T8/Chains also needs), and a clean
-`git clone → mise run attestation:sign` bootstrap for a new team member.
+**Status (2026-09-08):** Deferred, not scheduled. YAGNI — there is one
+developer, the machine is the trust boundary (ADR 0011), and nothing open
+(T7b included) needs this. An `/office-hours` pass on 2026-09-08 concluded
+there is no design session to run until a trigger below fires. This entry
+exists to record the trigger and the pre-picked direction so a future
+session does not re-derive them.
 
-**Why:** The design's zero-trust claim is "possession of the private key is
-the access control." In T5's interim form that collapses to "possession of
-the OpenBao root token as a `0600` file on one person's machine." Anyone with it can
-sign any `approvedBy` — there is no cryptographic per-approver identity.
-That's acceptable for a solo proof; it is not acceptable once a second
-person needs to approve, and building `attestation-sign.sh`'s auth twice is waste,
-so the shape should be designed before hardening.
+**The two gaps — kept distinct, `auth` alone is ambiguous:**
 
-**Design lenses:** security (per-identity least privilege, no shared
-long-lived secret), DX (a new member from clone to first approval in
-minutes, not a runbook), bootstrap (idempotent, works on a fresh machine),
-simplicity (an auth method, not a PKI), existing-stack fit (OpenBao auth
-backends, `gh`; check whether Cilium/Kyverno play a role at the
-cluster edge later).
+| Principal | Authentication (which principal is acting) | Authorization (what it may do) |
+|---|---|---|
+| **Human approver** | `attestation-sign.sh` presents the **root token**; OpenBao authenticates the token, not a person. `approvedBy` is a typed string (`gh api user` / `$USER`), unverified. | Root token ⇒ every path. Wants a policy scoped to `transit/sign/approval-key` only. |
+| **Pipeline pod** (T7b+) | T7a copies an operator `gh auth token` into a `docker-registry` Secret; the pod "is" whoever minted it. No workload identity. | That token carries the operator's full `gh` scopes. Wants push-one-repo / clone-two-repos and nothing wider. |
 
-**Context:** Surfaced by the 2026-09-06 T5 eng review.
-`environments/local/openbao` already has an empty `policies` input ready
-for the scoped policy. See `docs/designs/digest-as-source-of-truth.md`
-§ Trust boundary and `docs/adr/0004-approval-key-openbao-transit-not-acl.md`.
+**Why it is safe to defer:** the zero-trust claim ("possession of the
+private key is the access control") collapses today to "possession of one
+`0600` file on one machine" — which ADR 0011 accepts as correct for a
+single operator. The 2026-09-06 T5 eng review filed this as
+known-deferred P2, not urgent. The only forcing function for the human gap
+is a second approver.
 
-**Effort:** planning ~1 session; implementation ~1-2d human
-**Priority:** P2
-**Depends on:** ~~T5 shipped~~ — **UNBLOCKED 2026-09-06.** T5 shipped its
-interim auth: `attestation-sign.sh` signs with the root `VAULT_TOKEN` (the `0600`
-`root.token` file, ADR 0011) and, for a
-non-local registry, `gh auth token | cosign login` into an isolated
-`DOCKER_CONFIG`; `approvedBy` is self-asserted. The `write:packages` scope
-on the `gh` token is currently the operator's to arrange — this session
-designs the real per-member story.
+**Reopen when ANY of:**
+1. A second person needs to sign an approval verdict (the real trigger for
+   the human gap).
+2. The build/scan pipeline moves to a shared runner, a CI service account,
+   or any host where a personal `gh` token is the wrong credential (the
+   trigger for the pod gap) — note T7b on the local single-user OrbStack VM
+   does **not** cross this line; T7a's interim `gh`-token Secret is fine
+   there.
+3. `zot` replaces GHCR (T7d) and needs its own identity model wired.
+4. T8 (Tekton Chains) — narrower and already scoped: adds a
+   `chains-provenance-key` Transit policy denying it `approval-key`.
+   `environments/local/openbao/main.tf` already has the empty `policies`
+   input for exactly this; T8 does not need this whole session.
+
+**Pre-picked direction (evaluate these first, don't restart from zero):**
+- *Human authn+authz* — either (a) an OpenBao auth method (userpass / OIDC
+  / AppRole) issuing a token scoped to `transit/sign/approval-key`, or
+  (b) cosign **keyless / Fulcio** so the approver identity is an OIDC
+  identity carried in the signature itself and there is no OpenBao userpass
+  scheme to maintain. (b) overlaps "Upgrade cosign signing to public trust"
+  (this file, later) — decide them together.
+- *Pod authn+authz* — an OpenBao **k8s auth method** (pod authenticates by
+  ServiceAccount, gets short-lived narrowly-scoped registry + git creds),
+  vs. a scoped machine PAT in a sealed Secret. Kyverno can enforce *which*
+  SA may mount the Secret but is not the identity primitive and its module
+  is unbuilt. SPIFFE/SPIRE is an innovation-token overspend for one VM.
+- *New-member DX target* — `git clone` → `mise run attestation:sign` with
+  no runbook step, idempotent on a fresh machine.
+
+**Context:** Surfaced by the 2026-09-06 T5 eng review. See
+`docs/designs/digest-as-source-of-truth.md` § Trust boundary and
+`docs/adr/0004-approval-key-openbao-transit-not-acl.md`. T5's shipped
+interim auth: `attestation-sign.sh` signs with the root `VAULT_TOKEN` (the
+`0600` `root.token` file, ADR 0011) and, for a non-local registry,
+`gh auth token | cosign login` into an isolated `DOCKER_CONFIG`;
+`approvedBy` is self-asserted.
+
+**Effort (when reopened):** planning ~1 session; implementation ~1-2d human
+**Priority:** P2 · **Depends on:** a trigger above.
 
 ### T7 Phase-2 (Tekton) — re-cut, planned 2026-09-08
 

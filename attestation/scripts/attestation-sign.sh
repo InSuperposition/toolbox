@@ -21,8 +21,8 @@ set -euo pipefail
 # for the local demo — so a later reject, or a signed reject sitting next to
 # this approval, does not change what an already-pinned consumer sees.
 #
-# Interim auth (full multi-member design is a separate planning session —
-# TODOS.md "Auth + multi-member DX"): signing authenticates to OpenBao with
+# Interim auth (a per-member authn/authz design is a separate deferred task,
+# no trigger yet — TODOS.md "Auth + multi-member DX"): signing authenticates to OpenBao with
 # the root token in $VAULT_TOKEN (mise [env] reads the 0600 root.token file,
 # ADR 0011); pushing to a non-local registry uses `gh auth token` at call
 # time. Both are per-operator and call-time,
