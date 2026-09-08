@@ -1,4 +1,4 @@
-# [k8s]-gated (ci/scripts/ci-chainsaw.sh skips without an orbstack cluster
+# [k8s]-gated (ci/scripts/chainsaw-test.sh skips without an orbstack cluster
 # + Tekton). Server-side validation the static kubeconform gate cannot do:
 # the Tekton admission webhook accepts our Task YAML, the spike-proven
 # securityContext posture has not drifted, and the Task carries NO embedded

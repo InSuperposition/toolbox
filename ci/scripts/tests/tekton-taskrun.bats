@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 
-# ci/scripts/ci-taskrun.sh + lib/ci.sh — the pure-shell half: the strict
+# ci/scripts/tekton-taskrun.sh + lib/ci.sh — the pure-shell half: the strict
 # digest guard and every preflight failure path. Each preflight case runs
 # the real script against a fake-bin kubectl/tkn/gh (helper.bash
 # fakebin_setup) so no cluster is needed and CI runs them.
@@ -23,7 +23,7 @@ setup() {
 	export TOOLBOX_CI_KUBE_CONTEXT=orbstack
 }
 
-run_taskrun() { run "$CI_SCRIPTS/ci-taskrun.sh" "$CTX_DIR" "$DF" "$IMG"; }
+run_taskrun() { run "$CI_SCRIPTS/tekton-taskrun.sh" "$CTX_DIR" "$DF" "$IMG"; }
 
 # --- strict digest guard (lib/ci.sh) --------------------------------
 
@@ -49,13 +49,13 @@ run_taskrun() { run "$CI_SCRIPTS/ci-taskrun.sh" "$CTX_DIR" "$DF" "$IMG"; }
 # --- argument handling ---------------------------------------------
 
 @test "bad arguments -> exit 2 with usage" {
-	run "$CI_SCRIPTS/ci-taskrun.sh" only one
+	run "$CI_SCRIPTS/tekton-taskrun.sh" only one
 	[ "$status" -eq 2 ]
 	[[ "$output" == *"usage:"* ]]
 }
 
 @test "an image-ref with a tag is rejected -> exit 1" {
-	run "$CI_SCRIPTS/ci-taskrun.sh" "$CTX_DIR" "$DF" "ghcr.io/example/app:latest"
+	run "$CI_SCRIPTS/tekton-taskrun.sh" "$CTX_DIR" "$DF" "ghcr.io/example/app:latest"
 	[ "$status" -eq 1 ]
 	[[ "$output" == *"no tag"* ]]
 }

@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 #
 # ci/scripts/lib/ci.sh — shared shell for the ci/ concern's scripts
-# (ci-taskrun.sh today; pipeline-bundle-push.sh in T7b). Self-contained,
+# (tekton-taskrun.sh today; pipeline-bundle-push.sh in T7b). Self-contained,
 # no repo-level runtime lib (docs/designs/repo-structure.md § Naming).
 # Source it; do not execute.
 #

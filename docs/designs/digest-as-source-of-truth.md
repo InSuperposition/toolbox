@@ -169,11 +169,11 @@ deploy/frontend/                     # the per-consumer instantiation for cv_fro
   scripts/tests/*.bats + helper.bash
 
 ci/                                  # reusable Tekton defs → digest-pinned OCI bundles (ADR 0014)
-  tasks/buildkit-build.yaml            #   T7a ✓ — buildctl-daemonless rootless build → push under a per-run tag (one step, no script:); ci-taskrun.sh resolves the digest
+  tasks/buildkit-build.yaml            #   T7a ✓ — buildctl-daemonless rootless build → push under a per-run tag (one step, no script:); tekton-taskrun.sh resolves the digest
   tasks/{trivy-scan,oras-attach}.yaml  #   T7b — wrap the proven Phase-1 shell steps
   pipelines/build-scan-approve.yaml    #   T7b — wires the tasks; human approval stays attestation-sign.sh
   runtime/namespace.yaml               #   T7a ✓ — the `ci` namespace (no RBAC — the build SA needs none)
-  scripts/ci-taskrun.sh + ci-kubeconform.sh + ci-chainsaw.sh + lib/ci.sh + tests/   # T7a ✓
+  scripts/tekton-taskrun.sh + kubeconform-scan.sh + chainsaw-test.sh + lib/ci.sh + tests/   # T7a ✓
   scripts/pipeline-bundle-push.sh      #   T7b — tkn bundle push → registry digest
   tests/crd-schemas/task_v1.json       #   T7a ✓ — Tekton v1 CRD schema (vendored from the pinned release) for kubeconform
   tests/buildkit-build/chainsaw-test.yaml  #   T7a ✓ — [k8s]-gated: Tekton webhook accepts the Task + posture drift guard
@@ -206,9 +206,9 @@ block (CLAUDE.md § Constraints). `buildkit-build.yaml`'s one step is just
 the pushed digest, the strict-`sha256` guard, verification, staging,
 teardown, the go/no-go approval (`attestation-sign.sh`) — lives in a
 `shellcheck`-clean, `bats`-tested script the repo owner runs
-(`ci/scripts/ci-taskrun.sh`), never in the Task graph, exactly as a
+(`ci/scripts/tekton-taskrun.sh`), never in the Task graph, exactly as a
 required-reviewer click is "manual" in any CI system. (T7a's Task pushes
-under a throwaway tag and `ci-taskrun.sh` does `oras resolve` for the
+under a throwaway tag and `tekton-taskrun.sh` does `oras resolve` for the
 digest; T7b re-adds a proper Tekton `IMAGE_DIGEST` result via a committed
 extract script — the shell-free result mechanisms don't fit T7a: step
 stdout→result is `enable-api-fields: alpha`, `buildctl` has no bare-digest

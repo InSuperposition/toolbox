@@ -273,10 +273,10 @@ RESULT". Tekton v1.6.0 kept for Step 2.
 **Step 2 ✓ DONE** — `ci/` concern extracted: `ci/tasks/buildkit-build.yaml`
 (spike-proven posture, parameterised, consumer-agnostic, **one step —
 pinned `command`/`args`, no `script:` block**; pushes under a per-run tag,
-`ci-taskrun.sh` does `oras resolve` for the digest + the
+`tekton-taskrun.sh` does `oras resolve` for the digest + the
 `ci_is_strict_digest` guard) + `ci/runtime/namespace.yaml` (no RBAC,
 `automountServiceAccountToken: false`, PSA `privileged`) +
-`ci/scripts/{ci-taskrun,ci-kubeconform,ci-chainsaw}.sh` + `lib/ci.sh` +
+`ci/scripts/{tekton-taskrun,kubeconform-scan,chainsaw-test}.sh` + `lib/ci.sh` +
 20 bats cases + a `[k8s]`-gated chainsaw scenario (webhook accepts the Task,
 no `script:` field, posture-drift guard) + `rules/boundary-ci.yml` +
 `hk.pkl` kubeconform (fast) / chainsaw (heavy) steps + `mise` tasks
@@ -295,13 +295,13 @@ GHCR push auth, pod privilege posture.
 task._ Deferred from the PR #9 review (the review fixed only the
 `buildkit-build.yaml` `script:` block + reverted a self-granted CLAUDE.md
 carve-out). Left to do:
-- **Extract the inline k8s manifests from `ci/scripts/ci-taskrun.sh`** —
+- **Extract the inline k8s manifests from `ci/scripts/tekton-taskrun.sh`** —
   the two `<<-YAML` heredocs (PV/PVC, TaskRun) + `ws_binding()`'s
   `printf`-built YAML → committed template files under `ci/runtime/`
   rendered with `envsubst`; a bats case renders them and pipes through
-  `ci/scripts/ci-kubeconform.sh`. Precedent:
+  `ci/scripts/kubeconform-scan.sh`. Precedent:
   `environments/local/openbao/tests/config_render.tftest.hcl`.
-- **bats coverage for the remaining `ci-taskrun.sh` logic** — `common_prefix`
+- **bats coverage for the remaining `tekton-taskrun.sh` logic** — `common_prefix`
   (shared grandparent; component boundary `/a/bc` vs `/a/bcd`; identical
   dirs; the `STAGE_ROOT == /` rejection), `cleanup` (stub `ci_kubectl`,
   assert every delete target ∈ `CREATED`, never `namespace/ci`; `--keep`
@@ -313,9 +313,9 @@ carve-out). Left to do:
   bats-tested `tests/check-no-embedded-shell.sh` if ast-grep's YAML support
   can't express it.
 - **Rename `ci/scripts/*.sh` to `<tool>-<verb>`** (strict Scripts Policy —
-  `<domain>` = the tool, not the folder): `ci-taskrun.sh` →
-  `tekton-taskrun.sh` (or `buildkit-run.sh`), `ci-kubeconform.sh` →
-  `kubeconform-scan.sh`, `ci-chainsaw.sh` → `chainsaw-test.sh`. `git mv` in
+  `<domain>` = the tool, not the folder): `tekton-taskrun.sh` →
+  `tekton-taskrun.sh` (or `buildkit-run.sh`), `kubeconform-scan.sh` →
+  `kubeconform-scan.sh`, `chainsaw-test.sh` → `chainsaw-test.sh`. `git mv` in
   its own commit, then update `hk.pkl` / `mise.toml` / `tests/manifest.txt`
   / `ci/README.md` / `ci/scripts/tests/*` refs. `lib/ci.sh` stays (matches
   `lib/openbao.sh` / `lib/frontend.sh`).
@@ -349,7 +349,7 @@ _T7b gaps to resolve in that session:_ in-cluster trivy DB strategy (PVC /
 `--db-repository` OCI mirror / `--download-db-only` init); Task-step image
 pins vs `mise.toml` host pins (drift); the two-repo `git-clone`; **re-add a
 proper Tekton `IMAGE_DIGEST` result** (T7a's Task pushes under a throwaway
-tag and `ci-taskrun.sh` resolves it — a Pipeline needs the result to pin
+tag and `tekton-taskrun.sh` resolves it — a Pipeline needs the result to pin
 the next task; a committed `buildkit-extract-digest.sh` is a legal new file
 here); **do not carry `.github/workflows/build-cv-frontend.yml`'s embedded
 `run:` shell** (`:48` `tr` lowercase, `:98` digest-extract + `case` guard —
@@ -368,7 +368,7 @@ via **Tekton Results** (needs its log-collection + a durable-storage
 backend configured, not just the API installed). **Not** Tekton Chains —
 Chains stores signed provenance/attestations, not stdout/stderr.
 Acceptance test: a failed step's logs are retrievable *after* the TaskRun +
-Pod are deleted. `ci-taskrun.sh`'s failed-run object retention (the
+Pod are deleted. `tekton-taskrun.sh`'s failed-run object retention (the
 `cleanup()` keep-on-failure path) is interim inspection, not durable
 storage. Mirrors the GHA-side fix (`check.yml` uploads
 `$HK_STATE_DIR/{output.log,hk.log}` as an artifact).

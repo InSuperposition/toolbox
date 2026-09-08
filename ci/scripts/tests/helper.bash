@@ -6,7 +6,7 @@
 # There is NO [k8s] bats case: the fake-bin shim would fake a cluster gate
 # true and then the test would exec the REAL chainsaw/kubectl (a
 # GitHub-runner failure, not a skip). Real end-to-end coverage is the hk
-# `chainsaw` step itself (`./ci/scripts/ci-chainsaw.sh` — skips in CI on
+# `chainsaw` step itself (`./ci/scripts/chainsaw-test.sh` — skips in CI on
 # the missing orbstack context, runs the live cluster locally) and
 # `mise run ci:taskrun`.
 

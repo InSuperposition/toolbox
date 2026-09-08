@@ -161,8 +161,8 @@ auto = ["start"]
 ```
 
 `orb start k8s` is idempotent and returns once the cluster is up; it does
-**not** keep k8s healthy (Codex #8). So `ci/scripts/ci-taskrun.sh` and
-`ci-chainsaw.sh` always run their own `kubectl` readiness check and fail /
+**not** keep k8s healthy (Codex #8). So `ci/scripts/tekton-taskrun.sh` and
+`chainsaw-test.sh` always run their own `kubectl` readiness check and fail /
 skip with a clear message — the daemon is a convenience, not a guarantee.
 
 Pinned to **Tekton Pipelines v1.6.0**. `previous/v1.6.0/release.yaml` has

@@ -13,11 +13,11 @@ set -euo pipefail
 # Test seam: TOOLBOX_CI_SKIP_CHAINSAW=1 forces the skip path.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=/dev/null  # lib is bats-tested directly (ci-chainsaw.bats)
+# shellcheck source=/dev/null  # lib is bats-tested directly (chainsaw-test.bats)
 . "$SCRIPT_DIR/lib/ci.sh"
 
 skip() {
-	echo "ci-chainsaw: $* — skipping ([k8s] gate)"
+	echo "chainsaw-test: $* — skipping ([k8s] gate)"
 	exit 0
 }
 
@@ -28,5 +28,5 @@ ci_kubectl -n "${TOOLBOX_CI_TEKTON_NS:-tekton-pipelines}" \
 	get deployment/tekton-pipelines-controller >/dev/null 2>&1 ||
 	skip "Tekton Pipelines not installed (mise run local:tekton:install)"
 
-echo "ci-chainsaw: running chainsaw test over ci/tests/"
+echo "chainsaw-test: running chainsaw test over ci/tests/"
 exec chainsaw test --kube-context "$(ci_kube_context)" "$SCRIPT_DIR/../tests"

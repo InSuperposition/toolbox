@@ -9,7 +9,7 @@ digest-as-source-of-truth pipeline
 of the CI pipeline (`TODOS.md` T7) moves the build off GitHub Actions and
 into `orb start k8s`: a daemonless, rootless BuildKit Task builds an app
 from its Dockerfile and pushes it, with no privileged pod;
-`ci-taskrun.sh` then resolves the pushed **manifest digest** and pins on
+`tekton-taskrun.sh` then resolves the pushed **manifest digest** and pins on
 it (the digest is the trust boundary — ADR 0001).
 
 This concern **owns** the Task/Pipeline YAML, the `ci` namespace, and the
@@ -42,15 +42,15 @@ in-cluster end to end.
 |---|---|
 | `tasks/buildkit-build.yaml` | T7a — `buildctl-daemonless.sh` rootless build → push under a caller-supplied `TAG`. One step, pinned `command` + `args`, **no `script:`** (CLAUDE.md § Constraints). Params only (`IMAGE`, `TAG`, `PLATFORM`, `DOCKERFILE`, `CONTEXT_SUBPATH`, `BUILDKITD_FLAGS`); never names `cv_frontend`. No Tekton result — the caller resolves the digest (see below). No build cache (T7b adds it). |
 | `runtime/namespace.yaml` | the `ci` Namespace — nothing else. No `Role`/`RoleBinding`: the build step reads a **mounted** Secret, not the k8s API, so its ServiceAccount needs no verbs (the TaskRun also sets `automountServiceAccountToken: false`). |
-| `scripts/ci-taskrun.sh` | `mise run ci:taskrun` — stage the app context + the Dockerfile dir into one per-run hostPath workspace (two `subPath` bindings), apply the Task, create a TaskRun with a captured name, stream logs. Then `oras resolve $IMAGE:$TAG` → the manifest digest, `ci_is_strict_digest` validates it, and it pins on the digest to verify the Step-1 criteria (`oras` config `arch=arm64`, `docker pull`, pod `securityContext`). `--keep` / `--teardown` (also best-effort deletes the tag). |
+| `scripts/tekton-taskrun.sh` | `mise run ci:taskrun` — stage the app context + the Dockerfile dir into one per-run hostPath workspace (two `subPath` bindings), apply the Task, create a TaskRun with a captured name, stream logs. Then `oras resolve $IMAGE:$TAG` → the manifest digest, `ci_is_strict_digest` validates it, and it pins on the digest to verify the Step-1 criteria (`oras` config `arch=arm64`, `docker pull`, pod `securityContext`). `--keep` / `--teardown` (also best-effort deletes the tag). |
 | `scripts/lib/ci.sh` | shared shell: repo-root resolution, the strict `^sha256:[0-9a-f]{64}$` digest guard (`ci_is_strict_digest`), the `--context orbstack` kube-context guard. |
 | `scripts/tests/*.bats`, `scripts/tests/helper.bash` | pure-shell cases only — a fake-bin `kubectl`/`tkn`/`gh` shim drives the preflight + skip decisions. No `[k8s]` bats case (the shim would fake the gate true, then exec the real binary — a runner failure); the hk `chainsaw` step + `mise run ci:taskrun` are the real end-to-end coverage. |
 | `tests/buildkit-build/chainsaw-test.yaml` | `[k8s]`-gated — apply the Task, assert the Tekton webhook accepts it, that it has exactly one step with **no `script:` field**, and that the spike-proven `securityContext` posture (the ceiling) has not drifted. The full build→push assertions are `mise run ci:taskrun` + the recorded spike (T7b adds a credential-light chainsaw build). |
 
-## Why the digest is resolved in `ci-taskrun.sh`, not a Tekton result
+## Why the digest is resolved in `tekton-taskrun.sh`, not a Tekton result
 
 The Task pushes under a per-run tag and emits **no** `IMAGE_DIGEST` result;
-`ci-taskrun.sh` does `oras resolve $IMAGE:$TAG` and pins on the digest. A
+`tekton-taskrun.sh` does `oras resolve $IMAGE:$TAG` and pins on the digest. A
 Tekton step-result would need embedded shell (`jq … > $(results…path)`) —
 which CLAUDE.md forbids — and the shell-free alternatives don't fit T7a:
 step-stdout→result is `enable-api-fields: alpha` (the controller runs

@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 
-# ci/scripts/ci-kubeconform.sh — the static Tekton-manifest gate. Runs on a
+# ci/scripts/kubeconform-scan.sh — the static Tekton-manifest gate. Runs on a
 # scratch copy of ci/ so a deliberately broken manifest can be asserted to
 # fail (the guard must FAIL on bad input, not only pass on good).
 
@@ -9,7 +9,7 @@ setup() {
 	SCRATCH="$(mktemp -d)"
 	scratch_copy "$SCRATCH" "ci/tasks" "ci/runtime" "ci/scripts" "ci/tests/crd-schemas"
 	: >"$SCRATCH/mise.toml"
-	SW="$SCRATCH/ci/scripts/ci-kubeconform.sh"
+	SW="$SCRATCH/ci/scripts/kubeconform-scan.sh"
 }
 
 teardown() {

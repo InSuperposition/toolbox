@@ -63,8 +63,8 @@ local fast = new Mapping<String, Step> {
   // own command templating. Rationale + CRD-schema caveats in the script.
   // The glob only gates whether the step runs.
   ["kubeconform"] {
-    glob = List("ci/tasks/**/*.yaml", "ci/runtime/**/*.yaml", "ci/pipelines/**/*.yaml", "ci/tests/crd-schemas/**/*.json", "ci/scripts/ci-kubeconform.sh")
-    check = "./ci/scripts/ci-kubeconform.sh"
+    glob = List("ci/tasks/**/*.yaml", "ci/runtime/**/*.yaml", "ci/pipelines/**/*.yaml", "ci/tests/crd-schemas/**/*.json", "ci/scripts/kubeconform-scan.sh")
+    check = "./ci/scripts/kubeconform-scan.sh"
   }
 }
 
@@ -116,8 +116,8 @@ local heavy = new Mapping<String, Step> {
   // OrbStack, so this must not be fatal in CI, unlike [docker]). The glob
   // only gates whether the step runs; the wrapper globs ci/tests/ itself.
   ["chainsaw"] {
-    glob = List("ci/tests/**/*.yaml", "ci/tasks/**/*.yaml", "ci/runtime/**/*.yaml", "ci/scripts/ci-chainsaw.sh", "ci/scripts/lib/ci.sh")
-    check = "./ci/scripts/ci-chainsaw.sh"
+    glob = List("ci/tests/**/*.yaml", "ci/tasks/**/*.yaml", "ci/runtime/**/*.yaml", "ci/scripts/chainsaw-test.sh", "ci/scripts/lib/ci.sh")
+    check = "./ci/scripts/chainsaw-test.sh"
   }
   // Silent-coverage-drop guard (F5). Diffs the suites on disk, the
   // committed tests/manifest.txt, and what hk schedules — a mismatch fails
