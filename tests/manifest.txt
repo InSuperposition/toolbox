@@ -22,9 +22,9 @@ bats    environments/local/scripts/tests/openbao-reset.bats      3
 bats    environments/local/scripts/tests/openbao-snapshot.bats   3
 bats    environments/local/scripts/tests/mise-env.bats           3
 bats    environments/local/scripts/tests/zot-manifests.bats      7
-bats    ci/scripts/tests/tekton-taskrun.bats                    18
 bats    ci/scripts/tests/chainsaw-test.bats                   3
 bats    ci/scripts/tests/kubeconform-scan.bats               3
+bats    ci/scripts/tests/registry-seed.bats                  6
 bats    tests/check-coverage.bats                           3
 
 tftest  environments/local/openbao/tests/config_render.tftest.hcl  4

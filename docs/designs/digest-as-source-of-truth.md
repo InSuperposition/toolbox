@@ -170,15 +170,17 @@ deploy/frontend/                     # the per-consumer instantiation for cv_fro
   scripts/tests/*.bats + helper.bash
 
 ci/                                  # reusable Tekton defs (distribution mechanism decided in the T7c pre-plan — ADR 0014)
-  tasks/buildkit-build.yaml            #   T7a ✓ — buildctl-daemonless rootless build (T7b1: push $(IMAGE):$(APP_REVISION) to zot, no result)
-  tasks/git-clone.yaml                 #   T7b1 — anonymous clone of cv_frontend + toolbox at pinned SHAs into one workspace
+  tasks/buildkit-build.yaml            #   T7a ✓ — buildctl-daemonless rootless build (T7b1: push $(IMAGE):$(APP_REVISION) to zot, no result; mirror via buildkitd-config workspace)
+  tasks/git-clone.yaml                 #   T7b1 — anonymous clone of cv_frontend + toolbox at pinned SHAs into one workspace (step 0: disable-ipv6 sysctl)
   tasks/scan-attach.yaml               #   T7b2 — trivy json + trivy cyclonedx (one DB pull) → oras attach ×2
   tasks/gate.yaml                      #   T7b3 — trivy convert --exit-code 1 --severity CRITICAL on the same scan.json (LAST)
-  pipelines/build-scan-approve.yaml    #   T7b3 — clone → build → scan-attach → gate; human approval stays attestation-sign.sh
+  pipelines/build-scan-approve.yaml    #   T7b1 — clone-app → clone-defs → build (shared + buildkitd-config workspaces, retries on clones); scan-attach T7b2, gate T7b3
   runtime/namespace.yaml               #   T7a ✓ — the `ci` namespace (no RBAC — the build SA needs none)
+  runtime/buildkitd-mirror.yaml        #   T7b1-followup — buildkitd.toml ConfigMap: mirror docker.io + gcr.io → in-cluster zot (interim; OrbStack IPv6-egress defect)
+  scripts/registry-seed.sh             #   T7b1-followup — host crane-copy of a Dockerfile's base images into zot (mise run frontend:seed)
   scripts/kubeconform-scan.sh + chainsaw-test.sh + lib/ci.sh + tests/   # T7a ✓ (tekton-taskrun.sh deleted in T7b1)
-  tests/crd-schemas/task_v1.json       #   T7a ✓ — Tekton v1 CRD schema (vendored from the pinned release) for kubeconform
-  tests/buildkit-build/chainsaw-test.yaml  #   T7a ✓ — [k8s]-gated: Tekton webhook accepts the Task + posture drift guard
+  tests/crd-schemas/{task,pipeline}_v1.json  #   Tekton v1 CRD schemas (vendored from the pinned release) for kubeconform
+  tests/build-pipeline/chainsaw-test.yaml    #   [k8s]-gated: webhook accepts git-clone + buildkit-build + the Pipeline; no script:; posture + DAG
 
 environments/local/                  # the ONE deployment target — owns its OpenBao unit + orchestration
   main.tf                               #   applies module "secret_openbao_local" { source = "./openbao" }
@@ -244,8 +246,11 @@ independently (Gall's Law). The full sequencing lives in `TODOS.md`.
   pinned Tekton v1.6.0). **T7b** (re-cut, plan `~/.claude/plans/t7b-pipeline-recut.md`)
   — **T7b0** interim `zot` on orb (pulled forward from T7d — removes the interim
   `gh` push token); **T7b1** `git-clone` Task + the `clone → build` Pipeline
-  (delete `tekton-taskrun.sh`); **T7b2** `scan-attach` Task (trivy json + trivy
-  cyclonedx, one DB pull); **T7b3** `gate` Task + the full Pipeline + a
+  (delete `tekton-taskrun.sh`); **T7b1-followup** hermetic build — host zot
+  seed + `buildkitd.toml` registry mirror + a one-shot `disable-ipv6` sysctl
+  step, working around this OrbStack cluster's IPv6-egress defect (the only
+  privileged container in the pipeline); **T7b2** `scan-attach` Task (trivy
+  json + trivy cyclonedx, one DB pull); **T7b3** `gate` Task + the full Pipeline + a
   `deploy/frontend/` Timoni module rendering the on-demand `PipelineRun` + an
   end-to-end demo. **T7c** — a pre-plan (Flux reconciliation model + the defs
   distribution mechanism), then local Flux reconciles `ci/**` +

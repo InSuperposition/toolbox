@@ -1,5 +1,6 @@
 [tools]
 "aqua:ast-grep/ast-grep" = "0.45.3"
+"aqua:google/go-containerregistry" = "0.22.1"   # `crane` — digest-preserving registry copy; the T7b1-followup zot seed (TODOS.md T7)
 "aqua:jdx/mise" = "2026.9.1"
 "aqua:kyverno/chainsaw" = "0.2.15"
 "aqua:loeffel-io/ls-lint" = "2.3.1"
@@ -98,10 +99,29 @@ run = "./attestation/scripts/attestation-verify.sh"
 description = "Verify a pinned approval attestation and deploy that image to the local pitchfork frontend daemon — args: <registry/repo@sha256:...> <sha256:attestation-digest>"
 run = "./deploy/frontend/scripts/frontend-deploy.sh"
 
+# T7b1-followup: mirror the digest-pinned base + `# syntax=` images from
+# deploy/frontend/Dockerfile into the local zot, so the in-cluster build never
+# reaches docker.io / gcr.io (the OrbStack IPv6-egress defect — TODOS.md T7,
+# /investigate 2026-09-08). Runs on the host, where IPv4 works. Idempotent.
+[tasks."frontend:seed"]
+description = "Seed the local zot with cv_frontend's digest-pinned base images so the in-cluster build is hermetic (TODOS.md T7b1-followup) — arg: [zot-registry] (default localhost:30500)."
+run = "./ci/scripts/registry-seed.sh deploy/frontend/Dockerfile"
+
 # ci/ concern — reusable Tekton build defs (ADR 0014, TODOS.md T7).
-[tasks."ci:taskrun"]
-description = "T7a: stage a context + Dockerfile into per-run workspaces, apply the buildkit-build Task + a TaskRun on orb k8s, build + push by digest, verify — args: <context-dir> <dockerfile> <image-ref> [--keep|--teardown]"
-run = "./ci/scripts/tekton-taskrun.sh"
+# The T7a hand-driven `ci:taskrun` (a single TaskRun staged through two YAML
+# heredocs) was deleted in T7b1 — the `build-scan-approve` Pipeline +
+# `git-clone` Task replace it. Run a build with:
+#   mise run frontend:seed   # once — host-seed zot with the base images
+#   tkn --context orbstack -n ci pipeline start build-scan-approve \
+#     --param IMAGE=zot.zot.svc.cluster.local:5000/<app> \
+#     --param APP_REPO_URL=<git-url> --param APP_REVISION=<sha> \
+#     --param DEFS_REPO_URL=<git-url> --param DEFS_REVISION=<sha> \
+#     --param DOCKERFILE_DIR=defs/deploy/frontend \
+#     --workspace name=shared,volumeClaimTemplateFile=<vct.yaml> \
+#     --workspace name=buildkitd-config,config=buildkitd-mirror
+# (kubectl apply -f ci/runtime/buildkitd-mirror.yaml first — the mirror
+# ConfigMap; TODOS.md T7b1-followup, the OrbStack IPv6-egress defect.)
+# T7b3 wraps this in a deploy/frontend/ Timoni module (frontend-build.sh).
 
 # Interim platform install — environments/local/ owns vendored-upstream
 # installs (same split as OpenBao), NOT ci/. Replaced by Flux reconciliation

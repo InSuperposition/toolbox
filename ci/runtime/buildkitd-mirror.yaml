@@ -1,0 +1,28 @@
+# The `buildkitd.toml` the build Task loads via `--config`. It mirrors
+# docker.io + gcr.io to the local zot so the in-cluster BuildKit build never
+# reaches an external registry (TODOS.md T7b1-followup, /investigate
+# 2026-09-08 — this OrbStack cluster's pods have a working IPv6 stack + AAAA
+# DNS but no routable v6 egress, so external registry fetches fail ~50% of
+# the time). `mise run frontend:seed` populates zot from the host first.
+#
+# INTERIM + LOCAL-SPECIFIC. The mirror target (`zot.zot.svc.cluster.local:5000`)
+# is this dev cluster's zot; a production pipeline binds its own ConfigMap to
+# the build Task's `buildkitd-config` workspace. Once the Cilium module's
+# datapath is settled (Cilium planning session, TODOS.md), a v4-only datapath
+# makes the mirror an optimization rather than a correctness requirement.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: buildkitd-mirror
+  namespace: ci
+  labels:
+    app.kubernetes.io/part-of: toolbox-ci
+data:
+  buildkitd.toml: |
+    # https://github.com/moby/buildkit/blob/master/docs/buildkitd.toml.md
+    [registry."docker.io"]
+      mirrors = ["zot.zot.svc.cluster.local:5000"]
+    [registry."gcr.io"]
+      mirrors = ["zot.zot.svc.cluster.local:5000"]
+    [registry."zot.zot.svc.cluster.local:5000"]
+      http = true

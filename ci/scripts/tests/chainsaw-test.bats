@@ -4,7 +4,7 @@
 # kubectl/tkn (helper.bash fakebin_setup), so these cover only the skip
 # decision. The real end-to-end chainsaw run is the hk `chainsaw` step
 # itself (`./ci/scripts/chainsaw-test.sh` — skips in CI, runs against the
-# live cluster locally) and `mise run ci:taskrun`.
+# live cluster locally) and an operator `tkn pipeline start` (TODOS.md T7b1).
 
 setup() {
 	load helper
