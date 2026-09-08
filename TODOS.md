@@ -259,10 +259,10 @@ interim auth: `attestation-sign.sh` signs with the root `VAULT_TOKEN` (the
 
 ### T7 Phase-2 (Tekton) — re-cut, planned 2026-09-08
 
-**Planning done.** `/plan-eng-review` (2026-09-08) + Codex outside voice
-re-cut the whole arc around a **composable `ci/` concern** and
-**digest-pinned OCI bundles**. Plan file:
-`~/.claude/plans/t7a-buildkit-in-cluster-proof.md`. Key decisions
+**Planning done.** `/plan-eng-review` (2026-09-08, ×2) + Codex outside voice
+re-cut the arc around a **composable `ci/` concern**. T7a plan:
+`~/.claude/plans/t7a-buildkit-in-cluster-proof.md`. **T7b re-cut plan (2026-09-08):**
+`~/.claude/plans/t7b-pipeline-recut.md`. Key decisions
 ([ADR 0014](docs/adr/0014-tekton-defs-are-oci-bundles-in-ci.md)):
 
 - Builder = **BuildKit, daemonless, rootless** (`buildctl-daemonless.sh` in
@@ -271,15 +271,21 @@ re-cut the whole arc around a **composable `ci/` concern** and
   kaniko/buildah. Registry cache, not a PVC. **KEDA scale-to-zero dropped** —
   no standing builder to scale.
 - Reusable Tekton defs live in a new top-level **`ci/`** concern, **not
-  `modules/`**. Distributed as OCI bundles (`tkn bundle push` → digest,
-  bundles resolver, cosign-signable). Version = digest, no version-in-path.
-  Per-consumer `PipelineRun` stays in `deploy/<consumer>/`.
+  `modules/`**. Per-consumer instantiation lives in `deploy/<consumer>/`.
+  **The distribution mechanism** (`tkn bundle push` + bundles-resolver vs
+  Flux `OCIRepository`) is **decided in the T7c pre-plan**, not T7b — whichever
+  reconciler T7c picks owns the digest pin + cosign-signing the defs
+  (2026-09-08 eng review). ADR 0014's intent (digest-pinned, cosign-signable
+  defs, version = digest) stands; only the push mechanism is deferred.
 - Tekton controller + `zot` installs are `environments/local/` concerns
-  (Flux `OCIRepository`/`Kustomization`), not `ci/`.
+  (interim `mise` task now, Flux `OCIRepository`/`Kustomization` in T7c), not `ci/`.
 - byte-level build reproducibility → **T8** (with Chains provenance).
-- `deploy/frontend/Dockerfile` line 1 `# syntax=` gets **pinned by digest**
-  in T7a (Codex: unpinned frontend = input-trust hole, distinct from
-  timestamp reproducibility).
+- `deploy/frontend/Dockerfile` line 1 `# syntax=` **pinned by digest** in T7a
+  (Codex: unpinned frontend = input-trust hole, distinct from timestamp
+  reproducibility).
+- **`deploy/frontend/` becomes a Timoni module** for the on-demand `PipelineRun`
+  (T7b3) — the deliberate first step of a `deploy/` → Timoni conversion ahead of
+  the T7c Flux migration.
 
 **T7a — rootless BuildKit feasibility spike, then the `ci/` concern.**
 _Prove first._ **Step 1 ✓ PASSED 2026-09-08** — daemonless rootless BuildKit
@@ -341,54 +347,113 @@ review; branch `ci/t7a-followup-hygiene`.
   rename needs thought, and it touches `mise.toml` tasks, `pitchfork.toml`,
   ADRs, README, bats.
 
-**T7b — the full pipeline as OCI bundles + GHA retirement.**
-`ci/tasks/{trivy-scan,oras-attach}.yaml` (wrap the proven Phase-1 shell) +
-`ci/pipelines/build-scan-approve.yaml` + `ci/scripts/pipeline-bundle-push.sh`
-(`tkn bundle push` → digest) + `deploy/frontend/` `PipelineRun` (bundles
-resolver `@sha256:` pins) + a digest-pinned `git-clone` step (two repos:
-cv_frontend context, toolbox Dockerfile) + the registry cache + full
-kubeconform/chainsaw harness. **Deletes
-`.github/workflows/build-cv-frontend.yml`** only once build + evidence +
-approval + consumption are demonstrated in-cluster end to end.
-_T7b gaps to resolve in that session:_ in-cluster trivy DB strategy (PVC /
-`--db-repository` OCI mirror / `--download-db-only` init); Task-step image
-pins vs `mise.toml` host pins (drift); the two-repo `git-clone`; **the
-staging becomes committed Tekton YAML, not shell** — `tekton-taskrun.sh`'s
-two `<<-YAML` heredocs (per-run PV/PVC + TaskRun) go away entirely (the
-`git-clone` Task + a `PipelineRun` replace the hostPath dance); shell never
-authors YAML (from the T7a-follow-up review); **re-add a proper Tekton
-`IMAGE_DIGEST` result** (T7a's Task pushes under a throwaway
-tag and `tekton-taskrun.sh` resolves it — a Pipeline needs the result to pin
-the next task; a committed `buildkit-extract-digest.sh` is a legal new file
-here); **do not carry `.github/workflows/build-cv-frontend.yml`'s embedded
-`run:` shell** (`:48` `tr` lowercase, `:98` digest-extract + `case` guard —
-same logic the T7a Task refactor removed) into the Tekton pipeline —
-extract to a tested script or delete with the workflow.
-Effort: ~2-3d.
+**T7b — the working in-cluster Pipeline (re-cut 2026-09-08).**
+Full plan + eng-review report: `~/.claude/plans/t7b-pipeline-recut.md`. Scope
+is **the working Pipeline + an end-to-end demo only** — the OCI-bundle
+distribution and `build-cv-frontend.yml` retirement are **deferred to a phase
+after the T7c pre-plan** (that pre-plan decides the reconciler, which owns the
+pin mechanism). Sub-phased, each ships + tests on its own:
 
-**T7c — local Flux.** flux2 + flux-operator (already pinned) reconciles
-`ci/**` + `environments/local/` Kustomizations. Retires the interim
-`local:tekton:install`. This lands **before** T7d so the zot install has a
-reconciler. Effort: ~1-2d (includes the one-time Flux bootstrap:
+- **T7b0** — interim **zot** on orb (pulled forward from T7d): `environments/local/zot/`
+  (pinned `2.1.20`, `kubectl apply`, `deleteUntagged: false`) + `mise run
+  local:zot:install` + a `zot.<ns>.svc` Service + an OrbStack NodePort for host
+  reach. Removes the interim `gh` push token from the pipeline entirely (loopback
+  zot, no credential — threat model: single-user VM, all cluster writers trusted;
+  a **P2 TODO** opens real zot auth, below). _Verify the real clients_ (`buildctl
+  registry.insecure=true` push from a pod; `docker pull` from the host; exposure
+  is the NodePort only).
+- **T7b1** — `ci/tasks/git-clone.yaml` (anonymous clone of both public repos —
+  `cv_frontend` + `toolbox` — at pinned SHAs, `mkdir -p` the subPath dirs) +
+  modify `buildkit-build.yaml` (drop `TAG` + the per-run `gh` Secret + the
+  `dockerconfig` workspace; push `$(IMAGE):$(APP_REVISION)` — the git SHA as the
+  tag — to zot; **no Tekton result**) + a 2-Task `clone → build` Pipeline + one
+  `volumeClaimTemplate` workspace + `ci/README.md` § Workspaces (write down the
+  `coschedule: workspaces` one-PVC constraint) + **delete `tekton-taskrun.sh` +
+  `mise run ci:taskrun` + its 18 bats + the two heredocs** (its Task contract
+  dies here).
+- **T7b2** — `ci/tasks/scan-attach.yaml` (one Task: `trivy image -f json` →
+  `trivy image -f cyclonedx` (native, keeps CVE ratings) → `oras attach` ×2, all
+  pinned `command`/`args`) + shared trivy `--cache-dir` on the workspace (one DB
+  pull for both calls) + wire `runAfter build`.
+- **T7b3** — `ci/tasks/gate.yaml` (`trivy convert --exit-code 1 --severity
+  CRITICAL` on the step-1 `scan.json` — gate + SBOM can't disagree) + full
+  `ci/pipelines/build-scan-approve.yaml` (`clone → build → scan-attach → gate`) +
+  chainsaw harness + `deploy/frontend/` **Timoni module** rendering the on-demand
+  `PipelineRun` + `frontend-build.sh` (render → `kubectl create` → watch to a
+  terminal state, exit non-zero on Failed, LOUD gate-fail warning, `oras resolve`
+  + `ci_is_strict_digest` the digest, print it, delete the run). **End-to-end
+  demo with a known-good `cv_frontend` SHA**: fire a run → `oras resolve` →
+  `mise run attestation:sign` → `mise run frontend:deploy` → container serves the
+  **expected content with HTTP 200**.
+
+**The digest is never a Tekton result** — tasks address the image by
+`$(IMAGE):$(APP_REVISION)`, ordering is `runAfter`, and `oras resolve` produces
+the immutable digest once at the operator boundary (the only value-consumer,
+`attestation:sign`, runs outside the pipeline). This removes an extract script, a
+`results:` block, `--metadata-file` choreography, and `enable-api-fields: alpha`.
+ADR 0001 holds — the signed chain still pins the digest.
+
+Effort: ~5–6 days across T7b0–T7b3 (T7a's "simple" bits each ran long).
+
+**T7c — local Flux + a pre-plan first.** flux2 + flux-operator (already pinned)
+reconciles `ci/**` + `environments/local/` (incl. the interim `local:tekton:install`
++ `local:zot:install`). **Run a short T7c pre-plan first** to settle: the
+reconciliation model (`GitRepository` vs `OCIRepository`, what Flux owns), the
+Tekton-defs distribution mechanism (deferred out of T7b), and Tekton Results.
+The build *run* stays operator-triggered (`frontend-build.sh`), **not**
+Flux-reconciled — Pipelines-as-Code is the eventual git-event trigger, still
+deferred. Effort: ~1-2d + the pre-plan (includes the one-time Flux bootstrap:
 operator install + first `FluxInstance` + deploy-key).
 _Observability (from the CI-log-visibility review):_ once Flux reconciles
-`ci/**` TaskRuns, persist **failed-step logs beyond `tkn taskrun logs`** —
-via **Tekton Results** (needs its log-collection + a durable-storage
-backend configured, not just the API installed). **Not** Tekton Chains —
-Chains stores signed provenance/attestations, not stdout/stderr.
-Acceptance test: a failed step's logs are retrievable *after* the TaskRun +
-Pod are deleted. `tekton-taskrun.sh`'s failed-run object retention (the
-`cleanup()` keep-on-failure path) is interim inspection, not durable
-storage. Mirrors the GHA-side fix (`check.yml` uploads
-`$HK_STATE_DIR/{output.log,hk.log}` as an artifact).
+`ci/**` TaskRuns, persist **failed-step logs beyond `tkn taskrun logs`** via
+**Tekton Results** (needs log-collection + a durable-storage backend, not just
+the API). **Not** Tekton Chains. Acceptance test: a failed step's logs are
+retrievable *after* the TaskRun + Pod are deleted. Mirrors the GHA-side fix
+(`check.yml` uploads `$HK_STATE_DIR/{output.log,hk.log}`).
 
-**T7d — GHCR → zot.** zot on orb via the now-present Flux (vendored upstream
-in `environments/local/tekton/`… `environments/local/zot/`). Repoint the
-pipeline + `deploy/frontend/` consumer + the bundle registry at zot.
-Effort: ~1d.
+**T7c/T7d distribution phase (was T7b4/T7b5).** After the T7c pre-plan:
+`ci/pipelines/*` + `ci/tasks/*` distributed by the chosen mechanism (`tkn bundle
+push` → digest, or `flux push artifact` → `OCIRepository` digest), `@sha256:`
+pinned in `deploy/frontend/`, cosign-signed; then **delete
+`.github/workflows/build-cv-frontend.yml`** once build + evidence + approval +
+consumption are demonstrated in-cluster end to end (T7b3 already demonstrates the
+chain — this phase adds the pinned distribution and retires the GHA path). **Do
+not carry `build-cv-frontend.yml`'s embedded `run:` shell** (`:48` `tr`
+lowercase, `:98` digest-extract + `case` guard) into anything — extract to a
+tested script or delete with the workflow.
 
-**Priority:** P2 · **Depends on:** ~~T5 + T5b~~ done. T7a→T7b→T7c→T7d in
-order (T7c's Flux precedes T7d's zot install).
+**T7d — Flux-manage zot + production repoint.** zot's interim install (T7b0)
+becomes a Flux `OCIRepository`/`Kustomization`; the eventual `environments/production/`
+gets a zot with a real backup policy (the local zot's disaster path is
+rebuild → re-approve → re-pin — acceptable for dev, not prod). Effort: ~1d.
+
+**Priority:** P2 · **Depends on:** ~~T5 + T5b~~ done. **T7b0 → T7b1 → T7b2 →
+T7b3**, then the **T7c pre-plan**, then the distribution phase + T7c/T7d.
+
+### zot registry auth — planning session — P2
+
+**What:** design real auth for the local (and eventual production) zot. T7b0
+ships it **credential-free** on the single-user OrbStack VM (stated threat model:
+all cluster writers are the operator's). **Why:** a credential-free registry lets
+any cluster workload push an image or attach a referrer; `attestation-sign.sh`
+selects evidence by `last`-of-artifactType. Fine solo, not fine with a second
+operator or a shared cluster. **Options to weigh:** static htpasswd Secret,
+zot's OIDC/LDAP, an OpenBao-issued short-lived credential. **First step:** decide
+whether this folds into the deferred "Auth + multi-member DX" session (likely) or
+stays separate. **Depends on:** T7b0 (zot exists). **Triggers with:** a 2nd
+operator, a shared cluster, or `environments/production/`.
+
+### Pin-drift guard: host `mise.toml` vs `ci/tasks/*` step images — P3
+
+**What:** keep `trivy`/`oras`/`tkn` versions synced between the host toolchain
+(`mise.toml`) and the Tekton Task step images (T7b2 introduces the second pin
+site). **Why:** a scan running a different `trivy` than the linter is a
+silent-wrong-result bug — the class the repo exists to prevent. **First step:**
+**research common conventions** — renovate/dependabot grouped updates, a
+generated lockfile both sides consume, running `mise` *inside* the Task images,
+Tekton image refs as params from one manifest — then iterate + innovate, rather
+than reflexively adding another `mise run check` step. Pins move ~quarterly.
+**Depends on:** T7b2.
 
 ### T8 — Tekton Chains provenance — P2, planning session
 
