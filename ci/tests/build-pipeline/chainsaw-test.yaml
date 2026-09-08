@@ -1,11 +1,11 @@
 # [k8s]-gated (ci/scripts/chainsaw-test.sh skips without an orbstack cluster
 # + Tekton). Server-side validation the static kubeconform gate cannot do:
-# the Tekton admission webhook accepts the three defs, none carries embedded
+# the Tekton admission webhook accepts the four defs, none carries embedded
 # shell (CLAUDE.md § Constraints), the spike-proven build posture has not
-# drifted, the only privileged container is the `disable-ipv6` sysctl step
-# (TODOS.md T7b1-followup), and the Pipeline DAG is
-# clone-app -> clone-defs -> build over the `shared` workspace with a
-# `buildkitd-config` ConfigMap workspace.
+# drifted, the only privileged container in each Task is its `disable-ipv6`
+# sysctl step (TODOS.md T7b1-followup), and the Pipeline DAG is
+# clone-app -> clone-defs -> build -> scan-attach over the `shared` workspace
+# with a `buildkitd-config` ConfigMap workspace.
 #
 # The full clone -> build -> push -> `oras resolve` -> `docker pull` run
 # needs registry + git egress and a ~90s build; it is proven by an
@@ -24,6 +24,8 @@ spec:
         - apply:
             file: ../../tasks/buildkit-build.yaml
         - apply:
+            file: ../../tasks/scan-attach.yaml
+        - apply:
             file: ../../pipelines/build-scan-approve.yaml
         - assert:
             resource:
@@ -31,6 +33,12 @@ spec:
               kind: Task
               metadata:
                 name: git-clone
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: scan-attach
         - assert:
             resource:
               apiVersion: tekton.dev/v1
@@ -56,6 +64,15 @@ spec:
                 name: buildkit-build
               spec:
                 (length(steps)): 2
+                (steps[?script != null]): []
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: scan-attach
+              spec:
+                (length(steps)): 5
                 (steps[?script != null]): []
     - name: build-posture-has-not-drifted
       try:
@@ -103,6 +120,29 @@ spec:
                     (securityContext.privileged || 'unset'): unset
                   - name: checkout
                     (securityContext.privileged || 'unset'): unset
+    - name: scan-attach-only-the-sysctl-step-is-privileged
+      try:
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: scan-attach
+              spec:
+                steps:
+                  - name: disable-ipv6
+                    securityContext:
+                      privileged: true
+                      runAsUser: 0
+                    command: [sysctl]
+                  - name: trivy-report-json
+                    (securityContext.privileged || 'unset'): unset
+                  - name: trivy-sbom-cyclonedx
+                    (securityContext.privileged || 'unset'): unset
+                  - name: oras-attach-scan-report
+                    (securityContext.privileged || 'unset'): unset
+                  - name: oras-attach-sbom
+                    (securityContext.privileged || 'unset'): unset
     - name: pipeline-shape
       try:
         - assert:
@@ -138,3 +178,10 @@ spec:
                         subPath: defs
                       - name: buildkitd-config
                         workspace: buildkitd-config
+                  - name: scan-attach
+                    runAfter: [build]
+                    taskRef:
+                      name: scan-attach
+                    workspaces:
+                      - name: shared
+                        workspace: shared

@@ -1,0 +1,142 @@
+# T7b2 — scan the built image and attach the evidence as OCI 1.1 referrers.
+#
+# Consumer-agnostic (ADR 0014, rules/boundary-ci.yml): params only, never
+# names cv_frontend. Runs `runAfter: [build]` in build-scan-approve.yaml.
+#
+# No embedded shell (CLAUDE.md § Constraints): every step is a pinned
+# `command` + `args`, never a `script:` block. Four work steps plus a
+# privileged `disable-ipv6` step 0 (see below):
+#
+#   1. trivy image --format json      -> shared/scan.json      (never blocks —
+#      no --exit-code; the T7b3 `gate` Task reads this same file so its
+#      CRITICAL verdict can't drift from the attached evidence)
+#   2. trivy image --format cyclonedx -> shared/sbom.cdx.json  (trivy's
+#      NATIVE CycloneDX — keeps per-component CVE ratings, unlike
+#      `buildx --sbom`; docs/designs/digest-as-source-of-truth.md)
+#   3. oras attach  application/vnd.trivy.report+json  scan.json
+#   4. oras attach  application/vnd.cyclonedx+json     sbom.cdx.json
+#
+# The image is addressed by `$(params.IMAGE):$(params.APP_REVISION)` — the
+# same SHA tag the build pushed. `oras attach` resolves that tag to its
+# manifest digest and hangs the referrer off the DIGEST, so ADR 0001 still
+# holds: the operator's later `oras resolve` + `attestation:sign` pin the
+# digest, the tag is only a convenience handle. No Tekton result.
+#
+# ONE trivy DB pull: both trivy steps share `--cache-dir
+# $(workspaces.shared.path)/trivy-cache`; step 1 populates it, step 2 reuses.
+#
+# Insecure registry: the T7b0 zot is loopback HTTP, no auth. `TRIVY_INSECURE`
+# (env, from the param) and `oras --plain-http=` carry `$(params.REGISTRY_INSECURE)`.
+# A real HTTPS registry sets it `false`.
+#
+# Steps run as root (`stepTemplate`, like git-clone): the OrbStack
+# `local-path` PVC is not reliably group-writable under `fsGroup`, so
+# trivy/oras must be uid 0 to write scan.json into the shared workspace.
+#
+# Step 0 `disable-ipv6` (privileged `sysctl`, no `script:`): trivy's
+# vulnerability-DB pull (`mirror.gcr.io` / `ghcr.io`) is an external fetch,
+# and this OrbStack cluster's pods have a working IPv6 stack + AAAA DNS but
+# no routable v6 egress (`/investigate` 2026-09-08, TODOS.md T7b1-followup).
+# Disabling v6 in the pod netns forces v4; DNS/AAAA untouched. This is the
+# 3rd Task to need the workaround — TODOS.md § Cilium notes that a 4th is
+# the trigger to bring the Cilium datapath decision forward (a v4-only
+# datapath retires every `disable-ipv6` step at once). The step image is
+# reused (`moby/buildkit:rootless`, already node-cached from the build) — no
+# extra digest to track. `ci` ns is PSA `privileged`; this and the build
+# step are the only privileged containers.
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: scan-attach
+  labels:
+    app.kubernetes.io/part-of: toolbox-ci
+spec:
+  description: >-
+    Scan a pushed image with trivy (JSON report + native CycloneDX SBOM)
+    and attach both to the image's manifest digest as OCI 1.1 referrers.
+    Never blocks — the blocking CRITICAL gate is a separate Task (T7b3).
+  params:
+    - name: IMAGE
+      type: string
+      description: >-
+        Target repository reference with no tag, e.g.
+        zot.zot.svc.cluster.local:5000/cv-frontend.
+    - name: APP_REVISION
+      type: string
+      description: The app's git commit SHA — the tag the build pushed.
+    - name: REGISTRY_INSECURE
+      type: string
+      default: "true"
+      description: >-
+        "true" for the loopback HTTP zot (T7b0): sets TRIVY_INSECURE and
+        `oras --plain-http`. "false" for a real HTTPS registry.
+  workspaces:
+    - name: shared
+      description: >-
+        The per-run PVC. trivy writes scan.json + sbom.cdx.json to its root
+        and caches the vuln DB in trivy-cache/; oras reads the two files.
+  stepTemplate:
+    securityContext:
+      runAsUser: 0
+      runAsGroup: 0
+  steps:
+    - name: disable-ipv6
+      image: docker.io/moby/buildkit:rootless@sha256:80b15f0735e87bab7bf59ec4d695dfb4a7cfb25521cf56dc75d6f256285b63ef
+      securityContext:
+        privileged: true
+        runAsUser: 0
+      command: ["sysctl"]
+      args:
+        - "-w"
+        - "net.ipv6.conf.all.disable_ipv6=1"
+        - "net.ipv6.conf.default.disable_ipv6=1"
+        - "net.ipv6.conf.lo.disable_ipv6=1"
+    - name: trivy-report-json
+      image: docker.io/aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+      workingDir: $(workspaces.shared.path)
+      env:
+        - name: TRIVY_INSECURE
+          value: $(params.REGISTRY_INSECURE)
+      command: ["trivy"]
+      args:
+        - image
+        - --image-src=remote
+        - --cache-dir=$(workspaces.shared.path)/trivy-cache
+        - --format=json
+        - --output=$(workspaces.shared.path)/scan.json
+        - $(params.IMAGE):$(params.APP_REVISION)
+    - name: trivy-sbom-cyclonedx
+      image: docker.io/aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+      workingDir: $(workspaces.shared.path)
+      env:
+        - name: TRIVY_INSECURE
+          value: $(params.REGISTRY_INSECURE)
+      command: ["trivy"]
+      args:
+        - image
+        - --image-src=remote
+        - --cache-dir=$(workspaces.shared.path)/trivy-cache
+        - --skip-db-update
+        - --format=cyclonedx
+        - --output=$(workspaces.shared.path)/sbom.cdx.json
+        - $(params.IMAGE):$(params.APP_REVISION)
+    - name: oras-attach-scan-report
+      image: ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179
+      workingDir: $(workspaces.shared.path)
+      command: ["oras"]
+      args:
+        - attach
+        - --plain-http=$(params.REGISTRY_INSECURE)
+        - --artifact-type=application/vnd.trivy.report+json
+        - $(params.IMAGE):$(params.APP_REVISION)
+        - scan.json:application/vnd.trivy.report+json
+    - name: oras-attach-sbom
+      image: ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179
+      workingDir: $(workspaces.shared.path)
+      command: ["oras"]
+      args:
+        - attach
+        - --plain-http=$(params.REGISTRY_INSECURE)
+        - --artifact-type=application/vnd.cyclonedx+json
+        - $(params.IMAGE):$(params.APP_REVISION)
+        - sbom.cdx.json:application/vnd.cyclonedx+json

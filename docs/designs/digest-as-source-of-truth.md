@@ -172,9 +172,9 @@ deploy/frontend/                     # the per-consumer instantiation for cv_fro
 ci/                                  # reusable Tekton defs (distribution mechanism decided in the T7c pre-plan — ADR 0014)
   tasks/buildkit-build.yaml            #   T7a ✓ — buildctl-daemonless rootless build (T7b1: push $(IMAGE):$(APP_REVISION) to zot, no result; mirror via buildkitd-config workspace)
   tasks/git-clone.yaml                 #   T7b1 — anonymous clone of cv_frontend + toolbox at pinned SHAs into one workspace (step 0: disable-ipv6 sysctl)
-  tasks/scan-attach.yaml               #   T7b2 — trivy json + trivy cyclonedx (one DB pull) → oras attach ×2
+  tasks/scan-attach.yaml               #   T7b2 — trivy json + native cyclonedx (one DB pull) → oras attach ×2 as OCI referrers; never blocks (step 0: disable-ipv6 sysctl)
   tasks/gate.yaml                      #   T7b3 — trivy convert --exit-code 1 --severity CRITICAL on the same scan.json (LAST)
-  pipelines/build-scan-approve.yaml    #   T7b1 — clone-app → clone-defs → build (shared + buildkitd-config workspaces, retries on clones); scan-attach T7b2, gate T7b3
+  pipelines/build-scan-approve.yaml    #   T7b1/T7b2 — clone-app → clone-defs → build → scan-attach (shared + buildkitd-config workspaces, retries on clones); gate T7b3
   runtime/namespace.yaml               #   T7a ✓ — the `ci` namespace (no RBAC — the build SA needs none)
   runtime/buildkitd-mirror.yaml        #   T7b1-followup — buildkitd.toml ConfigMap: mirror docker.io + gcr.io → in-cluster zot (interim; OrbStack IPv6-egress defect)
   scripts/registry-seed.sh             #   T7b1-followup — host crane-copy of a Dockerfile's base images into zot (mise run frontend:seed)
@@ -250,7 +250,8 @@ independently (Gall's Law). The full sequencing lives in `TODOS.md`.
   seed + `buildkitd.toml` registry mirror + a one-shot `disable-ipv6` sysctl
   step, working around this OrbStack cluster's IPv6-egress defect (the only
   privileged container in the pipeline); **T7b2** `scan-attach` Task (trivy
-  json + trivy cyclonedx, one DB pull); **T7b3** `gate` Task + the full Pipeline + a
+  json + native cyclonedx, one DB pull, `oras attach` ×2 — its own
+  `disable-ipv6` step for the DB pull); **T7b3** `gate` Task + the full Pipeline + a
   `deploy/frontend/` Timoni module rendering the on-demand `PipelineRun` + an
   end-to-end demo. **T7c** — a pre-plan (Flux reconciliation model + the defs
   distribution mechanism), then local Flux reconciles `ci/**` +

@@ -33,7 +33,7 @@ The allowed dependency edges are explicit and machine-checked in
 - The rule is normative and the tree matches it (see Migration status
   below). The `ci/` concern (reusable Tekton defs, content-digest-pinned,
   [ADR 0014](../adr/0014-tekton-defs-are-oci-bundles-in-ci.md)) holds
-  `tasks/{git-clone,buildkit-build}.yaml`, `pipelines/build-scan-approve.yaml`,
+  `tasks/{git-clone,buildkit-build,scan-attach}.yaml`, `pipelines/build-scan-approve.yaml`,
   `runtime/` (namespace + the interim `buildkitd-mirror` ConfigMap), and the
   `kubeconform` / `chainsaw` / `registry-seed` scripts (`TODOS.md` T7). The distribution mechanism (`tkn bundle` vs Flux `OCIRepository`) is
   a T7c-pre-plan call. Tekton defs are **not** `modules/*` entries.
@@ -239,9 +239,10 @@ toolbox/
 │   ├── README.md                                     the job; ci/ (our defs) vs .github/workflows/ (runner + trigger)
 │   ├── tasks/
 │   │   ├── git-clone.yaml                             T7b1 — blobless shallow clone at a pinned SHA; no script: (step 0: disable-ipv6 sysctl)
-│   │   └── buildkit-build.yaml                        T7a posture — buildctl-daemonless rootless build → push $(IMAGE):$(APP_REVISION); mirror via buildkitd-config workspace
+│   │   ├── buildkit-build.yaml                        T7a posture — buildctl-daemonless rootless build → push $(IMAGE):$(APP_REVISION); mirror via buildkitd-config workspace
+│   │   └── scan-attach.yaml                           T7b2 — trivy JSON + native CycloneDX (one DB pull) → oras attach ×2 as OCI referrers; never blocks; no script:
 │   ├── pipelines/
-│   │   └── build-scan-approve.yaml                    T7b1 — clone-app → clone-defs → build (shared + buildkitd-config workspaces, retries on clones); scan/gate T7b2/T7b3
+│   │   └── build-scan-approve.yaml                    T7b1/T7b2 — clone-app → clone-defs → build → scan-attach (shared + buildkitd-config workspaces, retries on clones); gate T7b3
 │   ├── runtime/
 │   │   ├── namespace.yaml                             the `ci` namespace (no RBAC)
 │   │   └── buildkitd-mirror.yaml                      T7b1-followup — buildkitd.toml ConfigMap: mirror docker.io + gcr.io → in-cluster zot (interim; OrbStack IPv6-egress defect)
@@ -251,7 +252,7 @@ toolbox/
 │   │   ├── lib/ci.sh                                  repo-root, strict sha256 digest guard, kube-context guard
 │   │   └── tests/*.bats + helper.bash                 gate-script skip/fail cases (no [k8s] bats)
 │   └── tests/
-│       ├── build-pipeline/chainsaw-test.yaml          [k8s]-gated — webhook accepts the defs, no script:, posture + DAG
+│       ├── build-pipeline/chainsaw-test.yaml          [k8s]-gated — webhook accepts the 4 defs, no script:, per-Task posture + the clone→build→scan-attach DAG
 │       └── crd-schemas/{task,pipeline}_v1.json        vendored Tekton v1 CRD schemas for kubeconform
 │
 ├── modules/
