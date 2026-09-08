@@ -6,7 +6,7 @@
 # There is NO [k8s] bats case: the fake-bin shim would fake a cluster gate
 # true and then the test would exec the REAL chainsaw/kubectl (a
 # GitHub-runner failure, not a skip). Real end-to-end coverage is the hk
-# `chainsaw` step itself (`./ci/scripts/ci-chainsaw.sh` — skips in CI on
+# `chainsaw` step itself (`./ci/scripts/chainsaw-test.sh` — skips in CI on
 # the missing orbstack context, runs the live cluster locally) and
 # `mise run ci:taskrun`.
 
@@ -40,6 +40,24 @@ fakebin_setup() {
 		*"cluster-info"*)                 exit "${STUB_KUBECTL_CLUSTERINFO_RC:-0}" ;;
 		*tekton-pipelines-controller*)    exit "${STUB_KUBECTL_TEKTON_RC:-0}" ;;
 		*"get namespace"*)                exit "${STUB_KUBECTL_NS_RC:-0}" ;;
+		*"delete"*)
+		  # record every teardown target for cleanup-scoping assertions
+		  printf '%s\n' "$*" >> "${STUB_KUBECTL_DELETE_LOG:-/dev/null}" ; exit 0 ;;
+		*"create -o name"*)
+		  # the TaskRun create — return a plausible name
+		  printf 'taskrun.tekton.dev/%s\n' "${STUB_TR_NAME:-tekton-taskrun-fake}" ; exit 0 ;;
+		*"create secret"*)
+		  # stat the --from-file path so a test can assert its mode. Do NOT
+		  # log argv — it would carry the base64 token (the temp file exists
+		  # precisely to keep it off the command line).
+		  for a in "$@"; do
+		    case "$a" in --from-file=config.json=*)
+		      f="${a#--from-file=config.json=}"
+		      { stat -c '%a' "$f" 2>/dev/null || stat -f '%Lp' "$f" 2>/dev/null ; } \
+		        >> "${STUB_KUBECTL_DCJ_MODE:-/dev/null}" || true ;;
+		    esac
+		  done
+		  exit 0 ;;
 		*) exit 0 ;;
 		esac
 	SH

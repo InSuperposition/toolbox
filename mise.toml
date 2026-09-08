@@ -101,7 +101,7 @@ run = "./deploy/frontend/scripts/frontend-deploy.sh"
 # ci/ concern — reusable Tekton build defs (ADR 0014, TODOS.md T7).
 [tasks."ci:taskrun"]
 description = "T7a: stage a context + Dockerfile into per-run workspaces, apply the buildkit-build Task + a TaskRun on orb k8s, build + push by digest, verify — args: <context-dir> <dockerfile> <image-ref> [--keep|--teardown]"
-run = "./ci/scripts/ci-taskrun.sh"
+run = "./ci/scripts/tekton-taskrun.sh"
 
 # Interim platform install — environments/local/ owns vendored-upstream
 # installs (same split as OpenBao), NOT ci/. Replaced by Flux reconciliation

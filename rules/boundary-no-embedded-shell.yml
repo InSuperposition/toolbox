@@ -1,0 +1,19 @@
+id: no-embedded-shell-in-tekton-yaml
+language: yaml
+severity: error
+message: >-
+  A Tekton Task/Pipeline step carries a `script:` block — embedded shell in
+  a configuration file (CLAUDE.md § Constraints, "No Tekton `script:`
+  blocks"). Use a pinned `command` + `args`; anything a CLI cannot express
+  (digest extraction, format guards, verification) lives in a
+  shellcheck-clean, bats-tested `ci/scripts/*.sh`. PR #9 shipped one of
+  these and it was reverted; this rule stops the next one.
+files:
+  - "ci/tasks/**/*.yaml"
+  - "ci/runtime/**/*.yaml"
+  - "ci/pipelines/**/*.yaml"
+rule:
+  kind: block_mapping_pair
+  has:
+    field: key
+    regex: "^script$"

@@ -47,7 +47,7 @@ set -euo pipefail
 # TOOLBOX_CI_TASK_FILE, TOOLBOX_CI_TEKTON_NS, TOOLBOX_CI_SKIP_VERIFY.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=/dev/null  # lib is bats-tested directly (ci-taskrun.bats)
+# shellcheck source=/dev/null  # lib is bats-tested directly (tekton-taskrun.bats)
 . "$SCRIPT_DIR/lib/ci.sh"
 
 TASK_FILE="${TOOLBOX_CI_TASK_FILE:-$SCRIPT_DIR/../tasks/buildkit-build.yaml}"
@@ -55,7 +55,7 @@ TEKTON_NS="${TOOLBOX_CI_TEKTON_NS:-tekton-pipelines}"
 NS="$(ci_namespace)"
 
 die() {
-	echo "ci-taskrun: $*" >&2
+	echo "tekton-taskrun: $*" >&2
 	exit 1
 }
 usage() {
@@ -137,12 +137,12 @@ GH_USER="$(gh api user --jq .login 2>/dev/null || true)"
 # or two worktrees — never share a name, and teardown only ever names its
 # own objects (never the namespace, never another run).
 RUN_ID="$(od -An -N5 -tx1 /dev/urandom | tr -d ' \n')"
-SECRET_NAME="ci-taskrun-${RUN_ID}-ghcr"
-PV_STAGE="ci-taskrun-${RUN_ID}-stage"
+SECRET_NAME="tekton-taskrun-${RUN_ID}-ghcr"
+PV_STAGE="tekton-taskrun-${RUN_ID}-stage"
 # The Task pushes under this tag; we resolve the manifest digest from it
 # (`oras resolve`) and pin on the digest. A throwaway lookup handle —
 # best-effort deleted on teardown; GC-able otherwise.
-TAG="ci-taskrun-${RUN_ID}"
+TAG="tekton-taskrun-${RUN_ID}"
 CREATED=() # names to clean up, "kind/name"
 
 # --- dry run (test seam) -------------------------------------------
@@ -151,7 +151,7 @@ CREATED=() # names to clean up, "kind/name"
 if [ -n "${TOOLBOX_CI_DRY_RUN:-}" ]; then
 	echo "dry-run: namespace=${NS} (kept always)"
 	echo "dry-run: run-id=${RUN_ID}"
-	echo "dry-run: would-create taskrun/ci-taskrun-${RUN_ID}-<gen>"
+	echo "dry-run: would-create taskrun/tekton-taskrun-${RUN_ID}-<gen>"
 	echo "dry-run: would-create secret/${SECRET_NAME}"
 	echo "dry-run: would-create pvc/${PV_STAGE} pv/${PV_STAGE}"
 	echo "dry-run: would-push ${IMAGE_REF}:${TAG} (tag resolved to a digest, then deleted)"
@@ -260,7 +260,7 @@ TR_NAME="$(
 		apiVersion: tekton.dev/v1
 		kind: TaskRun
 		metadata:
-		  generateName: ci-taskrun-${RUN_ID}-
+		  generateName: tekton-taskrun-${RUN_ID}-
 		  labels: { app.kubernetes.io/part-of: toolbox-ci, ci.toolbox/run: "${RUN_ID}" }
 		spec:
 		  taskRef: { name: buildkit-build }
@@ -295,7 +295,7 @@ SUCCEEDED="$(ci_kubectl -n "$NS" get "taskrun/${TR_NAME}" -o jsonpath='{.status.
 # --- verify (Step-1 spike criteria) ------------------------------
 if [ -n "${TOOLBOX_CI_SKIP_VERIFY:-}" ]; then
 	echo "==> TOOLBOX_CI_SKIP_VERIFY set — skipping image verification"
-	echo "ci-taskrun: TaskRun ${TR_NAME} Succeeded"
+	echo "tekton-taskrun: TaskRun ${TR_NAME} Succeeded"
 	exit 0
 fi
 
@@ -327,4 +327,4 @@ case "$PRIV" in *true*) die "build pod ${POD} ran a privileged container" ;; esa
 case "$CAPS" in *SYS_ADMIN* | *SYS_PTRACE*) die "build pod ${POD} added SYS_ADMIN/SYS_PTRACE" ;; esac
 echo "    pod securityContext: no privileged, no SYS_ADMIN/SYS_PTRACE"
 
-echo "ci-taskrun: OK — ${REF}"
+echo "tekton-taskrun: OK — ${REF}"

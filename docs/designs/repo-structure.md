@@ -151,7 +151,7 @@ export-approval-pubkey    attestation:export-pubkey      inline: cosign public-k
 approve                   attestation:sign               → attestation/scripts/attestation-sign.sh
 verify-approval           attestation:verify             → attestation/scripts/attestation-verify.sh
 consume                   frontend:deploy                → deploy/frontend/scripts/frontend-deploy.sh
-(new, T7a)                ci:taskrun                     → ci/scripts/ci-taskrun.sh
+(new, T7a)                ci:taskrun                     → ci/scripts/tekton-taskrun.sh
 (new, T7a)                local:tekton:install           inline: kubectl --context orbstack apply --server-side -f <pinned release.yaml>
 check / fix               check / fix                    unchanged
 (future)                  local:bootstrap               aggregate → local:openbao:bootstrap + …
@@ -233,10 +233,10 @@ toolbox/
 │   ├── runtime/
 │   │   └── namespace.yaml                             the `ci` namespace (no RBAC — the build SA needs none)
 │   └── scripts/
-│       ├── ci-taskrun.sh                              mise run ci:taskrun — stage inputs, apply Task + TaskRun, stream, verify
+│       ├── tekton-taskrun.sh                              mise run ci:taskrun — stage inputs, apply Task + TaskRun, stream, verify
 │       ├── lib/ci.sh                                  repo-root, strict sha256 digest guard, kube-context guard
 │       └── tests/
-│           ├── ci-taskrun.bats
+│           ├── tekton-taskrun.bats
 │           └── helper.bash                            k8s_available() — skip (not exit 1) without orb/kubeconfig
 │   (ci/tests/buildkit-build.chainsaw.yaml — [k8s]-gated end-to-end scenario)
 │   (ci/pipelines/ + scripts/pipeline-bundle-push.sh — T7b)
@@ -263,7 +263,7 @@ hook only.
 | tool | job | how |
 |---|---|---|
 | `ls-lint` (`aqua:loeffel-io/ls-lint`; the `hk` `ls_lint` builtin drives the binary) | structure + naming | `.ls-lint.yml`: `.dir` is `kebab-case`; the `.sh` **stem** matches `^[a-z]+(-[a-z]+)+$` (`<domain>-<verb>`, no `\.sh` in the pattern) |
-| `ast-grep` (`aqua:ast-grep/ast-grep`) | forbidden-edge **lint** | `sgconfig.yml` + `rules/boundary-*.yml`: **shell only** — a literal `deploy/` path in a script upstream of `deploy/` (`attestation/`, `environments/`) or in `ci/` (`boundary-ci.yml`); a `../` climb two-or-more levels or into a named sibling concern (`ci/ deploy/ attestation/ modules/ environments/`); a concern-directory name inside `tests/lib/*.bash` |
+| `ast-grep` (`aqua:ast-grep/ast-grep`) | forbidden-edge + no-embedded-shell **lint** | `sgconfig.yml` + `rules/boundary-*.yml`: **shell** — a literal `deploy/` path in a script upstream of `deploy/` (`attestation/`, `environments/`) or in `ci/` (`boundary-ci.yml`); a `../` climb two-or-more levels or into a named sibling concern (`ci/ deploy/ attestation/ modules/ environments/`); a concern-directory name inside `tests/lib/*.bash`. **yaml** — a `script:` block in a Tekton manifest under `ci/tasks|runtime|pipelines/` (`boundary-no-embedded-shell.yml`). |
 | `tests/check-coverage.sh` (Phase 1c, own `hk` step, `check` hook, runs last) | silent-coverage-drop guard | diffs three views: suites found on disk (its own `find`), `tests/manifest.txt` (committed path + case count), and what `hk check --all --plan --json` schedules. A mismatch fails the gate. `tests/check-coverage.bats` mutation-tests it. |
 
 Each phase's `.ls-lint.yml` and `rules/` describe the **then-current** tree.
@@ -303,7 +303,7 @@ tasks T1–T6). This table is kept as the record of what moved.
 | 3 | mise task namespacing — the `openbao-*` tasks → `local:openbao:*` (+ new `local:openbao:stop`); every `mise run openbao-*` reference rewritten. | done |
 | 4 | `attestation/` split out of `deploy/frontend/` (one PR, 4a–4d): the sign/verify/preflight seam → `attestation/`; `consume.sh`/`run.sh` → `frontend-deploy.sh`/`frontend-serve.sh` + the `TOOLBOX_ATTESTATION_VERIFY` seam; `openbao-preflight.sh` 5-state + corrected static-seal advice; `openbao-bootstrap.sh` calls `mise run attestation:export-pubkey` (all boundary rules now closed, no lint exceptions). | done |
 | 5 | docs-accuracy sweep — `digest-as-source-of-truth.md`, ADRs 0004/0005/0006/0009/0011, `main.tf` comments re-verified against the moved code; link-check clean | done |
-| T7a | new `ci/` concern (skeleton) — `README.md`, `tasks/buildkit-build.yaml`, `runtime/namespace.yaml`, `scripts/ci-taskrun.sh` + `lib/ci.sh` + `tests/`; `rules/boundary-ci.yml` + `ci` added to the concern-climb sibling list; `ci:taskrun` + `local:tekton:install` mise tasks | done |
+| T7a | new `ci/` concern (skeleton) — `README.md`, `tasks/buildkit-build.yaml`, `runtime/namespace.yaml`, `scripts/tekton-taskrun.sh` + `lib/ci.sh` + `tests/`; `rules/boundary-ci.yml` + `ci` added to the concern-climb sibling list; `ci:taskrun` + `local:tekton:install` mise tasks | done |
 
 ## Negative space (deliberately not here)
 

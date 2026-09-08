@@ -38,7 +38,7 @@ design, not an afterthought.
     `command` + `args` — never an embedded `script:`. Anything a CLI
     invocation can't express (digest extraction, format guards,
     verification) lives in `ci/scripts/*.sh`, shellcheck-clean and
-    bats-tested, and runs from there (`ci/scripts/ci-taskrun.sh`).
+    bats-tested, and runs from there (`ci/scripts/tekton-taskrun.sh`).
 - No cyclic calls between `mise` tasks and scripts — one direction only.
 - One primary test tool per layer (§9) — acknowledged partial overlap is
   fine, redundant full coverage by two tools for the same concern is not.
@@ -223,8 +223,8 @@ non-overlapping claim:
 
 | Layer | Tool | Notes |
 |---|---|---|
-| k8s manifests, static | kubeconform | Schema validation, no cluster needed, fast pre-merge gate. First user: `ci/` (T7a) — via `ci/scripts/ci-kubeconform.sh` (the `-schema-location` template collides with hk's own), Tekton has no standalone validator so the Task is checked against a v1 CRD schema vendored from the pinned release at `ci/tests/crd-schemas/`. |
-| k8s manifests, live behavior/policy | chainsaw | End-to-end in a real/test cluster; runs after kubeconform passes. First user: `ci/` (T7a) — `[k8s]`-gated via `ci/scripts/ci-chainsaw.sh` (skips, never fatal, without an orbstack cluster + Tekton — GitHub runners have no OrbStack; a documented departure from `[docker]`). |
+| k8s manifests, static | kubeconform | Schema validation, no cluster needed, fast pre-merge gate. First user: `ci/` (T7a) — via `ci/scripts/kubeconform-scan.sh` (the `-schema-location` template collides with hk's own), Tekton has no standalone validator so the Task is checked against a v1 CRD schema vendored from the pinned release at `ci/tests/crd-schemas/`. |
+| k8s manifests, live behavior/policy | chainsaw | End-to-end in a real/test cluster; runs after kubeconform passes. First user: `ci/` (T7a) — `[k8s]`-gated via `ci/scripts/chainsaw-test.sh` (skips, never fatal, without an orbstack cluster + Tekton — GitHub runners have no OrbStack; a documented departure from `[docker]`). |
 | OpenTofu units | `tofu test` (`.tftest.hcl`) | Native framework; tests in `<unit>/tests/`. |
 | Shell scripts | bats | Every script gets one, in `<concern>/scripts/tests/*.bats` beside the script. |
 

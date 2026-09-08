@@ -273,10 +273,10 @@ RESULT". Tekton v1.6.0 kept for Step 2.
 **Step 2 ✓ DONE** — `ci/` concern extracted: `ci/tasks/buildkit-build.yaml`
 (spike-proven posture, parameterised, consumer-agnostic, **one step —
 pinned `command`/`args`, no `script:` block**; pushes under a per-run tag,
-`ci-taskrun.sh` does `oras resolve` for the digest + the
+`tekton-taskrun.sh` does `oras resolve` for the digest + the
 `ci_is_strict_digest` guard) + `ci/runtime/namespace.yaml` (no RBAC,
 `automountServiceAccountToken: false`, PSA `privileged`) +
-`ci/scripts/{ci-taskrun,ci-kubeconform,ci-chainsaw}.sh` + `lib/ci.sh` +
+`ci/scripts/{tekton-taskrun,kubeconform-scan,chainsaw-test}.sh` + `lib/ci.sh` +
 20 bats cases + a `[k8s]`-gated chainsaw scenario (webhook accepts the Task,
 no `script:` field, posture-drift guard) + `rules/boundary-ci.yml` +
 `hk.pkl` kubeconform (fast) / chainsaw (heavy) steps + `mise` tasks
@@ -291,50 +291,33 @@ credential-light `git-clone` Task. A proper Tekton `IMAGE_DIGEST` result is
 deferred to T7b too (see below). Answered: rootless viability, in-cluster
 GHCR push auth, pod privilege posture.
 
-**T7a-follow-up — `ci/` concern config/script hygiene + rename.** _P2, own
-task._ Deferred from the PR #9 review (the review fixed only the
-`buildkit-build.yaml` `script:` block + reverted a self-granted CLAUDE.md
-carve-out). Left to do:
-- **Extract the inline k8s manifests from `ci/scripts/ci-taskrun.sh`** —
-  the two `<<-YAML` heredocs (PV/PVC, TaskRun) + `ws_binding()`'s
-  `printf`-built YAML → committed template files under `ci/runtime/`
-  rendered with `envsubst`; a bats case renders them and pipes through
-  `ci/scripts/ci-kubeconform.sh`. Precedent:
-  `environments/local/openbao/tests/config_render.tftest.hcl`.
-- **bats coverage for the remaining `ci-taskrun.sh` logic** — `common_prefix`
-  (shared grandparent; component boundary `/a/bc` vs `/a/bcd`; identical
-  dirs; the `STAGE_ROOT == /` rejection), `cleanup` (stub `ci_kubectl`,
-  assert every delete target ∈ `CREATED`, never `namespace/ci`; `--keep`
-  deletes nothing; `auto` + failure keeps all), the `DCJ_FILE` `0600` +
-  removal on both paths.
-- **Recurrence lint** — `rules/boundary-no-embedded-shell.yml` (`ast-grep`,
-  `language: yaml`) flagging a `script:` block-scalar under any
-  k8s-manifest dir, wired into the existing `ast-grep` hk step; or a
-  bats-tested `tests/check-no-embedded-shell.sh` if ast-grep's YAML support
-  can't express it.
-- **Rename `ci/scripts/*.sh` to `<tool>-<verb>`** (strict Scripts Policy —
-  `<domain>` = the tool, not the folder): `ci-taskrun.sh` →
-  `tekton-taskrun.sh` (or `buildkit-run.sh`), `ci-kubeconform.sh` →
-  `kubeconform-scan.sh`, `ci-chainsaw.sh` → `chainsaw-test.sh`. `git mv` in
-  its own commit, then update `hk.pkl` / `mise.toml` / `tests/manifest.txt`
-  / `ci/README.md` / `ci/scripts/tests/*` refs. `lib/ci.sh` stays (matches
-  `lib/openbao.sh` / `lib/frontend.sh`).
-- **Fix the CLAUDE.md Scripts Policy text inconsistency (separate)** — the
-  policy says `<domain>` = the tool, not the folder, but `frontend-deploy.sh`,
-  `frontend-serve.sh`, `attestation-sign.sh`, `attestation-verify.sh` all
-  use the **concern** name. Reconcile: relax the text to allow the concern
-  name (matching practice), or rename those four too. Don't leave the doc
-  contradicting shipped scripts.
-- **`.github/workflows/check.yml`** — `:79` (`docker info` /
-  `docker buildx version`) join with `&&`; `:103` diagnostics `run: |`
-  block → a script or leave as pure diagnostics (no branching). Decide in
-  the session.
-- **Wire the hk `actionlint` builtin** — a `fast`-layer step,
-  `glob = List(".github/workflows/**")`, static-lints the two workflow
-  files (`if:` typos, bad `uses:` refs, shell mistakes, deprecated
-  syntax). Pin `aqua:rhysd/actionlint` in `mise.toml`. Would NOT have
-  caught the `bash -e` no-pipefail assumption (semantic, not syntax), but
-  closes the "no automated check for workflow YAML" gap.
+**T7a-follow-up — `ci/` concern script hygiene.** _P2._ From the PR #9
+review; branch `ci/t7a-followup-hygiene`.
+- ✅ **Renamed `ci/scripts/*.sh` to `<tool>-<verb>`** (`f492f5c` + `dffef3f`):
+  `ci-taskrun` → `tekton-taskrun`, `ci-kubeconform` → `kubeconform-scan`,
+  `ci-chainsaw` → `chainsaw-test`; `lib/ci.sh` stays. Full ref sweep + the
+  per-run cluster-object prefix.
+- ✅ **Recurrence lint** (`69a2cff`): `rules/boundary-no-embedded-shell.yml`
+  (`ast-grep`, `language: yaml`) fails `mise run check` on a `script:`
+  block under `ci/tasks|runtime|pipelines/`.
+- ✅ **bats for `tekton-taskrun.sh`** (`b67fa34`): `common_prefix`
+  (grandparent / component boundary / identical dirs / `STAGE_ROOT == /`),
+  `cleanup` (`--teardown` scoped to this run's objects, never the
+  namespace; `--keep` deletes nothing), `DCJ_FILE` mode 600.
+- ❌ **actionlint + check.yml `run:` tidy** — dropped. GitHub Actions is
+  not the source of truth (Tekton is); no new tooling for the transitional
+  workflows.
+- ➡️ **Extract the `tekton-taskrun.sh` PV/PVC + TaskRun heredocs** — moved
+  to **T7b**. Shell must never author YAML (hard rule); T7b's staging
+  rewrite (git-clone Task + `PipelineRun`) replaces the heredocs with
+  committed Tekton YAML anyway, so fixing them separately first is wasted.
+- **Open — rename `frontend-*` / `attestation-*` to `<tool>-<verb>`** (P3,
+  own task). `frontend-deploy.sh` / `frontend-serve.sh` /
+  `attestation-sign.sh` / `attestation-verify.sh` use the concern name and
+  now contradict the (unchanged, enforced) Scripts Policy. No single tool
+  drives them (cosign + oras + openbao; docker + the verify seam) — the
+  rename needs thought, and it touches `mise.toml` tasks, `pitchfork.toml`,
+  ADRs, README, bats.
 
 **T7b — the full pipeline as OCI bundles + GHA retirement.**
 `ci/tasks/{trivy-scan,oras-attach}.yaml` (wrap the proven Phase-1 shell) +
@@ -347,9 +330,13 @@ kubeconform/chainsaw harness. **Deletes
 approval + consumption are demonstrated in-cluster end to end.
 _T7b gaps to resolve in that session:_ in-cluster trivy DB strategy (PVC /
 `--db-repository` OCI mirror / `--download-db-only` init); Task-step image
-pins vs `mise.toml` host pins (drift); the two-repo `git-clone`; **re-add a
-proper Tekton `IMAGE_DIGEST` result** (T7a's Task pushes under a throwaway
-tag and `ci-taskrun.sh` resolves it — a Pipeline needs the result to pin
+pins vs `mise.toml` host pins (drift); the two-repo `git-clone`; **the
+staging becomes committed Tekton YAML, not shell** — `tekton-taskrun.sh`'s
+two `<<-YAML` heredocs (per-run PV/PVC + TaskRun) go away entirely (the
+`git-clone` Task + a `PipelineRun` replace the hostPath dance); shell never
+authors YAML (from the T7a-follow-up review); **re-add a proper Tekton
+`IMAGE_DIGEST` result** (T7a's Task pushes under a throwaway
+tag and `tekton-taskrun.sh` resolves it — a Pipeline needs the result to pin
 the next task; a committed `buildkit-extract-digest.sh` is a legal new file
 here); **do not carry `.github/workflows/build-cv-frontend.yml`'s embedded
 `run:` shell** (`:48` `tr` lowercase, `:98` digest-extract + `case` guard —
@@ -368,7 +355,7 @@ via **Tekton Results** (needs its log-collection + a durable-storage
 backend configured, not just the API installed). **Not** Tekton Chains —
 Chains stores signed provenance/attestations, not stdout/stderr.
 Acceptance test: a failed step's logs are retrievable *after* the TaskRun +
-Pod are deleted. `ci-taskrun.sh`'s failed-run object retention (the
+Pod are deleted. `tekton-taskrun.sh`'s failed-run object retention (the
 `cleanup()` keep-on-failure path) is interim inspection, not durable
 storage. Mirrors the GHA-side fix (`check.yml` uploads
 `$HK_STATE_DIR/{output.log,hk.log}` as an artifact).
