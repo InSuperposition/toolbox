@@ -22,7 +22,7 @@ bats    environments/local/scripts/tests/openbao-reset.bats      3
 bats    environments/local/scripts/tests/openbao-snapshot.bats   3
 bats    environments/local/scripts/tests/mise-env.bats           3
 bats    ci/scripts/tests/ci-taskrun.bats                    11
-bats    ci/scripts/tests/ci-chainsaw.bats                   4    # 1 [k8s] case skips without an orbstack cluster
+bats    ci/scripts/tests/ci-chainsaw.bats                   3
 bats    ci/scripts/tests/ci-kubeconform.bats               3
 bats    tests/check-coverage.bats                           3
 

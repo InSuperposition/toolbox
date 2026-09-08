@@ -1,8 +1,10 @@
 #!/usr/bin/env bats
 
-# ci/scripts/ci-chainsaw.sh — the [k8s] gate. The skip paths run anywhere
-# (no cluster); the real chainsaw run is [k8s]-gated on a live orbstack +
-# Tekton and asserts the whole wiring end to end.
+# ci/scripts/ci-chainsaw.sh — the [k8s] skip gate. Every case runs a fake
+# kubectl/tkn (helper.bash fakebin_setup), so these cover only the skip
+# decision. The real end-to-end chainsaw run is the hk `chainsaw` step
+# itself (`./ci/scripts/ci-chainsaw.sh` — skips in CI, runs against the
+# live cluster locally) and `mise run ci:taskrun`.
 
 setup() {
 	load helper
@@ -26,11 +28,4 @@ setup() {
 	STUB_KUBECTL_TEKTON_RC=1 run "$CI_SCRIPTS/ci-chainsaw.sh"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"local:tekton:install"* ]]
-}
-
-@test "[k8s] against a live orbstack + Tekton: chainsaw passes" {
-	k8s_available || skip "no orbstack cluster with Tekton"
-	run "$CI_SCRIPTS/ci-chainsaw.sh"
-	[ "$status" -eq 0 ]
-	[[ "$output" == *"PASS"* ]] || [[ "$output" == *"Passed  tests 1"* ]]
 }

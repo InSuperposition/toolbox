@@ -1,12 +1,14 @@
 # ci/ test fixtures. The concern-agnostic half (scratch-dir copy, free
 # ports, a throwaway registry) lives in tests/lib/ and is loaded below.
-# What stays here is ci-specific: a fake-bin PATH shim for the preflight
-# unit cases, and k8s_available() for the [k8s]-gated integration cases.
+# What stays here is ci-specific: a fake-bin PATH shim (stub
+# kubectl/tkn/gh) for the preflight + skip-decision unit cases.
 #
-# [k8s] gate — DEPARTS from the [docker] "fatal in CI" rule (T9a): T7a's
-# in-cluster build is a local spike, not a pre-merge gate, and GitHub
-# runners have no OrbStack. So k8s_available() SKIPS (never exit 1), in CI
-# too. Revisit in T7b if a self-hosted orb runner lands.
+# There is NO [k8s] bats case: the fake-bin shim would fake a cluster gate
+# true and then the test would exec the REAL chainsaw/kubectl (a
+# GitHub-runner failure, not a skip). Real end-to-end coverage is the hk
+# `chainsaw` step itself (`./ci/scripts/ci-chainsaw.sh` — skips in CI on
+# the missing orbstack context, runs the live cluster locally) and
+# `mise run ci:taskrun`.
 
 # --- load the shared test lib (per-dir loader, no BATS_LIB_PATH) --------
 _d="$BATS_TEST_DIRNAME"
@@ -19,16 +21,6 @@ while [ "$_d" != "/" ] && [ ! -e "$_d/mise.toml" ]; do _d="$(dirname "$_d")"; do
 export CI_SCRIPTS="$_d/ci/scripts"
 export CI_LIB="$_d/ci/scripts/lib/ci.sh"
 unset _d
-
-# --- k8s gate ---------------------------------------------------------
-# True only when `orb start k8s` is up and the orbstack context works.
-k8s_available() {
-	command -v kubectl >/dev/null || return 1
-	command -v tkn >/dev/null || return 1
-	kubectl --context "${TOOLBOX_CI_KUBE_CONTEXT:-orbstack}" cluster-info >/dev/null 2>&1 || return 1
-	kubectl --context "${TOOLBOX_CI_KUBE_CONTEXT:-orbstack}" -n tekton-pipelines \
-		get deployment/tekton-pipelines-controller >/dev/null 2>&1
-}
 
 # --- fake-bin PATH shim for the preflight unit cases ------------------
 # Writes stub kubectl / tkn / gh into $FAKEBIN and prepends it to PATH.
