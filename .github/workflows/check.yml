@@ -77,6 +77,12 @@ jobs:
       - name: Install pinned tools (mise.toml [tools])
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         with:
+          # Pin the mise binary. Unpinned, mise-action reads
+          # https://mise.jdx.dev/VERSION which briefly served 2026.9.3
+          # before that GitHub release existed -> `curl ... 404` on the
+          # install step (2026-09-08). This is the mise binary, separate
+          # from the `aqua:jdx/mise` tool pin in mise.toml.
+          version: 2026.9.2
           install: true
           cache: true
 
