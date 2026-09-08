@@ -263,7 +263,7 @@ hook only.
 | tool | job | how |
 |---|---|---|
 | `ls-lint` (`aqua:loeffel-io/ls-lint`; the `hk` `ls_lint` builtin drives the binary) | structure + naming | `.ls-lint.yml`: `.dir` is `kebab-case`; the `.sh` **stem** matches `^[a-z]+(-[a-z]+)+$` (`<domain>-<verb>`, no `\.sh` in the pattern) |
-| `ast-grep` (`aqua:ast-grep/ast-grep`) | forbidden-edge **lint** | `sgconfig.yml` + `rules/boundary-*.yml`: **shell only** — a literal `deploy/` path in a script upstream of `deploy/` (`attestation/`, `environments/`) or in `ci/` (`boundary-ci.yml`); a `../` climb two-or-more levels or into a named sibling concern (`ci/ deploy/ attestation/ modules/ environments/`); a concern-directory name inside `tests/lib/*.bash` |
+| `ast-grep` (`aqua:ast-grep/ast-grep`) | forbidden-edge + no-embedded-shell **lint** | `sgconfig.yml` + `rules/boundary-*.yml`: **shell** — a literal `deploy/` path in a script upstream of `deploy/` (`attestation/`, `environments/`) or in `ci/` (`boundary-ci.yml`); a `../` climb two-or-more levels or into a named sibling concern (`ci/ deploy/ attestation/ modules/ environments/`); a concern-directory name inside `tests/lib/*.bash`. **yaml** — a `script:` block in a Tekton manifest under `ci/tasks|runtime|pipelines/` (`boundary-no-embedded-shell.yml`). |
 | `tests/check-coverage.sh` (Phase 1c, own `hk` step, `check` hook, runs last) | silent-coverage-drop guard | diffs three views: suites found on disk (its own `find`), `tests/manifest.txt` (committed path + case count), and what `hk check --all --plan --json` schedules. A mismatch fails the gate. `tests/check-coverage.bats` mutation-tests it. |
 
 Each phase's `.ls-lint.yml` and `rules/` describe the **then-current** tree.

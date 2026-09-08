@@ -47,11 +47,16 @@ local fast = new Mapping<String, Step> {
   // ls-lint reads names only and validates the whole tree against
   // .ls-lint.yml itself, so it takes no file list.
   ["ls-lint"] = Builtins.ls_lint
-  // Forbidden cross-concern path refs in shell. `ast-grep scan` reads
-  // sgconfig.yml + rules/ and walks the whole tree; the glob only gates
-  // whether the step runs when a relevant file changes.
+  // Forbidden cross-concern path refs in shell (rules/boundary-shell-*,
+  // boundary-*-ref) + no `script:` block in a Tekton manifest
+  // (rules/boundary-no-embedded-shell.yml, `language: yaml`). `ast-grep
+  // scan` reads sgconfig.yml + rules/ and walks the whole tree; the glob
+  // only gates whether the step runs when a relevant file changes.
   ["ast-grep"] {
-    glob = List("**/*.sh", "**/*.bash", "sgconfig.yml", "rules/**/*.yml")
+    glob = List(
+      "**/*.sh", "**/*.bash", "sgconfig.yml", "rules/**/*.yml",
+      "ci/tasks/**/*.yaml", "ci/runtime/**/*.yaml", "ci/pipelines/**/*.yaml"
+    )
     allow_binary = true
     allow_symlinks = true
     batch = false

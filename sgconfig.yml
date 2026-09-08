@@ -2,9 +2,12 @@
 # Rules live in rules/boundary-*.yml. Run via the hk `ast-grep` step in the
 # `fast` layer; `mise run check` covers it.
 #
-# Honest scope (repo-structure.md): this is a lint over literal path strings
-# and relative climbs in *shell* — ast-grep has no HCL grammar built in, so
-# the tofu layer's edges are not covered here (a resolved-graph check is a
-# deferred TODO). Paths assembled from variables are not caught.
+# Honest scope (repo-structure.md): mostly a lint over literal path strings
+# and relative climbs in *shell* (boundary-shell-*, boundary-*-ref), plus
+# one `language: yaml` rule forbidding a `script:` block in a Tekton
+# manifest under ci/ (boundary-no-embedded-shell.yml). ast-grep has no HCL
+# grammar built in, so the tofu layer's edges are not covered here (a
+# resolved-graph check is a deferred TODO). Paths assembled from variables
+# are not caught.
 ruleDirs:
   - rules
