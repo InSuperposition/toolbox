@@ -450,10 +450,31 @@ pin mechanism). Sub-phased, each ships + tests on its own:
     unreachable`. `mise run check` green. Docs swept (`ci/README.md` §
     Deterministic builds on OrbStack, `repo-structure.md`,
     `digest-as-source-of-truth.md`, `deploy/frontend/README.md`).
-- **T7b2** — `ci/tasks/scan-attach.yaml` (one Task: `trivy image -f json` →
-  `trivy image -f cyclonedx` (native, keeps CVE ratings) → `oras attach` ×2, all
-  pinned `command`/`args`) + shared trivy `--cache-dir` on the workspace (one DB
-  pull for both calls) + wire `runAfter build`.
+- **T7b2 — DONE 2026-09-08 (branch `t7b2-scan-attach`).** `ci/tasks/scan-attach.yaml`
+  — one Task, 5 steps, pinned `command`/`args`, no `script:`:
+  `disable-ipv6` (step 0 — trivy's vuln-DB pull is external, `/investigate`
+  option A, "keep it simple for now") → `trivy image --format json` →
+  `trivy image --format cyclonedx --skip-db-update` (native SBOM, keeps CVE
+  ratings; shared `--cache-dir` on the workspace → **one DB pull**) →
+  `oras attach` `application/vnd.trivy.report+json` →
+  `oras attach` `application/vnd.cyclonedx+json`. Never blocks (no
+  `--exit-code` — the CRITICAL gate is T7b3). `TRIVY_INSECURE` /
+  `oras --plain-http=` carry `$(REGISTRY_INSECURE)`. Wired `runAfter: [build]`
+  in `build-scan-approve.yaml` (`shared` workspace). Images pinned by digest
+  (`aquasec/trivy:0.74.0`, `ghcr.io/oras-project/oras:v1.3.4`); `disable-ipv6`
+  reuses the node-cached `moby/buildkit:rootless`. chainsaw updated (webhook
+  accepts 4 defs, `scan-attach` 5 steps / no `script:`,
+  `scan-attach-only-the-sysctl-step-is-privileged`, DAG adds `scan-attach`).
+  Docs swept. **Cilium note updated:** 3rd `disable-ipv6` Task + a newly
+  observed gap (step 0's sysctl doesn't reach buildkit's rootless build-exec
+  netns — `npm ci` still hung once in ~4 runs) — a 4th Task, or k0s replacing
+  OrbStack, is the trigger to make the Cilium datapath call.
+  **Live: `build-scan-approve` ran 2/2 Succeeded** (1 earlier attempt killed
+  after `npm ci` hung ~4m — the build-netns gap above). scan-attach's 5 steps
+  all `Completed/0`; `oras discover localhost:30500/cv-frontend:db174d91`
+  shows both referrers on `sha256:7bda3c3e…` —
+  `application/vnd.trivy.report+json` + `application/vnd.cyclonedx+json`.
+  `mise run check` green.
 - **T7b3** — `ci/tasks/gate.yaml` (`trivy convert --exit-code 1 --severity
   CRITICAL` on the step-1 `scan.json` — gate + SBOM can't disagree) + full
   `ci/pipelines/build-scan-approve.yaml` (`clone → build → scan-attach → gate`) +
@@ -589,6 +610,29 @@ the session:
   "scope `ci` privileged" input to nothing);
   the seed + mirror stays useful as a rate-limit / speed optimization but is no
   longer load-bearing. A dual-stack datapath keeps both load-bearing.
+- **The `disable-ipv6` step is spreading — this is the trigger to watch.**
+  T7b2 adds it to a 3rd Task (`scan-attach` — `trivy`'s vuln-DB pull is an
+  external fetch, `/investigate` option A, "keep it simple for now" — user
+  2026-09-08). Every in-cluster tool that reaches an external registry / API
+  over this OrbStack CNI needs the same privileged `sysctl` workaround. That
+  does not scale. **Two forcing conditions to bring this session forward:**
+  (a) a **4th** tool needs `disable-ipv6`, or (b) k0s replaces the OrbStack
+  cluster (the substrate OpenTofu owns — VM → k0s → OpenBao). Whichever comes
+  first, the Cilium datapath decision (v4-only vs dual-stack + real v6 egress
+  vs DNS-proxy AAAA filtering) should be made **then**, and one datapath
+  choice retires all N `disable-ipv6` steps + the Kyverno "scope `ci`
+  privileged" input at once. Do not add a 4th `disable-ipv6` step without
+  re-opening this.
+- **Known gap in the `disable-ipv6` step itself** (observed T7b2,
+  2026-09-08): step 0's `sysctl` sets the POD netns, but `buildkit-build`'s
+  RUN steps (`npm ci`) execute inside `rootlesskit`'s own build-exec
+  network namespace, which step 0 does not reach — so `npm ci` still
+  occasionally hangs on an unreachable AAAA (~1 run in 4). A pod-netns
+  sysctl cannot fix a nested netns; only a datapath with no v6 route at all
+  (v4-only Cilium) closes it. Interim mitigation if it gets worse before
+  Cilium: `--opt network=host` on the `buildctl build` (RUN steps then
+  share the pod netns) or a `buildkitd.toml` `dns` block — both add
+  surface, neither is worth it yet.
 
 **Design lenses:** the CNI datapath (single/dual-stack, IPAM, kube-proxy
 replacement), the L7 DNS proxy, the default-deny bootstrap allow-list (DNS, API

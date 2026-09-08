@@ -1,5 +1,6 @@
-# T7b1 — the in-cluster build pipeline: clone-app -> clone-defs -> build.
-# T7b2 adds `scan-attach` (runAfter build); T7b3 adds `gate` (last).
+# T7b1/T7b2 — the in-cluster build pipeline:
+#   clone-app -> clone-defs -> build -> scan-attach.
+# T7b3 adds `gate` (last, blocking on CRITICAL).
 #
 # Consumer-agnostic (ADR 0014, rules/boundary-ci.yml): every concrete value
 # is a param. The per-consumer PipelineRun that binds cv_frontend's repo
@@ -33,8 +34,9 @@ metadata:
     app.kubernetes.io/part-of: toolbox-ci
 spec:
   description: >-
-    Clone an app + the toolbox Dockerfile at pinned revisions, then build
-    and push a SHA-tagged image with daemonless rootless BuildKit.
+    Clone an app + the toolbox Dockerfile at pinned revisions, build and
+    push a SHA-tagged image with daemonless rootless BuildKit, then scan it
+    with trivy and attach the JSON report + CycloneDX SBOM as OCI referrers.
   params:
     - name: IMAGE
       type: string
@@ -98,3 +100,13 @@ spec:
         - { name: source, workspace: shared, subPath: app }
         - { name: build-defs, workspace: shared, subPath: defs }
         - { name: buildkitd-config, workspace: buildkitd-config }
+    - name: scan-attach
+      runAfter: [build]
+      taskRef:
+        name: scan-attach
+      params:
+        - { name: IMAGE, value: $(params.IMAGE) }
+        - { name: APP_REVISION, value: $(params.APP_REVISION) }
+        - { name: REGISTRY_INSECURE, value: $(params.REGISTRY_INSECURE) }
+      workspaces:
+        - { name: shared, workspace: shared }
