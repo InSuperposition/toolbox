@@ -26,6 +26,17 @@
 # (git's default 0644 / 0755), and the `build` step reads it back at its
 # careful rootless uid 1000 — the posture that matters is on the build, not
 # a clone of a public repo.
+#
+# Step 0 `disable-ipv6` (privileged, `sysctl` only, no `script:`): this
+# OrbStack cluster gives pods a working AF_INET6 stack + AAAA DNS but no
+# routable IPv6 egress, so `git`'s resolver can pick an unreachable AAAA for
+# github.com and hard-fail (`/investigate` 2026-09-08, TODOS.md
+# T7b1-followup). Disabling v6 in the pod netns — DNS/AAAA untouched — makes
+# every dialer use v4. Steps share the pod netns, so the setting persists to
+# `clone` / `checkout`. The `ci` namespace is PSA `privileged`
+# (ci/runtime/namespace.yaml); this one tiny step is the only privileged
+# container. A v4-only Cilium datapath (Cilium planning session) removes the
+# need for it.
 apiVersion: tekton.dev/v1
 kind: Task
 metadata:
@@ -56,6 +67,17 @@ spec:
       runAsUser: 0
       runAsGroup: 0
   steps:
+    - name: disable-ipv6
+      image: docker.io/moby/buildkit:rootless@sha256:80b15f0735e87bab7bf59ec4d695dfb4a7cfb25521cf56dc75d6f256285b63ef
+      securityContext:
+        privileged: true
+        runAsUser: 0
+      command: ["sysctl"]
+      args:
+        - "-w"
+        - "net.ipv6.conf.all.disable_ipv6=1"
+        - "net.ipv6.conf.default.disable_ipv6=1"
+        - "net.ipv6.conf.lo.disable_ipv6=1"
     - name: clone
       image: docker.io/moby/buildkit:rootless@sha256:80b15f0735e87bab7bf59ec4d695dfb4a7cfb25521cf56dc75d6f256285b63ef
       workingDir: $(workspaces.output.path)

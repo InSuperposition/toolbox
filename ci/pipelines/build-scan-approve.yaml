@@ -7,10 +7,20 @@
 # T7b3). Human approval (`attestation-sign.sh`) and consumption
 # (`frontend-deploy.sh`) stay OUTSIDE this pipeline.
 #
-# One workspace, `shared`, backed by a per-run `volumeClaimTemplate` in the
+# Workspace `shared` is backed by a per-run `volumeClaimTemplate` in the
 # PipelineRun (ci/README.md § Workspaces — Tekton `coschedule: workspaces`
 # forbids a TaskRun binding two distinct PVCs, so the clones and the build
 # share ONE claim and address their trees by sub-directory / subPath).
+# Workspace `buildkitd-config` is a ConfigMap (not a PVC — no coschedule
+# constraint); the PipelineRun binds it to `ci/runtime/buildkitd-mirror.yaml`
+# so the build talks only to the in-cluster zot (TODOS.md T7b1-followup —
+# the OrbStack IPv6-egress defect).
+#
+# `retries: 2` on the clone tasks: the same OrbStack cluster intermittently
+# fails DNS on an external host (`git`'s resolver, ~10% — an OrbStack DNS
+# proxy timeout, distinct from the IPv6 mode the `disable-ipv6` step and the
+# build mirror handle). A retry clears it; the build has no external egress
+# left to retry.
 #
 # The build digest is never a Pipeline result — see
 # ci/tasks/buildkit-build.yaml. The operator runs
@@ -52,8 +62,10 @@ spec:
       default: "true"
   workspaces:
     - name: shared
+    - name: buildkitd-config
   tasks:
     - name: clone-app
+      retries: 2
       taskRef:
         name: git-clone
       params:
@@ -64,6 +76,7 @@ spec:
         - { name: output, workspace: shared }
     - name: clone-defs
       runAfter: [clone-app]
+      retries: 2
       taskRef:
         name: git-clone
       params:
@@ -84,3 +97,4 @@ spec:
       workspaces:
         - { name: source, workspace: shared, subPath: app }
         - { name: build-defs, workspace: shared, subPath: defs }
+        - { name: buildkitd-config, workspace: buildkitd-config }

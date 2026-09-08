@@ -2,8 +2,10 @@
 # + Tekton). Server-side validation the static kubeconform gate cannot do:
 # the Tekton admission webhook accepts the three defs, none carries embedded
 # shell (CLAUDE.md § Constraints), the spike-proven build posture has not
-# drifted, and the Pipeline DAG is clone-app -> clone-defs -> build over one
-# shared workspace.
+# drifted, the only privileged container is the `disable-ipv6` sysctl step
+# (TODOS.md T7b1-followup), and the Pipeline DAG is
+# clone-app -> clone-defs -> build over the `shared` workspace with a
+# `buildkitd-config` ConfigMap workspace.
 #
 # The full clone -> build -> push -> `oras resolve` -> `docker pull` run
 # needs registry + git egress and a ~90s build; it is proven by an
@@ -44,7 +46,7 @@ spec:
               metadata:
                 name: git-clone
               spec:
-                (length(steps)): 2
+                (length(steps)): 3
                 (steps[?script != null]): []
         - assert:
             resource:
@@ -53,8 +55,7 @@ spec:
               metadata:
                 name: buildkit-build
               spec:
-                (length(steps)): 1
-                (steps[0].name): build
+                (length(steps)): 2
                 (steps[?script != null]): []
     - name: build-posture-has-not-drifted
       try:
@@ -66,6 +67,10 @@ spec:
                 name: buildkit-build
               spec:
                 steps:
+                  - name: disable-ipv6
+                    securityContext:
+                      privileged: true
+                      runAsUser: 0
                   - name: build
                     securityContext:
                       runAsUser: 1000
@@ -79,6 +84,25 @@ spec:
                     (securityContext.privileged || 'unset'): unset
                     (contains(securityContext.capabilities.add, 'SYS_ADMIN')): false
                     (contains(securityContext.capabilities.add, 'SYS_PTRACE')): false
+    - name: git-clone-only-the-sysctl-step-is-privileged
+      try:
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: git-clone
+              spec:
+                steps:
+                  - name: disable-ipv6
+                    securityContext:
+                      privileged: true
+                      runAsUser: 0
+                    command: [sysctl]
+                  - name: clone
+                    (securityContext.privileged || 'unset'): unset
+                  - name: checkout
+                    (securityContext.privileged || 'unset'): unset
     - name: pipeline-shape
       try:
         - assert:
@@ -90,12 +114,15 @@ spec:
               spec:
                 workspaces:
                   - name: shared
+                  - name: buildkitd-config
                 tasks:
                   - name: clone-app
+                    retries: 2
                     taskRef:
                       name: git-clone
                   - name: clone-defs
                     runAfter: [clone-app]
+                    retries: 2
                     taskRef:
                       name: git-clone
                   - name: build
@@ -109,3 +136,5 @@ spec:
                       - name: build-defs
                         workspace: shared
                         subPath: defs
+                      - name: buildkitd-config
+                        workspace: buildkitd-config

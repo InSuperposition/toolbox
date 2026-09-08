@@ -34,8 +34,8 @@ The allowed dependency edges are explicit and machine-checked in
   below). The `ci/` concern (reusable Tekton defs, content-digest-pinned,
   [ADR 0014](../adr/0014-tekton-defs-are-oci-bundles-in-ci.md)) holds
   `tasks/{git-clone,buildkit-build}.yaml`, `pipelines/build-scan-approve.yaml`,
-  `runtime/`, and the `kubeconform` / `chainsaw` gate scripts (`TODOS.md`
-  T7). The distribution mechanism (`tkn bundle` vs Flux `OCIRepository`) is
+  `runtime/` (namespace + the interim `buildkitd-mirror` ConfigMap), and the
+  `kubeconform` / `chainsaw` / `registry-seed` scripts (`TODOS.md` T7). The distribution mechanism (`tkn bundle` vs Flux `OCIRepository`) is
   a T7c-pre-plan call. Tekton defs are **not** `modules/*` entries.
 - `mise run check` stayed green after every phase; it still gates every change.
 - `git mv` and a logic change never land in the same commit — refactor,
@@ -152,6 +152,7 @@ export-approval-pubkey    attestation:export-pubkey      inline: cosign public-k
 approve                   attestation:sign               → attestation/scripts/attestation-sign.sh
 verify-approval           attestation:verify             → attestation/scripts/attestation-verify.sh
 consume                   frontend:deploy                → deploy/frontend/scripts/frontend-deploy.sh
+(new, T7b1-followup)      frontend:seed                  → ci/scripts/registry-seed.sh deploy/frontend/Dockerfile
 (T7a; deleted T7b1)       ci:taskrun                     — replaced by `tkn pipeline start build-scan-approve`
 (new, T7a)                local:tekton:install           inline: kubectl --context orbstack apply --server-side -f <pinned release.yaml>
 (new, T7b0)               local:zot:install              inline: kubectl --context orbstack apply -f environments/local/zot/zot.yaml
@@ -237,14 +238,16 @@ toolbox/
 ├── ci/                                              reusable Tekton build defs, content-digest-pinned (ADR 0014; T7)
 │   ├── README.md                                     the job; ci/ (our defs) vs .github/workflows/ (runner + trigger)
 │   ├── tasks/
-│   │   ├── git-clone.yaml                             T7b1 — blobless shallow clone at a pinned SHA; no script:
-│   │   └── buildkit-build.yaml                        T7a posture — buildctl-daemonless rootless build → push $(IMAGE):$(APP_REVISION)
+│   │   ├── git-clone.yaml                             T7b1 — blobless shallow clone at a pinned SHA; no script: (step 0: disable-ipv6 sysctl)
+│   │   └── buildkit-build.yaml                        T7a posture — buildctl-daemonless rootless build → push $(IMAGE):$(APP_REVISION); mirror via buildkitd-config workspace
 │   ├── pipelines/
-│   │   └── build-scan-approve.yaml                    T7b1 — clone-app → clone-defs → build (one shared workspace); scan/gate T7b2/T7b3
+│   │   └── build-scan-approve.yaml                    T7b1 — clone-app → clone-defs → build (shared + buildkitd-config workspaces, retries on clones); scan/gate T7b2/T7b3
 │   ├── runtime/
-│   │   └── namespace.yaml                             the `ci` namespace (no RBAC)
+│   │   ├── namespace.yaml                             the `ci` namespace (no RBAC)
+│   │   └── buildkitd-mirror.yaml                      T7b1-followup — buildkitd.toml ConfigMap: mirror docker.io + gcr.io → in-cluster zot (interim; OrbStack IPv6-egress defect)
 │   ├── scripts/
 │   │   ├── kubeconform-scan.sh  chainsaw-test.sh      the static + [k8s] hk gates
+│   │   ├── registry-seed.sh                           T7b1-followup — host-side crane copy of a Dockerfile's base images into zot (mise run frontend:seed)
 │   │   ├── lib/ci.sh                                  repo-root, strict sha256 digest guard, kube-context guard
 │   │   └── tests/*.bats + helper.bash                 gate-script skip/fail cases (no [k8s] bats)
 │   └── tests/

@@ -4,8 +4,9 @@
 # rules/boundary-ci.yml). The per-consumer values are bound by the
 # PipelineRun in deploy/<consumer>/ (a Timoni module — T7b3).
 #
-# No embedded shell (CLAUDE.md § Constraints): the single step is a pinned
-# `buildctl-daemonless.sh` `command` + `args`.
+# No embedded shell (CLAUDE.md § Constraints): every step is a pinned
+# `command` + `args`, never a `script:` block. Two steps — a privileged
+# `disable-ipv6` `sysctl` (see below) and the rootless `buildctl-daemonless.sh`.
 #
 #   * The image is pushed as `$(params.IMAGE):$(params.APP_REVISION)` — the
 #     app's git SHA as a deterministic, meaningful tag. There is NO Tekton
@@ -26,10 +27,12 @@
 #     two-repo split, ADR 0014). Both workspaces are subPaths of one
 #     `volumeClaimTemplate` PVC in the Pipeline (ci/README.md § Workspaces).
 #
-# Pod posture is the spike-proven minimum for rootless BuildKit on
-# `orb start k8s` with NO privileged pod (TODOS.md T7a, ci/README.md
-# § Residual privilege surface). Do NOT tighten a field without re-running
-# a real build — each was found by iteration:
+# The `build` step's posture is the spike-proven minimum for rootless
+# BuildKit on `orb start k8s` — NOT privileged, no SYS_ADMIN (TODOS.md T7a,
+# ci/README.md § Residual privilege surface). The separate `disable-ipv6`
+# step 0 IS privileged; it runs `sysctl` and exits before the build starts.
+# Do NOT tighten a `build` field without re-running a real build — each was
+# found by iteration:
 #   seccomp Unconfined         rootlesskit needs unshare/clone (baseline PSA blocks them)
 #   allowPrivilegeEscalation   this image's newuidmap is file-cap based, not setuid;
 #     : true                   no_new_privs (which `false` forces) makes the caps a no-op
@@ -98,7 +101,34 @@ spec:
         A separate checkout holding the Dockerfile (toolbox owns
         deploy/<consumer>/Dockerfile; the app owns the context). The
         two-repo split from ADR 0014.
+    - name: buildkitd-config
+      mountPath: /cfg
+      description: >-
+        A ConfigMap with a `buildkitd.toml` key — passed to buildkitd via
+        `--config`. Used for the registry mirror that keeps the build off
+        external registries (ci/runtime/buildkitd-mirror.yaml; TODOS.md
+        T7b1-followup). Bound by the PipelineRun.
   steps:
+    # Step 0: this OrbStack cluster gives pods a working AF_INET6 stack +
+    # AAAA DNS but no routable v6 egress — buildkitd's registry resolver can
+    # pick an unreachable AAAA and hard-fail (`/investigate` 2026-09-08,
+    # TODOS.md T7b1-followup). Disabling v6 in the pod netns (DNS/AAAA
+    # untouched) forces v4. `sysctl` only, no `script:`. With the mirror
+    # config below the build only talks to the in-cluster zot anyway, but
+    # this keeps it deterministic if the mirror is ever unbound. `ci` ns is
+    # PSA `privileged`; this is the only privileged container. A v4-only
+    # Cilium datapath removes the need for it.
+    - name: disable-ipv6
+      image: docker.io/moby/buildkit:rootless@sha256:80b15f0735e87bab7bf59ec4d695dfb4a7cfb25521cf56dc75d6f256285b63ef
+      securityContext:
+        privileged: true
+        runAsUser: 0
+      command: ["sysctl"]
+      args:
+        - "-w"
+        - "net.ipv6.conf.all.disable_ipv6=1"
+        - "net.ipv6.conf.default.disable_ipv6=1"
+        - "net.ipv6.conf.lo.disable_ipv6=1"
     - name: build
       image: docker.io/moby/buildkit:rootless@sha256:80b15f0735e87bab7bf59ec4d695dfb4a7cfb25521cf56dc75d6f256285b63ef
       securityContext:
@@ -115,7 +145,7 @@ spec:
         - name: HOME
           value: /tekton/home
         - name: BUILDKITD_FLAGS
-          value: $(params.BUILDKITD_FLAGS)
+          value: "$(params.BUILDKITD_FLAGS) --config /cfg/buildkitd.toml"
       command: ["buildctl-daemonless.sh"]
       args:
         - build

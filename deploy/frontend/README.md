@@ -24,6 +24,12 @@ consumer.
 - **T5b** (verify + local deploy) — `scripts/frontend-deploy.sh`,
   `scripts/frontend-serve.sh`, `pitchfork.toml` `[daemons.frontend]`. See
   "Consume + deploy" below.
+- **T7b** (in-cluster build) — the reusable Tekton graph is `ci/`. Before a
+  local run, `mise run frontend:seed` mirrors this `Dockerfile`'s
+  digest-pinned base images into the in-cluster zot (the OrbStack
+  IPv6-egress defect — `ci/README.md` § Deterministic builds on OrbStack,
+  `TODOS.md` T7b1-followup). The per-consumer `PipelineRun` lands here in
+  T7b3 (a Timoni module).
 
 ## Consume + deploy (T5b)
 
