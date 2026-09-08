@@ -329,6 +329,12 @@ carve-out). Left to do:
   `docker buildx version`) join with `&&`; `:103` diagnostics `run: |`
   block → a script or leave as pure diagnostics (no branching). Decide in
   the session.
+- **Wire the hk `actionlint` builtin** — a `fast`-layer step,
+  `glob = List(".github/workflows/**")`, static-lints the two workflow
+  files (`if:` typos, bad `uses:` refs, shell mistakes, deprecated
+  syntax). Pin `aqua:rhysd/actionlint` in `mise.toml`. Would NOT have
+  caught the `bash -e` no-pipefail assumption (semantic, not syntax), but
+  closes the "no automated check for workflow YAML" gap.
 
 **T7b — the full pipeline as OCI bundles + GHA retirement.**
 `ci/tasks/{trivy-scan,oras-attach}.yaml` (wrap the proven Phase-1 shell) +
@@ -356,6 +362,16 @@ Effort: ~2-3d.
 `local:tekton:install`. This lands **before** T7d so the zot install has a
 reconciler. Effort: ~1-2d (includes the one-time Flux bootstrap:
 operator install + first `FluxInstance` + deploy-key).
+_Observability (from the CI-log-visibility review):_ once Flux reconciles
+`ci/**` TaskRuns, persist **failed-step logs beyond `tkn taskrun logs`** —
+via **Tekton Results** (needs its log-collection + a durable-storage
+backend configured, not just the API installed). **Not** Tekton Chains —
+Chains stores signed provenance/attestations, not stdout/stderr.
+Acceptance test: a failed step's logs are retrievable *after* the TaskRun +
+Pod are deleted. `ci-taskrun.sh`'s failed-run object retention (the
+`cleanup()` keep-on-failure path) is interim inspection, not durable
+storage. Mirrors the GHA-side fix (`check.yml` uploads
+`$HK_STATE_DIR/{output.log,hk.log}` as an artifact).
 
 **T7d — GHCR → zot.** zot on orb via the now-present Flux (vendored upstream
 in `environments/local/tekton/`… `environments/local/zot/`). Repoint the
