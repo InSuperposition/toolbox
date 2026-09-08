@@ -271,20 +271,64 @@ add [SETUID,SETGID]`, `BUILDKITD_FLAGS=--oci-worker-no-process-sandbox`
 in `~/.claude/plans/t7a-buildkit-in-cluster-proof.md` § "Step 1 — SPIKE
 RESULT". Tekton v1.6.0 kept for Step 2.
 **Step 2 ✓ DONE** — `ci/` concern extracted: `ci/tasks/buildkit-build.yaml`
-(spike-proven posture, parameterised, consumer-agnostic) +
-`ci/runtime/namespace.yaml` (no RBAC, `automountServiceAccountToken: false`,
-PSA `privileged`) + `ci/scripts/{ci-taskrun,ci-kubeconform,ci-chainsaw}.sh`
-+ `lib/ci.sh` + 20 bats cases + a `[k8s]`-gated chainsaw scenario +
-`rules/boundary-ci.yml` + `hk.pkl` kubeconform (fast) / chainsaw (heavy)
-steps + `mise` tasks `ci:taskrun` & `local:tekton:install` (pinned Tekton
-v1.6.0) + Tekton v1 CRD schema vendored at `ci/tests/crd-schemas/`.
+(spike-proven posture, parameterised, consumer-agnostic, **one step —
+pinned `command`/`args`, no `script:` block**; pushes under a per-run tag,
+`ci-taskrun.sh` does `oras resolve` for the digest + the
+`ci_is_strict_digest` guard) + `ci/runtime/namespace.yaml` (no RBAC,
+`automountServiceAccountToken: false`, PSA `privileged`) +
+`ci/scripts/{ci-taskrun,ci-kubeconform,ci-chainsaw}.sh` + `lib/ci.sh` +
+20 bats cases + a `[k8s]`-gated chainsaw scenario (webhook accepts the Task,
+no `script:` field, posture-drift guard) + `rules/boundary-ci.yml` +
+`hk.pkl` kubeconform (fast) / chainsaw (heavy) steps + `mise` tasks
+`ci:taskrun` & `local:tekton:install` (pinned Tekton v1.6.0) + Tekton v1
+CRD schema vendored at `ci/tests/crd-schemas/`.
 [ADR 0014](docs/adr/0014-tekton-defs-are-oci-bundles-in-ci.md).
 _Carry-over:_ machine-global `orb-k8s` pitchfork daemon — the stanza is
 **documented** in `environments/local/README.md` § Tekton; auto-registration
 is deferred to a future `local:bootstrap` aggregate (P2). The full
 build→push chainsaw assertions need a registry cred — folded into T7b's
-credential-light `git-clone` Task. Answered: rootless viability, in-cluster
+credential-light `git-clone` Task. A proper Tekton `IMAGE_DIGEST` result is
+deferred to T7b too (see below). Answered: rootless viability, in-cluster
 GHCR push auth, pod privilege posture.
+
+**T7a-follow-up — `ci/` concern config/script hygiene + rename.** _P2, own
+task._ Deferred from the PR #9 review (the review fixed only the
+`buildkit-build.yaml` `script:` block + reverted a self-granted CLAUDE.md
+carve-out). Left to do:
+- **Extract the inline k8s manifests from `ci/scripts/ci-taskrun.sh`** —
+  the two `<<-YAML` heredocs (PV/PVC, TaskRun) + `ws_binding()`'s
+  `printf`-built YAML → committed template files under `ci/runtime/`
+  rendered with `envsubst`; a bats case renders them and pipes through
+  `ci/scripts/ci-kubeconform.sh`. Precedent:
+  `environments/local/openbao/tests/config_render.tftest.hcl`.
+- **bats coverage for the remaining `ci-taskrun.sh` logic** — `common_prefix`
+  (shared grandparent; component boundary `/a/bc` vs `/a/bcd`; identical
+  dirs; the `STAGE_ROOT == /` rejection), `cleanup` (stub `ci_kubectl`,
+  assert every delete target ∈ `CREATED`, never `namespace/ci`; `--keep`
+  deletes nothing; `auto` + failure keeps all), the `DCJ_FILE` `0600` +
+  removal on both paths.
+- **Recurrence lint** — `rules/boundary-no-embedded-shell.yml` (`ast-grep`,
+  `language: yaml`) flagging a `script:` block-scalar under any
+  k8s-manifest dir, wired into the existing `ast-grep` hk step; or a
+  bats-tested `tests/check-no-embedded-shell.sh` if ast-grep's YAML support
+  can't express it.
+- **Rename `ci/scripts/*.sh` to `<tool>-<verb>`** (strict Scripts Policy —
+  `<domain>` = the tool, not the folder): `ci-taskrun.sh` →
+  `tekton-taskrun.sh` (or `buildkit-run.sh`), `ci-kubeconform.sh` →
+  `kubeconform-scan.sh`, `ci-chainsaw.sh` → `chainsaw-test.sh`. `git mv` in
+  its own commit, then update `hk.pkl` / `mise.toml` / `tests/manifest.txt`
+  / `ci/README.md` / `ci/scripts/tests/*` refs. `lib/ci.sh` stays (matches
+  `lib/openbao.sh` / `lib/frontend.sh`).
+- **Fix the CLAUDE.md Scripts Policy text inconsistency (separate)** — the
+  policy says `<domain>` = the tool, not the folder, but `frontend-deploy.sh`,
+  `frontend-serve.sh`, `attestation-sign.sh`, `attestation-verify.sh` all
+  use the **concern** name. Reconcile: relax the text to allow the concern
+  name (matching practice), or rename those four too. Don't leave the doc
+  contradicting shipped scripts.
+- **`.github/workflows/check.yml`** — `:79` (`docker info` /
+  `docker buildx version`) join with `&&`; `:103` diagnostics `run: |`
+  block → a script or leave as pure diagnostics (no branching). Decide in
+  the session.
 
 **T7b — the full pipeline as OCI bundles + GHA retirement.**
 `ci/tasks/{trivy-scan,oras-attach}.yaml` (wrap the proven Phase-1 shell) +
@@ -297,7 +341,14 @@ kubeconform/chainsaw harness. **Deletes
 approval + consumption are demonstrated in-cluster end to end.
 _T7b gaps to resolve in that session:_ in-cluster trivy DB strategy (PVC /
 `--db-repository` OCI mirror / `--download-db-only` init); Task-step image
-pins vs `mise.toml` host pins (drift); the two-repo `git-clone`.
+pins vs `mise.toml` host pins (drift); the two-repo `git-clone`; **re-add a
+proper Tekton `IMAGE_DIGEST` result** (T7a's Task pushes under a throwaway
+tag and `ci-taskrun.sh` resolves it — a Pipeline needs the result to pin
+the next task; a committed `buildkit-extract-digest.sh` is a legal new file
+here); **do not carry `.github/workflows/build-cv-frontend.yml`'s embedded
+`run:` shell** (`:48` `tr` lowercase, `:98` digest-extract + `case` guard —
+same logic the T7a Task refactor removed) into the Tekton pipeline —
+extract to a tested script or delete with the workflow.
 Effort: ~2-3d.
 
 **T7c — local Flux.** flux2 + flux-operator (already pinned) reconciles
