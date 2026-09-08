@@ -1,0 +1,111 @@
+# [k8s]-gated (ci/scripts/chainsaw-test.sh skips without an orbstack cluster
+# + Tekton). Server-side validation the static kubeconform gate cannot do:
+# the Tekton admission webhook accepts the three defs, none carries embedded
+# shell (CLAUDE.md § Constraints), the spike-proven build posture has not
+# drifted, and the Pipeline DAG is clone-app -> clone-defs -> build over one
+# shared workspace.
+#
+# The full clone -> build -> push -> `oras resolve` -> `docker pull` run
+# needs registry + git egress and a ~90s build; it is proven by an
+# operator `tkn pipeline start` (recorded in TODOS.md T7b1) the same way
+# T7a's spike proved buildkit. T7b2/T7b3 add scan/attach/gate to this file.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: build-pipeline
+spec:
+  steps:
+    - name: webhook-accepts-the-defs
+      try:
+        - apply:
+            file: ../../tasks/git-clone.yaml
+        - apply:
+            file: ../../tasks/buildkit-build.yaml
+        - apply:
+            file: ../../pipelines/build-scan-approve.yaml
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: git-clone
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Pipeline
+              metadata:
+                name: build-scan-approve
+    - name: no-embedded-shell
+      try:
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: git-clone
+              spec:
+                (length(steps)): 2
+                (steps[?script != null]): []
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: buildkit-build
+              spec:
+                (length(steps)): 1
+                (steps[0].name): build
+                (steps[?script != null]): []
+    - name: build-posture-has-not-drifted
+      try:
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: buildkit-build
+              spec:
+                steps:
+                  - name: build
+                    securityContext:
+                      runAsUser: 1000
+                      runAsNonRoot: true
+                      allowPrivilegeEscalation: true
+                      seccompProfile:
+                        type: Unconfined
+                      capabilities:
+                        drop: [ALL]
+                        add: [SETUID, SETGID]
+                    (securityContext.privileged || 'unset'): unset
+                    (contains(securityContext.capabilities.add, 'SYS_ADMIN')): false
+                    (contains(securityContext.capabilities.add, 'SYS_PTRACE')): false
+    - name: pipeline-shape
+      try:
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Pipeline
+              metadata:
+                name: build-scan-approve
+              spec:
+                workspaces:
+                  - name: shared
+                tasks:
+                  - name: clone-app
+                    taskRef:
+                      name: git-clone
+                  - name: clone-defs
+                    runAfter: [clone-app]
+                    taskRef:
+                      name: git-clone
+                  - name: build
+                    runAfter: [clone-defs]
+                    taskRef:
+                      name: buildkit-build
+                    workspaces:
+                      - name: source
+                        workspace: shared
+                        subPath: app
+                      - name: build-defs
+                        workspace: shared
+                        subPath: defs

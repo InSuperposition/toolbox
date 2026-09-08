@@ -1,0 +1,86 @@
+# T7b1 — the in-cluster build pipeline: clone-app -> clone-defs -> build.
+# T7b2 adds `scan-attach` (runAfter build); T7b3 adds `gate` (last).
+#
+# Consumer-agnostic (ADR 0014, rules/boundary-ci.yml): every concrete value
+# is a param. The per-consumer PipelineRun that binds cv_frontend's repo
+# URLs + SHAs + image ref lives in deploy/<consumer>/ (a Timoni module,
+# T7b3). Human approval (`attestation-sign.sh`) and consumption
+# (`frontend-deploy.sh`) stay OUTSIDE this pipeline.
+#
+# One workspace, `shared`, backed by a per-run `volumeClaimTemplate` in the
+# PipelineRun (ci/README.md § Workspaces — Tekton `coschedule: workspaces`
+# forbids a TaskRun binding two distinct PVCs, so the clones and the build
+# share ONE claim and address their trees by sub-directory / subPath).
+#
+# The build digest is never a Pipeline result — see
+# ci/tasks/buildkit-build.yaml. The operator runs
+# `oras resolve $(IMAGE):$(APP_REVISION)` after a green run.
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: build-scan-approve
+  labels:
+    app.kubernetes.io/part-of: toolbox-ci
+spec:
+  description: >-
+    Clone an app + the toolbox Dockerfile at pinned revisions, then build
+    and push a SHA-tagged image with daemonless rootless BuildKit.
+  params:
+    - name: IMAGE
+      type: string
+      description: Target repo ref, no tag (e.g. zot.zot.svc.cluster.local:5000/cv-frontend).
+    - name: APP_REPO_URL
+      type: string
+      description: Public HTTPS git URL of the app (the build context).
+    - name: APP_REVISION
+      type: string
+      description: App commit SHA — also the push tag.
+    - name: DEFS_REPO_URL
+      type: string
+      description: Public HTTPS git URL of the repo holding the Dockerfile (toolbox).
+    - name: DEFS_REVISION
+      type: string
+      description: Dockerfile-repo commit SHA.
+    - name: DOCKERFILE_DIR
+      type: string
+      default: "."
+      description: >-
+        Dockerfile directory relative to the defs checkout root
+        (e.g. deploy/frontend — the build Task subPaths build-defs to defs/).
+    - name: REGISTRY_INSECURE
+      type: string
+      default: "true"
+  workspaces:
+    - name: shared
+  tasks:
+    - name: clone-app
+      taskRef:
+        name: git-clone
+      params:
+        - { name: URL, value: $(params.APP_REPO_URL) }
+        - { name: REVISION, value: $(params.APP_REVISION) }
+        - { name: SUBDIR, value: app }
+      workspaces:
+        - { name: output, workspace: shared }
+    - name: clone-defs
+      runAfter: [clone-app]
+      taskRef:
+        name: git-clone
+      params:
+        - { name: URL, value: $(params.DEFS_REPO_URL) }
+        - { name: REVISION, value: $(params.DEFS_REVISION) }
+        - { name: SUBDIR, value: defs }
+      workspaces:
+        - { name: output, workspace: shared }
+    - name: build
+      runAfter: [clone-defs]
+      taskRef:
+        name: buildkit-build
+      params:
+        - { name: IMAGE, value: $(params.IMAGE) }
+        - { name: APP_REVISION, value: $(params.APP_REVISION) }
+        - { name: DOCKERFILE_DIR, value: $(params.DOCKERFILE_DIR) }
+        - { name: REGISTRY_INSECURE, value: $(params.REGISTRY_INSECURE) }
+      workspaces:
+        - { name: source, workspace: shared, subPath: app }
+        - { name: build-defs, workspace: shared, subPath: defs }

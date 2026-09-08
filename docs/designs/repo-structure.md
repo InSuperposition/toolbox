@@ -31,11 +31,12 @@ The allowed dependency edges are explicit and machine-checked in
 ## Constraints
 
 - The rule is normative and the tree matches it (see Migration status
-  below). The `ci/` concern (reusable Tekton defs → digest-pinned OCI
-  bundles, [ADR 0014](../adr/0014-tekton-defs-are-oci-bundles-in-ci.md))
-  landed its T7a skeleton — `tasks/buildkit-build.yaml`, `runtime/`, and
-  the taskrun scripts (`TODOS.md` T7). `pipelines/` and the bundle-push
-  script arrive in T7b. Tekton defs are **not** `modules/*` entries.
+  below). The `ci/` concern (reusable Tekton defs, content-digest-pinned,
+  [ADR 0014](../adr/0014-tekton-defs-are-oci-bundles-in-ci.md)) holds
+  `tasks/{git-clone,buildkit-build}.yaml`, `pipelines/build-scan-approve.yaml`,
+  `runtime/`, and the `kubeconform` / `chainsaw` gate scripts (`TODOS.md`
+  T7). The distribution mechanism (`tkn bundle` vs Flux `OCIRepository`) is
+  a T7c-pre-plan call. Tekton defs are **not** `modules/*` entries.
 - `mise run check` stayed green after every phase; it still gates every change.
 - `git mv` and a logic change never land in the same commit — refactor,
   then change.
@@ -151,7 +152,7 @@ export-approval-pubkey    attestation:export-pubkey      inline: cosign public-k
 approve                   attestation:sign               → attestation/scripts/attestation-sign.sh
 verify-approval           attestation:verify             → attestation/scripts/attestation-verify.sh
 consume                   frontend:deploy                → deploy/frontend/scripts/frontend-deploy.sh
-(new, T7a)                ci:taskrun                     → ci/scripts/tekton-taskrun.sh  (deleted in T7b1)
+(T7a; deleted T7b1)       ci:taskrun                     — replaced by `tkn pipeline start build-scan-approve`
 (new, T7a)                local:tekton:install           inline: kubectl --context orbstack apply --server-side -f <pinned release.yaml>
 (new, T7b0)               local:zot:install              inline: kubectl --context orbstack apply -f environments/local/zot/zot.yaml
 (new, T7b0)               local:zot:wait                 inline: kubectl --context orbstack -n zot wait --for=condition=Available deploy/zot
@@ -233,20 +234,22 @@ toolbox/
 │           └── zot.yaml                              one multi-doc manifest, pinned by image digest, credential-free, GC off
 │           (T7c: → environments/local/tekton/ + zot/ as Flux OCIRepository/Kustomization)
 │
-├── ci/                                              reusable Tekton build defs → digest-pinned OCI bundles (ADR 0014; T7)
+├── ci/                                              reusable Tekton build defs, content-digest-pinned (ADR 0014; T7)
 │   ├── README.md                                     the job; ci/ (our defs) vs .github/workflows/ (runner + trigger)
 │   ├── tasks/
-│   │   └── buildkit-build.yaml                        T7a — buildctl-daemonless rootless build → push by digest; params only
+│   │   ├── git-clone.yaml                             T7b1 — blobless shallow clone at a pinned SHA; no script:
+│   │   └── buildkit-build.yaml                        T7a posture — buildctl-daemonless rootless build → push $(IMAGE):$(APP_REVISION)
+│   ├── pipelines/
+│   │   └── build-scan-approve.yaml                    T7b1 — clone-app → clone-defs → build (one shared workspace); scan/gate T7b2/T7b3
 │   ├── runtime/
-│   │   └── namespace.yaml                             the `ci` namespace (no RBAC — the build SA needs none)
-│   └── scripts/
-│       ├── tekton-taskrun.sh                              mise run ci:taskrun — stage inputs, apply Task + TaskRun, stream, verify
-│       ├── lib/ci.sh                                  repo-root, strict sha256 digest guard, kube-context guard
-│       └── tests/
-│           ├── tekton-taskrun.bats
-│           └── helper.bash                            k8s_available() — skip (not exit 1) without orb/kubeconfig
-│   (ci/tests/buildkit-build.chainsaw.yaml — [k8s]-gated end-to-end scenario)
-│   (ci/pipelines/ + scripts/pipeline-bundle-push.sh — T7b)
+│   │   └── namespace.yaml                             the `ci` namespace (no RBAC)
+│   ├── scripts/
+│   │   ├── kubeconform-scan.sh  chainsaw-test.sh      the static + [k8s] hk gates
+│   │   ├── lib/ci.sh                                  repo-root, strict sha256 digest guard, kube-context guard
+│   │   └── tests/*.bats + helper.bash                 gate-script skip/fail cases (no [k8s] bats)
+│   └── tests/
+│       ├── build-pipeline/chainsaw-test.yaml          [k8s]-gated — webhook accepts the defs, no script:, posture + DAG
+│       └── crd-schemas/{task,pipeline}_v1.json        vendored Tekton v1 CRD schemas for kubeconform
 │
 ├── modules/
 │   └── README.md                                     "reusable, versioned, URL-consumed OT modules only"

@@ -174,11 +174,11 @@ ci/                                  # reusable Tekton defs (distribution mechan
   tasks/git-clone.yaml                 #   T7b1 — anonymous clone of cv_frontend + toolbox at pinned SHAs into one workspace
   tasks/scan-attach.yaml               #   T7b2 — trivy json + trivy cyclonedx (one DB pull) → oras attach ×2
   tasks/gate.yaml                      #   T7b3 — trivy convert --exit-code 1 --severity CRITICAL on the same scan.json (LAST)
-  pipelines/build-scan-approve.yaml    #   T7b3 — clone → build → scan-attach → gate; human approval stays attestation-sign.sh
+  pipelines/build-scan-approve.yaml    #   T7b1 — clone-app → clone-defs → build (one shared workspace); scan-attach T7b2, gate T7b3
   runtime/namespace.yaml               #   T7a ✓ — the `ci` namespace (no RBAC — the build SA needs none)
   scripts/kubeconform-scan.sh + chainsaw-test.sh + lib/ci.sh + tests/   # T7a ✓ (tekton-taskrun.sh deleted in T7b1)
-  tests/crd-schemas/task_v1.json       #   T7a ✓ — Tekton v1 CRD schema (vendored from the pinned release) for kubeconform
-  tests/buildkit-build/chainsaw-test.yaml  #   T7a ✓ — [k8s]-gated: Tekton webhook accepts the Task + posture drift guard
+  tests/crd-schemas/{task,pipeline}_v1.json  #   Tekton v1 CRD schemas (vendored from the pinned release) for kubeconform
+  tests/build-pipeline/chainsaw-test.yaml    #   [k8s]-gated: webhook accepts git-clone + buildkit-build + the Pipeline; no script:; posture + DAG
 
 environments/local/                  # the ONE deployment target — owns its OpenBao unit + orchestration
   main.tf                               #   applies module "secret_openbao_local" { source = "./openbao" }

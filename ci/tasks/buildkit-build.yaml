@@ -1,26 +1,35 @@
-# T7a — daemonless, rootless BuildKit build → push.
+# T7a spike-proven build; T7b1 rewired for the Pipeline + local zot.
 #
 # Consumer-agnostic: params only, never names cv_frontend (ADR 0014,
-# rules/boundary-ci.yml). The per-consumer PipelineRun that binds real
-# values + the pinned bundle digest lives in deploy/<consumer>/ (T7b).
+# rules/boundary-ci.yml). The per-consumer values are bound by the
+# PipelineRun in deploy/<consumer>/ (a Timoni module — T7b3).
 #
 # No embedded shell (CLAUDE.md § Constraints): the single step is a pinned
-# `command` + `args` — `buildctl` reads DOCKER_CONFIG straight from the
-# mounted `dockerconfig` workspace (no cp), and the image is pushed under a
-# per-run tag ($(params.TAG), set by tekton-taskrun.sh). tekton-taskrun.sh then
-# turns that tag into the manifest digest with `oras resolve`, validates
-# it with ci_is_strict_digest (bats-tested), and pins on the digest
-# thereafter — the tag is a throwaway lookup handle.
-#   (Why not a Tekton IMAGE_DIGEST result: step-stdout→result needs
-#    enable-api-fields=alpha, the controller is beta; buildctl has no
-#    bare-digest output flag; and coschedule=workspaces forbids a second
-#    PVC-backed "meta" workspace. T7b re-adds a proper result via a
-#    committed extract script when it builds the Pipeline — TODOS.md T7b.)
+# `buildctl-daemonless.sh` `command` + `args`.
+#
+#   * The image is pushed as `$(params.IMAGE):$(params.APP_REVISION)` — the
+#     app's git SHA as a deterministic, meaningful tag. There is NO Tekton
+#     `IMAGE_DIGEST` result: `scan`/`attach`/`gate` (T7b2/T7b3) address the
+#     image by that same tag, ordering is `runAfter`, and `oras resolve`
+#     produces the immutable digest ONCE at the operator boundary — the
+#     only value-consumer, `attestation-sign.sh`, runs outside the
+#     pipeline. ADR 0001 holds: the tag is a convenience alias, the signed
+#     chain still pins the digest. (`~/.claude/plans/t7b-pipeline-recut.md`,
+#     `TODOS.md` T7b.)
+#   * `registry.insecure=$(params.REGISTRY_INSECURE)` — the T7b0 zot is
+#     loopback HTTP with no auth (default `true`). A real HTTPS registry
+#     sets it `false`; no `dockerconfig` workspace either way (zot is
+#     credential-free; `TODOS.md` § "zot registry auth" is the P2 follow-up).
+#   * The build CONTEXT is the `source` workspace (the app checkout, staged
+#     by the `git-clone` Task). The DOCKERFILE is `$(params.DOCKERFILE_DIR)`
+#     within the `build-defs` workspace (a separate toolbox checkout — the
+#     two-repo split, ADR 0014). Both workspaces are subPaths of one
+#     `volumeClaimTemplate` PVC in the Pipeline (ci/README.md § Workspaces).
 #
 # Pod posture is the spike-proven minimum for rootless BuildKit on
 # `orb start k8s` with NO privileged pod (TODOS.md T7a, ci/README.md
-# § Residual privilege surface). Do not tighten a field without re-running
-# `mise run ci:taskrun` — each one was found by iteration:
+# § Residual privilege surface). Do NOT tighten a field without re-running
+# a real build — each was found by iteration:
 #   seccomp Unconfined         rootlesskit needs unshare/clone (baseline PSA blocks them)
 #   allowPrivilegeEscalation   this image's newuidmap is file-cap based, not setuid;
 #     : true                   no_new_privs (which `false` forces) makes the caps a no-op
@@ -36,20 +45,19 @@ metadata:
 spec:
   description: >-
     Build an OCI image from a Dockerfile with daemonless rootless BuildKit
-    and push it to a registry under a caller-supplied tag. The caller
-    (tekton-taskrun.sh) resolves the pushed manifest digest and pins on it.
+    and push it to a registry, tagged with the app's git SHA. The caller
+    resolves the pushed manifest digest with `oras resolve` and pins on it.
   params:
     - name: IMAGE
       type: string
       description: >-
         Target repository reference with no tag, e.g.
-        registry.example/org/app.
-    - name: TAG
+        zot.zot.svc.cluster.local:5000/cv-frontend.
+    - name: APP_REVISION
       type: string
       description: >-
-        Tag to push under, e.g. tekton-taskrun-<run-id>. A throwaway lookup
-        handle — the caller resolves the digest from it and pins on the
-        digest; it may delete the tag afterwards.
+        The app's git commit SHA. Used as the push tag — deterministic and
+        meaningful, not a throwaway.
     - name: PLATFORM
       type: string
       default: linux/arm64
@@ -57,13 +65,25 @@ spec:
     - name: DOCKERFILE
       type: string
       default: Dockerfile
-      description: Dockerfile filename within the build-defs workspace root.
+      description: Dockerfile filename within DOCKERFILE_DIR.
+    - name: DOCKERFILE_DIR
+      type: string
+      default: "."
+      description: >-
+        Directory holding the Dockerfile, relative to the build-defs
+        workspace root (e.g. deploy/frontend). Consumer-agnostic — the
+        PipelineRun supplies the real path.
     - name: CONTEXT_SUBPATH
       type: string
       default: "."
       description: >-
         Build-context directory relative to the source workspace root.
-        "." means the workspace root is the context.
+    - name: REGISTRY_INSECURE
+      type: string
+      default: "true"
+      description: >-
+        Passed to buildctl as registry.insecure — true for the loopback
+        HTTP zot (T7b0), false for a real HTTPS registry.
     - name: BUILDKITD_FLAGS
       type: string
       default: "--oci-worker-no-process-sandbox"
@@ -72,17 +92,12 @@ spec:
         an empty value makes the build fail to solve (TODOS.md T7a).
   workspaces:
     - name: source
-      description: The build context (an app checkout).
+      description: The build context — an app checkout (the git-clone Task's app/ subdir).
     - name: build-defs
       description: >-
-        The directory holding the Dockerfile — a separate checkout
-        (toolbox owns deploy/<consumer>/Dockerfile; the app owns the
-        context). This is the two-repo split from ADR 0014 / the T7a plan.
-    - name: dockerconfig
-      description: >-
-        A Secret with a single `config.json` key holding registry push
-        credentials for IMAGE. Projected read-only and pointed at by
-        DOCKER_CONFIG — buildctl reads it directly, no copy.
+        A separate checkout holding the Dockerfile (toolbox owns
+        deploy/<consumer>/Dockerfile; the app owns the context). The
+        two-repo split from ADR 0014.
   steps:
     - name: build
       image: docker.io/moby/buildkit:rootless@sha256:80b15f0735e87bab7bf59ec4d695dfb4a7cfb25521cf56dc75d6f256285b63ef
@@ -99,8 +114,6 @@ spec:
       env:
         - name: HOME
           value: /tekton/home
-        - name: DOCKER_CONFIG
-          value: $(workspaces.dockerconfig.path)
         - name: BUILDKITD_FLAGS
           value: $(params.BUILDKITD_FLAGS)
       command: ["buildctl-daemonless.sh"]
@@ -108,7 +121,7 @@ spec:
         - build
         - --frontend=dockerfile.v0
         - --local=context=$(workspaces.source.path)/$(params.CONTEXT_SUBPATH)
-        - --local=dockerfile=$(workspaces.build-defs.path)
+        - --local=dockerfile=$(workspaces.build-defs.path)/$(params.DOCKERFILE_DIR)
         - --opt=filename=$(params.DOCKERFILE)
         - --opt=platform=$(params.PLATFORM)
-        - --output=type=image,name=$(params.IMAGE):$(params.TAG),push=true
+        - --output=type=image,name=$(params.IMAGE):$(params.APP_REVISION),push=true,registry.insecure=$(params.REGISTRY_INSECURE)

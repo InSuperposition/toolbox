@@ -7,57 +7,76 @@ digest-as-source-of-truth pipeline
 (`docs/designs/digest-as-source-of-truth.md`,
 [ADR 0014](../docs/adr/0014-tekton-defs-are-oci-bundles-in-ci.md)). Phase 2
 of the CI pipeline (`TODOS.md` T7) moves the build off GitHub Actions and
-into `orb start k8s`: a daemonless, rootless BuildKit Task builds an app
-from its Dockerfile and pushes it, with no privileged pod;
-`tekton-taskrun.sh` then resolves the pushed **manifest digest** and pins on
-it (the digest is the trust boundary — ADR 0001).
+into `orb start k8s`: a `git-clone` Task fetches the app + the toolbox
+Dockerfile at pinned SHAs, a daemonless rootless BuildKit Task builds and
+pushes a **SHA-tagged** image to the local zot, with no privileged pod.
 
 This concern **owns** the Task/Pipeline YAML, the `ci` namespace, and the
-scripts that stage inputs and drive a run. It **may depend on** `tests/lib`
-only. Like `attestation/`, it **never names a consumer** — the forbidden
-edge `ci ─╳▶ deploy/*` is machine-checked
-(`rules/boundary-ci.yml`, `docs/designs/repo-structure.md` § Enforcement).
-The per-consumer instantiation — a `PipelineRun` binding one consumer's
-params and the pinned bundle digests — lives in `deploy/<consumer>/` (T7b).
+scripts that drive a chainsaw run. It **may depend on** `tests/lib` only.
+Like `attestation/`, it **never names a consumer** — the forbidden edge
+`ci ─╳▶ deploy/*` is machine-checked (`rules/boundary-ci.yml`,
+`docs/designs/repo-structure.md` § Enforcement). The per-consumer
+instantiation — a `PipelineRun` binding one consumer's repo URLs, SHAs and
+image ref — lives in `deploy/<consumer>/` (a Timoni module, T7b3).
 
-The Tekton **controller** install and `zot` are vendored upstreams, not our
-reusable code — they are `environments/local/`'s concern (an interim
-`local:tekton:install` mise task now, a Flux `OCIRepository` /
-`Kustomization` in T7c), never `ci/`.
+The Tekton **controller** install and **zot** are vendored upstreams, not
+our reusable code — they are `environments/local/`'s concern (interim
+`local:tekton:install` / `local:zot:install` mise tasks now, Flux
+`OCIRepository` / `Kustomization` in T7c/T7d), never `ci/`.
 
 ## `ci/` vs `.github/workflows/`
 
 | | holds | pinned by |
 |---|---|---|
-| `ci/` | **what** the build does — the Tekton Task/Pipeline graph, parameterised, consumer-agnostic | OCI bundle digest (T7b: `tkn bundle push` → `@sha256:` in the resolver ref) |
+| `ci/` | **what** the build does — the Tekton Task/Pipeline graph, parameterised, consumer-agnostic | content digest (the distribution mechanism — `tkn bundle` vs Flux `OCIRepository` — is decided in the T7c pre-plan; `TODOS.md` T7) |
 | `.github/workflows/` | **where/when** it runs — the GitHub-hosted runner, the trigger | the workflow file on the branch |
 
-Phase 1's `.github/workflows/build-cv-frontend.yml` is retired at the end of
-T7b, once build + evidence + approval + consumption are demonstrated
-in-cluster end to end.
+Phase 1's `.github/workflows/build-cv-frontend.yml` is retired in the
+post-T7c distribution phase, once the pinned in-cluster path is stable
+(`TODOS.md` T7).
 
 ## Files
 
 | File | Role |
 |---|---|
-| `tasks/buildkit-build.yaml` | T7a — `buildctl-daemonless.sh` rootless build → push under a caller-supplied `TAG`. One step, pinned `command` + `args`, **no `script:`** (CLAUDE.md § Constraints). Params only (`IMAGE`, `TAG`, `PLATFORM`, `DOCKERFILE`, `CONTEXT_SUBPATH`, `BUILDKITD_FLAGS`); never names `cv_frontend`. No Tekton result — the caller resolves the digest (see below). No build cache (T7b adds it). |
-| `runtime/namespace.yaml` | the `ci` Namespace — nothing else. No `Role`/`RoleBinding`: the build step reads a **mounted** Secret, not the k8s API, so its ServiceAccount needs no verbs (the TaskRun also sets `automountServiceAccountToken: false`). |
-| `scripts/tekton-taskrun.sh` | `mise run ci:taskrun` — stage the app context + the Dockerfile dir into one per-run hostPath workspace (two `subPath` bindings), apply the Task, create a TaskRun with a captured name, stream logs. Then `oras resolve $IMAGE:$TAG` → the manifest digest, `ci_is_strict_digest` validates it, and it pins on the digest to verify the Step-1 criteria (`oras` config `arch=arm64`, `docker pull`, pod `securityContext`). `--keep` / `--teardown` (also best-effort deletes the tag). |
-| `scripts/lib/ci.sh` | shared shell: repo-root resolution, the strict `^sha256:[0-9a-f]{64}$` digest guard (`ci_is_strict_digest`), the `--context orbstack` kube-context guard. |
-| `scripts/tests/*.bats`, `scripts/tests/helper.bash` | pure-shell cases only — a fake-bin `kubectl`/`tkn`/`gh` shim drives the preflight + skip decisions. No `[k8s]` bats case (the shim would fake the gate true, then exec the real binary — a runner failure); the hk `chainsaw` step + `mise run ci:taskrun` are the real end-to-end coverage. |
-| `tests/buildkit-build/chainsaw-test.yaml` | `[k8s]`-gated — apply the Task, assert the Tekton webhook accepts it, that it has exactly one step with **no `script:` field**, and that the spike-proven `securityContext` posture (the ceiling) has not drifted. The full build→push assertions are `mise run ci:taskrun` + the recorded spike (T7b adds a credential-light chainsaw build). |
+| `tasks/git-clone.yaml` | T7b1 — blobless shallow clone of a public repo at a pinned `REVISION` into `<output>/<SUBDIR>`. Two steps (`git clone --no-checkout`, `git checkout --detach`), pinned `command` + `args`, **no `script:`**. Reuses the pinned `moby/buildkit:rootless` image (it ships `git`) — one image digest for the whole pipeline. Steps run as root; see § Workspaces. |
+| `tasks/buildkit-build.yaml` | T7a posture, T7b1-rewired — `buildctl-daemonless.sh` rootless build. Context = the `source` workspace; Dockerfile = `$(DOCKERFILE_DIR)` in `build-defs`. Pushes `$(IMAGE):$(APP_REVISION)` (the app git SHA as the tag), `registry.insecure=$(REGISTRY_INSECURE)` (default `true`, for the loopback zot). One step, pinned `command` + `args`, **no `script:`**, **no Tekton result** (see below), no `dockerconfig` workspace (zot is credential-free). Params only; never names `cv_frontend`. |
+| `pipelines/build-scan-approve.yaml` | T7b1 — the `clone-app → clone-defs → build` DAG over one `shared` workspace. T7b2 adds `scan-attach` (`runAfter build`); T7b3 adds `gate` (last). Consumer values are PipelineRun params. |
+| `runtime/namespace.yaml` | the `ci` Namespace — nothing else. No `Role`/`RoleBinding`: the steps touch a mounted workspace + a registry, never the k8s API (`automountServiceAccountToken: false` on the pods). |
+| `scripts/chainsaw-test.sh` / `kubeconform-scan.sh` / `lib/ci.sh` | the hk `chainsaw` (`[k8s]`-gated) + `kubeconform` gates and their shared shell (repo-root, the strict `^sha256:[0-9a-f]{64}$` guard `ci_is_strict_digest`, the `--context orbstack` guard). |
+| `scripts/tests/*.bats`, `scripts/tests/helper.bash` | pure-shell cases for the gate scripts' skip / fail decisions. No `[k8s]` bats case (the fake-bin shim would fake the gate true, then exec the real binary — a runner failure). |
+| `tests/build-pipeline/chainsaw-test.yaml` | `[k8s]`-gated — the Tekton webhook accepts all three defs, none carries a `script:` field, the spike-proven build `securityContext` (the ceiling) has not drifted, and the Pipeline DAG is `clone-app → clone-defs → build` over one workspace. The full `clone → build → push → oras resolve → docker pull` run is an operator `tkn pipeline start` (recorded in `TODOS.md` T7b1), the way T7a's spike proved buildkit. |
+| `tests/crd-schemas/{task,pipeline}_v1.json` | Tekton v1 CRD schemas vendored from the pinned release for `kubeconform` (regenerate on a Tekton bump — `environments/local/README.md` § Tekton). |
 
-## Why the digest is resolved in `tekton-taskrun.sh`, not a Tekton result
+## Why there is no Tekton `IMAGE_DIGEST` result
 
-The Task pushes under a per-run tag and emits **no** `IMAGE_DIGEST` result;
-`tekton-taskrun.sh` does `oras resolve $IMAGE:$TAG` and pins on the digest. A
-Tekton step-result would need embedded shell (`jq … > $(results…path)`) —
-which CLAUDE.md forbids — and the shell-free alternatives don't fit T7a:
-step-stdout→result is `enable-api-fields: alpha` (the controller runs
-`beta`), `buildctl` has no bare-digest output flag, and
-`coschedule: workspaces` forbids a second PVC-backed "meta" workspace. T7b
-re-adds a proper `IMAGE_DIGEST` result via a committed extract script when
-it builds the Pipeline (`TODOS.md` T7b).
+Inside the pipeline every task addresses the image by
+`$(IMAGE):$(APP_REVISION)` — the app's git SHA as a deterministic tag.
+Ordering is `runAfter`. The one consumer of the digest-as-a-value,
+`attestation-sign.sh`, runs **outside** the pipeline — and `oras resolve`
+(already pinned) turns the tag into the immutable digest there, in one
+call, at the operator boundary. A Tekton result would need embedded shell
+or `enable-api-fields: alpha` and buys nothing the tag doesn't. ADR 0001
+holds: the tag is a convenience alias; the signed chain
+(`attestation-sign.sh` → `frontend-deploy.sh`) still pins the digest, which
+never leaves the human boundary. (`~/.claude/plans/t7b-pipeline-recut.md`,
+`TODOS.md` T7b.)
+
+## Workspaces
+
+One workspace, `shared`, backed by a per-run `volumeClaimTemplate` in the
+PipelineRun. Tekton `coschedule: workspaces` forbids a single TaskRun
+binding two **distinct** PVCs — so `clone-app` writes `shared/app`,
+`clone-defs` writes `shared/defs`, and the `build` Task binds that one claim
+twice via `subPath` (`source` → `app`, `build-defs` → `defs`). This is why
+T7a's hostPath-PV / `common_prefix` dance was needed then and is gone now.
+
+The `git-clone` steps run as **root** (`runAsUser: 0`). The OrbStack
+`local-path` PVC is not reliably group-writable under `fsGroup` (verified
+2026-09-08 — `git clone` as uid 1000 fails "Permission denied" on `.git`).
+Root writes the tree world-readable; the `build` step reads it back at its
+careful rootless uid 1000. The posture that matters is on the build, not on
+a clone of a public repo. The PipelineRun sets no `fsGroup`.
 
 ## Residual privilege surface
 

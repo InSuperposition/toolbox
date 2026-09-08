@@ -363,19 +363,32 @@ pin mechanism). Sub-phased, each ships + tests on its own:
   NodePort reach `localhost:30500/v2/` → HTTP 200; host + in-cluster
   (`zot.zot.svc.cluster.local:5000`) `oras` push/pull round-trips; native OCI 1.1
   Referrers (`oras discover` tree); exposure is the NodePort only (no
-  Ingress/LoadBalancer). The `buildctl registry.insecure=true` push proof rides
-  with T7b1 (buildkit runs only in the build Task). Threat model: single-user VM,
-  all cluster writers trusted; the P2 "zot registry auth" TODO opens real auth.
-  **zot left running** for T7b1.
-- **T7b1** — `ci/tasks/git-clone.yaml` (anonymous clone of both public repos —
-  `cv_frontend` + `toolbox` — at pinned SHAs, `mkdir -p` the subPath dirs) +
-  modify `buildkit-build.yaml` (drop `TAG` + the per-run `gh` Secret + the
-  `dockerconfig` workspace; push `$(IMAGE):$(APP_REVISION)` — the git SHA as the
-  tag — to zot; **no Tekton result**) + a 2-Task `clone → build` Pipeline + one
-  `volumeClaimTemplate` workspace + `ci/README.md` § Workspaces (write down the
-  `coschedule: workspaces` one-PVC constraint) + **delete `tekton-taskrun.sh` +
-  `mise run ci:taskrun` + its 18 bats + the two heredocs** (its Task contract
-  dies here).
+  Ingress/LoadBalancer). Threat model: single-user VM, all cluster writers
+  trusted; the P2 "zot registry auth" TODO opens real auth. **zot left running**
+  for T7b1.
+- **T7b1** — ✅ **DONE.** `ci/tasks/git-clone.yaml` (blobless shallow clone at a
+  pinned SHA, anonymous; reuses the pinned `moby/buildkit:rootless` image — it
+  ships `git`, so ONE image digest for the whole pipeline; steps run as root — the
+  OrbStack `local-path` PVC is not group-writable under `fsGroup`, verified) +
+  `buildkit-build.yaml` rewired (drop `TAG` + `dockerconfig` workspace + the `gh`
+  Secret; push `$(IMAGE):$(APP_REVISION)` to zot, `registry.insecure=true`; **no
+  Tekton result**) + `ci/pipelines/build-scan-approve.yaml` (`clone-app →
+  clone-defs → build`, one `volumeClaimTemplate` workspace, subPath binding) +
+  `ci/tests/crd-schemas/pipeline_v1.json` + `ci/tests/build-pipeline/chainsaw-test.yaml`
+  + `ci/README.md` § Workspaces + **deleted `tekton-taskrun.sh` + `ci:taskrun` +
+  its 18 bats + the two heredocs**.
+  **Live-verified 2026-09-08** on `orb start k8s`: `clone-app` + `clone-defs`
+  Succeeded (`cv_frontend@db174d91`, `toolbox@3210363` into `shared/app` +
+  `shared/defs`); the `build` step mounted both workspaces, loaded the Dockerfile
+  from `shared/defs/deploy/frontend/`, and buildkit began solving with the
+  spike-proven posture — then hit **docker.io unreachable over IPv6** fetching the
+  `# syntax=docker/dockerfile:1@sha256:` frontend (environmental egress, same as
+  the T7a spike needed a network day). chainsaw green (webhook + no-`script:` +
+  posture + DAG). **Owed:** a full `clone → build → push → oras resolve → docker
+  pull` run once docker.io egress is available — every image build needs it.
+  **Follow-up (P3):** mirror the `# syntax=` frontend + base images into zot so
+  the build has no docker.io dependency (belongs with T7d / the zot-everything
+  cutover).
 - **T7b2** — `ci/tasks/scan-attach.yaml` (one Task: `trivy image -f json` →
   `trivy image -f cyclonedx` (native, keeps CVE ratings) → `oras attach` ×2, all
   pinned `command`/`args`) + shared trivy `--cache-dir` on the workspace (one DB

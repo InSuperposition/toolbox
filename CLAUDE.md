@@ -36,9 +36,10 @@ design, not an afterthought.
     Dockerfile.
   - **No Tekton `script:` blocks.** A Tekton Task step is a pinned
     `command` + `args` — never an embedded `script:`. Anything a CLI
-    invocation can't express (digest extraction, format guards,
-    verification) lives in `ci/scripts/*.sh`, shellcheck-clean and
-    bats-tested, and runs from there (`ci/scripts/tekton-taskrun.sh`).
+    invocation can't express (format guards, verification, the digest
+    resolution `oras resolve` does at the operator boundary) lives in
+    `ci/scripts/*.sh`, shellcheck-clean and bats-tested, and runs from
+    there. Machine-checked by `rules/boundary-no-embedded-shell.yml`.
 - No cyclic calls between `mise` tasks and scripts — one direction only.
 - One primary test tool per layer (§9) — acknowledged partial overlap is
   fine, redundant full coverage by two tools for the same concern is not.

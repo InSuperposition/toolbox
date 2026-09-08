@@ -1,0 +1,73 @@
+# T7b1 — shallow-clone a public git repo at a pinned revision.
+#
+# Consumer-agnostic (ADR 0014, rules/boundary-ci.yml): URL + REVISION +
+# SUBDIR are params, never a literal repo. Anonymous HTTPS only — both
+# repos the pipeline needs (the app context, the toolbox Dockerfile) are
+# public (`TODOS.md` T7b0 verified 2026-09-08). A private repo, or a
+# non-loopback registry, is the deferred "Auth + multi-member DX" concern.
+#
+# No embedded shell (CLAUDE.md § Constraints): two steps, each a pinned
+# `git` `command` + `args`. `--no-checkout` on the clone then an explicit
+# `checkout --detach <REVISION>` so a bare commit SHA works without first
+# materialising the default branch. `--filter=blob:none` is a partial
+# clone — every ref is fetched (so any SHA is reachable) but blobs stream
+# on demand.
+#
+# Image: the SAME pinned `moby/buildkit:rootless` the build step uses — it
+# ships `git` (2.52.x, for buildkit's own git-context support). Reusing it
+# means ONE image digest for the whole pipeline (no separate `alpine/git`
+# pin to track and bump), and on the single-node cluster the layer is
+# already cached from the build. Bump both step images together.
+#
+# The clone steps run as root (`runAsUser: 0`). The shared workspace PVC on
+# OrbStack's `local-path` storage class is not reliably group-writable
+# under `fsGroup` (verified 2026-09-08 — `git clone` into it as uid 1000
+# fails "Permission denied" on `.git`). Root writes the tree world-readable
+# (git's default 0644 / 0755), and the `build` step reads it back at its
+# careful rootless uid 1000 — the posture that matters is on the build, not
+# a clone of a public repo.
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: git-clone
+  labels:
+    app.kubernetes.io/part-of: toolbox-ci
+spec:
+  description: >-
+    Shallow, blobless clone of a public git repository at a pinned revision
+    into a sub-directory of the output workspace. No credentials.
+  params:
+    - name: URL
+      type: string
+      description: HTTPS git URL of a public repository.
+    - name: REVISION
+      type: string
+      description: A commit SHA (preferred), tag, or branch to check out.
+    - name: SUBDIR
+      type: string
+      description: >-
+        Directory under the workspace root to clone into (e.g. app, defs).
+        Created by the clone; must not already exist.
+  workspaces:
+    - name: output
+      description: The clone is written to <output>/<SUBDIR>.
+  stepTemplate:
+    securityContext:
+      runAsUser: 0
+      runAsGroup: 0
+  steps:
+    - name: clone
+      image: docker.io/moby/buildkit:rootless@sha256:80b15f0735e87bab7bf59ec4d695dfb4a7cfb25521cf56dc75d6f256285b63ef
+      workingDir: $(workspaces.output.path)
+      command: ["git"]
+      args:
+        - clone
+        - --filter=blob:none
+        - --no-checkout
+        - $(params.URL)
+        - $(params.SUBDIR)
+    - name: checkout
+      image: docker.io/moby/buildkit:rootless@sha256:80b15f0735e87bab7bf59ec4d695dfb4a7cfb25521cf56dc75d6f256285b63ef
+      workingDir: $(workspaces.output.path)/$(params.SUBDIR)
+      command: ["git"]
+      args: ["checkout", "--detach", "$(params.REVISION)"]
