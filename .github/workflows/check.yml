@@ -51,6 +51,15 @@ jobs:
       # every run (the .terraform.lock.hcl files pin the versions; this
       # skips the download, it is not an offline mode).
       TF_PLUGIN_CACHE_DIR: /home/runner/.terraform.d/plugin-cache
+      # hk writes output.log (failing step's full un-interleaved capture)
+      # and hk.log (its DEBUG trace) under HK_STATE_DIR. Pin it to a known
+      # path so the "Upload hk logs" step can grab them — otherwise a check
+      # failure points at a runner file that's gone. `/tmp` (not
+      # `runner.temp` — that context is not available at job `env:` level,
+      # and `/tmp` matches the existing pitchfork-supervisor.log path). The
+      # ephemeral runner discards it after the job. output.log is
+      # failure-only; a green run leaves just hk.log or nothing.
+      HK_STATE_DIR: /tmp/hk
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v7.0.1
@@ -105,3 +114,21 @@ jobs:
           pitchfork list || true
           pitchfork supervisor status || true
           cat /tmp/pitchfork-supervisor.log || true
+
+      # `mise run check` streams every hk step to this job log (interleaved
+      # across parallel steps). On a FAILURE hk also writes a clean,
+      # un-interleaved per-failing-step capture to $HK_STATE_DIR/output.log
+      # and prints "See .../output.log" — but that file dies with the
+      # runner. This keeps it (+ hk.log). `always()` so it survives a red
+      # run; `if-no-files-found: ignore` because output.log is failure-only.
+      # No `run:` shell here on purpose — a bare `| tee` on the check step
+      # would run under the default `bash -e` (no pipefail) and MASK hk's
+      # exit code.
+      - name: Upload hk logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: hk-check-log
+          path: /tmp/hk/*.log
+          if-no-files-found: ignore
+          retention-days: 14
