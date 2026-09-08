@@ -169,7 +169,7 @@ deploy/frontend/                     # the per-consumer instantiation for cv_fro
   scripts/tests/*.bats + helper.bash
 
 ci/                                  # reusable Tekton defs → digest-pinned OCI bundles (ADR 0014)
-  tasks/buildkit-build.yaml            #   T7a ✓ — buildctl-daemonless rootless build → push by digest (params only)
+  tasks/buildkit-build.yaml            #   T7a ✓ — buildctl-daemonless rootless build → push under a per-run tag (one step, no script:); ci-taskrun.sh resolves the digest
   tasks/{trivy-scan,oras-attach}.yaml  #   T7b — wrap the proven Phase-1 shell steps
   pipelines/build-scan-approve.yaml    #   T7b — wires the tasks; human approval stays attestation-sign.sh
   runtime/namespace.yaml               #   T7a ✓ — the `ci` namespace (no RBAC — the build SA needs none)
@@ -199,18 +199,20 @@ instances. The local OpenBao daemon is machine-global — registered in
 (`openbao://approval-key`) — it never provisions OpenBao. See
 `environments/local/README.md` for the bootstrap/reset/snapshot runbook.
 
-**No orchestration logic in Tekton YAML** — a Task step is a single pinned
-CLI invocation via `command`/`args`, or a short fixed `script:` **step
-body** (a container-entrypoint analogue: no branching, no decisions) where
-a CLI cannot express the shape — `buildkit-build.yaml` needs one because
-`buildctl`'s digest lands in a `--metadata-file` that wants a `jq`
-extraction + a strict-format guard before it reaches the result path, and
-redirection is not expressible in `command`/`args` (`ci/README.md` § Why a
-`script:` step body, same carve-out shape as `deploy/frontend/Dockerfile`).
-Every real decision — staging, verification, teardown, the go/no-go
-approval (`attestation-sign.sh`) — lives in a `shellcheck`-clean,
-`bats`-tested script the repo owner runs, never in the Task graph, exactly
-as a required-reviewer click is "manual" in any CI system.
+**No embedded scripts in Tekton YAML** — every Task step is a single pinned
+CLI invocation via Kubernetes' native `command`/`args`, never a `script:`
+block (CLAUDE.md § Constraints). `buildkit-build.yaml`'s one step is just
+`buildctl-daemonless.sh` + args; anything a CLI can't express — resolving
+the pushed digest, the strict-`sha256` guard, verification, staging,
+teardown, the go/no-go approval (`attestation-sign.sh`) — lives in a
+`shellcheck`-clean, `bats`-tested script the repo owner runs
+(`ci/scripts/ci-taskrun.sh`), never in the Task graph, exactly as a
+required-reviewer click is "manual" in any CI system. (T7a's Task pushes
+under a throwaway tag and `ci-taskrun.sh` does `oras resolve` for the
+digest; T7b re-adds a proper Tekton `IMAGE_DIGEST` result via a committed
+extract script — the shell-free result mechanisms don't fit T7a: step
+stdout→result is `enable-api-fields: alpha`, `buildctl` has no bare-digest
+flag, `coschedule: workspaces` forbids a second PVC workspace.)
 
 ## Phasing
 

@@ -34,14 +34,11 @@ design, not an afterthought.
     real build logic (evidence-gathering, the approval decision) still
     lives in its own tested script per the Scripts Policy, never in the
     Dockerfile.
-  - **Named carve-out:** a Tekton Task step may carry a short fixed
-    `script:` **step body** (a container-entrypoint analogue — no
-    branching, no decisions) where `command`/`args` cannot express the
-    shape. Today: `ci/tasks/buildkit-build.yaml` (a `jq` digest extraction
-    + strict-format guard `buildctl` forces via `--metadata-file`;
-    `ci/README.md` § Why a `script:` step body). Orchestration —
-    staging, verification, teardown — stays in `ci/scripts/*.sh`,
-    shellcheck-clean and bats-tested.
+  - **No Tekton `script:` blocks.** A Tekton Task step is a pinned
+    `command` + `args` — never an embedded `script:`. Anything a CLI
+    invocation can't express (digest extraction, format guards,
+    verification) lives in `ci/scripts/*.sh`, shellcheck-clean and
+    bats-tested, and runs from there (`ci/scripts/ci-taskrun.sh`).
 - No cyclic calls between `mise` tasks and scripts — one direction only.
 - One primary test tool per layer (§9) — acknowledged partial overlap is
   fine, redundant full coverage by two tools for the same concern is not.

@@ -8,8 +8,9 @@ digest-as-source-of-truth pipeline
 [ADR 0014](../docs/adr/0014-tekton-defs-are-oci-bundles-in-ci.md)). Phase 2
 of the CI pipeline (`TODOS.md` T7) moves the build off GitHub Actions and
 into `orb start k8s`: a daemonless, rootless BuildKit Task builds an app
-from its Dockerfile and pushes the image **by digest**, with no privileged
-pod.
+from its Dockerfile and pushes it, with no privileged pod;
+`ci-taskrun.sh` then resolves the pushed **manifest digest** and pins on
+it (the digest is the trust boundary — ADR 0001).
 
 This concern **owns** the Task/Pipeline YAML, the `ci` namespace, and the
 scripts that stage inputs and drive a run. It **may depend on** `tests/lib`
@@ -39,26 +40,24 @@ in-cluster end to end.
 
 | File | Role |
 |---|---|
-| `tasks/buildkit-build.yaml` | T7a — `buildctl-daemonless.sh` rootless build → push by digest. Params only (`IMAGE`, `PLATFORM`, `DOCKERFILE`, `CONTEXT_SUBPATH`, `BUILD_ARGS`); never names `cv_frontend`. Result: `IMAGE_DIGEST` (strict `sha256:`). No build cache (T7b adds it). |
+| `tasks/buildkit-build.yaml` | T7a — `buildctl-daemonless.sh` rootless build → push under a caller-supplied `TAG`. One step, pinned `command` + `args`, **no `script:`** (CLAUDE.md § Constraints). Params only (`IMAGE`, `TAG`, `PLATFORM`, `DOCKERFILE`, `CONTEXT_SUBPATH`, `BUILDKITD_FLAGS`); never names `cv_frontend`. No Tekton result — the caller resolves the digest (see below). No build cache (T7b adds it). |
 | `runtime/namespace.yaml` | the `ci` Namespace — nothing else. No `Role`/`RoleBinding`: the build step reads a **mounted** Secret, not the k8s API, so its ServiceAccount needs no verbs (the TaskRun also sets `automountServiceAccountToken: false`). |
-| `scripts/ci-taskrun.sh` | `mise run ci:taskrun` — stage the app context + the Dockerfile dir into one per-run hostPath workspace (two `subPath` bindings), apply the Task, create a TaskRun with a captured name, stream logs, verify per the Step-1 criteria (strict `sha256`, `oras` config `arch=arm64`, `docker pull`, pod `securityContext`). `--keep` / `--teardown`. |
-| `scripts/lib/ci.sh` | shared shell: repo-root resolution, the strict `^sha256:[0-9a-f]{64}$` digest guard, the `--context orbstack` kube-context guard. |
+| `scripts/ci-taskrun.sh` | `mise run ci:taskrun` — stage the app context + the Dockerfile dir into one per-run hostPath workspace (two `subPath` bindings), apply the Task, create a TaskRun with a captured name, stream logs. Then `oras resolve $IMAGE:$TAG` → the manifest digest, `ci_is_strict_digest` validates it, and it pins on the digest to verify the Step-1 criteria (`oras` config `arch=arm64`, `docker pull`, pod `securityContext`). `--keep` / `--teardown` (also best-effort deletes the tag). |
+| `scripts/lib/ci.sh` | shared shell: repo-root resolution, the strict `^sha256:[0-9a-f]{64}$` digest guard (`ci_is_strict_digest`), the `--context orbstack` kube-context guard. |
 | `scripts/tests/*.bats`, `scripts/tests/helper.bash` | the matrix. `k8s_available()` **skips** (not `exit 1`) without orb / a kubeconfig — T7a's in-cluster build is a local spike, not a pre-merge gate (GitHub runners have no OrbStack). |
-| `tests/buildkit-build.chainsaw.yaml` | `[k8s]`-gated — apply Task + TaskRun, assert `Succeeded` + strict `sha256` result + `arm64` config + no privileged pod + no mounted SA token + the default SA cannot `create taskruns` / `get secrets`. |
+| `tests/buildkit-build/chainsaw-test.yaml` | `[k8s]`-gated — apply the Task, assert the Tekton webhook accepts it, that it has exactly one step with **no `script:` field**, and that the spike-proven `securityContext` posture (the ceiling) has not drifted. The full build→push assertions are `mise run ci:taskrun` + the recorded spike (T7b adds a credential-light chainsaw build). |
 
-## Why a `script:` step body, not `command`/`args`
+## Why the digest is resolved in `ci-taskrun.sh`, not a Tekton result
 
-`docs/designs/digest-as-source-of-truth.md` states the ideal: every Task
-step is a single pinned CLI invocation. `buildkit-build.yaml` keeps one
-short `script:` block because `buildctl`'s digest lands in a
-`--metadata-file` that needs a `jq` extraction + a strict-format guard
-before it can be written to `$(results.IMAGE_DIGEST.path)`, and shell
-redirection is not expressible in `command`/`args`. This is a **step body**
-— the analogue of a container entrypoint — not embedded orchestration
-config: it is a fixed, reviewed sequence with no branching, and every real
-decision (staging, verification, teardown) lives in `ci-taskrun.sh`, which
-is `shellcheck`-clean and `bats`-tested. Same carve-out shape as
-`deploy/frontend/Dockerfile` (`CLAUDE.md` § Constraints).
+The Task pushes under a per-run tag and emits **no** `IMAGE_DIGEST` result;
+`ci-taskrun.sh` does `oras resolve $IMAGE:$TAG` and pins on the digest. A
+Tekton step-result would need embedded shell (`jq … > $(results…path)`) —
+which CLAUDE.md forbids — and the shell-free alternatives don't fit T7a:
+step-stdout→result is `enable-api-fields: alpha` (the controller runs
+`beta`), `buildctl` has no bare-digest output flag, and
+`coschedule: workspaces` forbids a second PVC-backed "meta" workspace. T7b
+re-adds a proper `IMAGE_DIGEST` result via a committed extract script when
+it builds the Pipeline (`TODOS.md` T7b).
 
 ## Residual privilege surface
 
