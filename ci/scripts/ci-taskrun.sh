@@ -5,11 +5,14 @@ set -euo pipefail
 #
 # T7a Step 2 — drive one buildkit-build TaskRun on `orb start k8s`: stage
 # the build context and the Dockerfile into per-run workspaces, apply the
-# shared Task, create a TaskRun, stream its logs, and verify the result
-# against the Step-1 spike criteria (strict sha256, arm64 config, image
-# pullable, no privileged pod). This is the disposable-spike ergonomics of
-# T7a; T7b replaces the staging with a digest-pinned git-clone Task and
-# wraps this in a Pipeline (TODOS.md T7).
+# shared Task, create a TaskRun, stream its logs. The Task pushes under a
+# per-run tag; this script then resolves the manifest digest from that tag
+# (`oras resolve`), validates it (`ci_is_strict_digest`), pins on the
+# digest, and verifies the Step-1 spike criteria (arm64 config, image
+# pullable, no privileged pod) — the digest guard the Task no longer
+# carries lives HERE. This is the disposable-spike ergonomics of T7a; T7b
+# replaces the staging with a digest-pinned git-clone Task, wraps this in a
+# Pipeline, and re-adds a proper Tekton IMAGE_DIGEST result (TODOS.md T7).
 #
 # Consumer-agnostic (ADR 0014, rules/boundary-ci.yml): every concrete path
 # is an argument. <dockerfile> is a path to the Dockerfile FILE (its
@@ -26,14 +29,15 @@ set -euo pipefail
 # volume. T7b's digest-pinned git-clone Task removes the shared-parent
 # constraint.
 #
-# Credentials: a per-run docker-registry Secret built from `gh auth token`
-# at call time (mise-env-exec-chain — never an [env] var, never echo'd).
-# Deleted on teardown. An expired token surfaces as a 401 on push; the fix
-# is `gh auth login` / `gh auth refresh` with write:packages.
+# Credentials: a per-run Secret (single `config.json` key) built from
+# `gh auth token` at call time (mise-env-exec-chain — never an [env] var,
+# never echo'd). Deleted on teardown. An expired token surfaces as a 401 on
+# push; the fix is `gh auth login` / `gh auth refresh` with write:packages.
 #
-# Cleanup: on success this run's TaskRun + Secret + PVC/PV are deleted; on
-# failure they are kept for inspection. --keep never deletes; --teardown
-# always deletes. The `ci` namespace and the shared Task are never deleted.
+# Cleanup: on success this run's TaskRun + Secret + PVC/PV are deleted (and
+# the push tag best-effort); on failure they are kept for inspection.
+# --keep never deletes; --teardown always deletes. The `ci` namespace and
+# the shared Task are never deleted.
 #
 # Exit 0  — TaskRun Succeeded and every verification passed.
 # Exit 1  — a preflight check failed, the build failed, or verification failed.
@@ -135,6 +139,10 @@ GH_USER="$(gh api user --jq .login 2>/dev/null || true)"
 RUN_ID="$(od -An -N5 -tx1 /dev/urandom | tr -d ' \n')"
 SECRET_NAME="ci-taskrun-${RUN_ID}-ghcr"
 PV_STAGE="ci-taskrun-${RUN_ID}-stage"
+# The Task pushes under this tag; we resolve the manifest digest from it
+# (`oras resolve`) and pin on the digest. A throwaway lookup handle —
+# best-effort deleted on teardown; GC-able otherwise.
+TAG="ci-taskrun-${RUN_ID}"
 CREATED=() # names to clean up, "kind/name"
 
 # --- dry run (test seam) -------------------------------------------
@@ -146,6 +154,7 @@ if [ -n "${TOOLBOX_CI_DRY_RUN:-}" ]; then
 	echo "dry-run: would-create taskrun/ci-taskrun-${RUN_ID}-<gen>"
 	echo "dry-run: would-create secret/${SECRET_NAME}"
 	echo "dry-run: would-create pvc/${PV_STAGE} pv/${PV_STAGE}"
+	echo "dry-run: would-push ${IMAGE_REF}:${TAG} (tag resolved to a digest, then deleted)"
 	echo "dry-run: stage-root=${STAGE_ROOT} source-subpath=${CTX_SUBPATH} build-defs-subpath=${DEFS_SUBPATH} dockerfile=${DOCKERFILE_NAME}"
 	exit 0
 fi
@@ -172,6 +181,11 @@ cleanup() {
 		*) ci_kubectl -n "$NS" delete "$obj" --ignore-not-found --wait=false >/dev/null 2>&1 || true ;;
 		esac
 	done
+	# best-effort — the gh token may lack delete:packages; the tag is
+	# GC-able and the digest is what everything pins on regardless.
+	if command -v oras >/dev/null; then
+		oras manifest delete --force "${IMAGE_REF}:${TAG}" >/dev/null 2>&1 || true
+	fi
 }
 trap 'rc=$?; cleanup "$rc"; exit $rc' EXIT
 
@@ -220,18 +234,19 @@ WS_SOURCE="$(ws_binding source "$CTX_SUBPATH")"
 WS_DEFS="$(ws_binding build-defs "$DEFS_SUBPATH")"
 
 # --- credential Secret (per run, from `gh auth token`) --------------
-# Built as a dockerconfigjson via a 0600 temp file — `kubectl create secret
-# docker-registry` only takes --docker-password=<value> (argv-visible), and
-# generic --from-literal is argv-visible too. The token never reaches a
-# command line or stdout.
+# A Secret with a single `config.json` key, written via a 0600 temp file —
+# the buildkit step points DOCKER_CONFIG straight at the mounted workspace,
+# so the key must be literally `config.json` (a kubernetes.io/dockerconfigjson
+# Secret's `.dockerconfigjson` key would not match). `kubectl create secret`
+# with a value flag is argv-visible; the file keeps the token off the
+# command line and out of stdout.
 echo "==> Creating push Secret secret/${SECRET_NAME} (user ${GH_USER})"
 DCJ_FILE="$(mktemp)"
 chmod 600 "$DCJ_FILE"
 AUTH_B64="$(printf '%s:%s' "$GH_USER" "$GH_TOKEN_VALUE" | base64 | tr -d '\n')"
 printf '{"auths":{"%s":{"auth":"%s"}}}' "${IMAGE_REF%%/*}" "$AUTH_B64" >"$DCJ_FILE"
 ci_kubectl -n "$NS" create secret generic "$SECRET_NAME" \
-	--type=kubernetes.io/dockerconfigjson \
-	--from-file=.dockerconfigjson="$DCJ_FILE" >/dev/null
+	--from-file=config.json="$DCJ_FILE" >/dev/null
 rm -f "$DCJ_FILE"
 CREATED+=("secret/${SECRET_NAME}")
 
@@ -251,6 +266,7 @@ TR_NAME="$(
 		  taskRef: { name: buildkit-build }
 		  params:
 		    - { name: IMAGE, value: "${IMAGE_REF}" }
+		    - { name: TAG, value: "${TAG}" }
 		    - { name: DOCKERFILE, value: "${DOCKERFILE_NAME}" }
 		  podTemplate:
 		    automountServiceAccountToken: false
@@ -284,22 +300,20 @@ if [ -n "${TOOLBOX_CI_SKIP_VERIFY:-}" ]; then
 fi
 
 echo "==> Verifying result"
-DIGEST="$(ci_kubectl -n "$NS" get "taskrun/${TR_NAME}" -o jsonpath='{.status.results[?(@.name=="IMAGE_DIGEST")].value}')"
-ci_is_strict_digest "$DIGEST" || die "IMAGE_DIGEST result is not a strict sha256: '${DIGEST}'"
+command -v oras >/dev/null || die "oras not on PATH — run \`mise install\`"
+DIGEST="$(oras resolve "${IMAGE_REF}:${TAG}" 2>/dev/null || true)"
+ci_is_strict_digest "$DIGEST" ||
+	die "could not resolve a strict sha256 digest for ${IMAGE_REF}:${TAG} (got: '${DIGEST}') — is the package readable? try \`oras login ${IMAGE_REF%%/*}\`"
 REF="${IMAGE_REF}@${DIGEST}"
-echo "    digest: ${DIGEST}"
+echo "    digest: ${DIGEST}  (resolved from :${TAG})"
 
-if command -v oras >/dev/null; then
-	# architecture lives in the image CONFIG blob, not the manifest
-	CONFIG="$(oras manifest fetch-config "$REF" 2>/dev/null || true)"
-	case "$CONFIG" in
-	*'"architecture":"arm64"'*) echo "    oras: image config arch=arm64" ;;
-	"") die "oras could not fetch the image config for ${REF} (is the package readable?)" ;;
-	*) die "image ${REF} is not arm64: $(printf '%s' "$CONFIG" | grep -o '"architecture":"[^\"]*"' | head -n1)" ;;
-	esac
-else
-	echo "    oras not on PATH — skipping manifest check"
-fi
+# architecture lives in the image CONFIG blob, not the manifest
+CONFIG="$(oras manifest fetch-config "$REF" 2>/dev/null || true)"
+case "$CONFIG" in
+*'"architecture":"arm64"'*) echo "    oras: image config arch=arm64" ;;
+"") die "oras could not fetch the image config for ${REF}" ;;
+*) die "image ${REF} is not arm64: $(printf '%s' "$CONFIG" | grep -o '"architecture":"[^\"]*"' | head -n1)" ;;
+esac
 
 if command -v docker >/dev/null; then
 	docker pull --quiet "$REF" >/dev/null || die "docker pull ${REF} failed"

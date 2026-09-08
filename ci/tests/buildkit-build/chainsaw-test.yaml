@@ -1,10 +1,11 @@
 # [k8s]-gated (ci/scripts/ci-chainsaw.sh skips without an orbstack cluster
 # + Tekton). Server-side validation the static kubeconform gate cannot do:
-# the Tekton admission webhook accepts our Task YAML, and the spike-proven
-# securityContext posture has not drifted.
+# the Tekton admission webhook accepts our Task YAML, the spike-proven
+# securityContext posture has not drifted, and the Task carries NO embedded
+# shell (CLAUDE.md § Constraints — the whole point of the refactor).
 #
-# The full build → push-by-digest → arm64 → no-privileged-pod assertions
-# need a real registry credential and a ~90s build; they are covered by
+# The full build → push → arm64 → no-privileged-pod assertions need a real
+# registry credential and a ~90s build; they are covered by
 # `mise run ci:taskrun` (manual, [k8s]) and the recorded live spike
 # (TODOS.md T7a). T7b's digest-pinned git-clone Task makes a credential-
 # light chainsaw build feasible — added then.
@@ -25,13 +26,23 @@ spec:
               metadata:
                 name: buildkit-build
               spec:
-                results:
-                  - name: IMAGE_DIGEST
-                    type: string
                 workspaces:
                   - name: source
                   - name: build-defs
                   - name: dockerconfig
+    - name: no-embedded-shell
+      try:
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: buildkit-build
+              spec:
+                # exactly one step, named `build`, and NO step has a `script`
+                (length(steps)): 1
+                (steps[0].name): build
+                (steps[?script != null]): []
     - name: security-posture-has-not-drifted
       try:
         - assert:
@@ -42,7 +53,7 @@ spec:
                 name: buildkit-build
               spec:
                 steps:
-                  - name: build-and-push
+                  - name: build
                     securityContext:
                       runAsUser: 1000
                       runAsNonRoot: true
