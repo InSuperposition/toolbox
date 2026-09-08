@@ -16,10 +16,14 @@ bats    attestation/scripts/tests/attestation-verify.bats   11
 bats    attestation/scripts/tests/openbao-preflight.bats    8
 bats    deploy/frontend/scripts/tests/frontend-deploy.bats  4    # 2 [docker] cases skip without docker
 bats    deploy/frontend/scripts/tests/frontend-serve.bats   6    # 1 [docker] case skips without docker
+bats    deploy/frontend/scripts/tests/dockerfile-pin.bats   2
 bats    environments/local/scripts/tests/openbao-bootstrap.bats  9
 bats    environments/local/scripts/tests/openbao-reset.bats      3
 bats    environments/local/scripts/tests/openbao-snapshot.bats   3
 bats    environments/local/scripts/tests/mise-env.bats           3
+bats    ci/scripts/tests/ci-taskrun.bats                    11
+bats    ci/scripts/tests/ci-chainsaw.bats                   3
+bats    ci/scripts/tests/ci-kubeconform.bats               3
 bats    tests/check-coverage.bats                           3
 
 tftest  environments/local/openbao/tests/config_render.tftest.hcl  4

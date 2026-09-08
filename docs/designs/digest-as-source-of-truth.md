@@ -147,9 +147,9 @@ a trust input. Per-member identity is a `TODOS.md` planning task.
 
 Each top-level concern owns its files and declares which other concerns it
 may name (`docs/designs/repo-structure.md`, ADR 0012/0013). The reusable
-Tekton definitions live in a `ci/` concern (Phase 2, deferred) and are
-distributed as **digest-pinned OCI bundles**, not versioned directories
-(ADR 0014).
+Tekton definitions live in a `ci/` concern (Phase 2 — the T7a skeleton is
+on disk; the rest is deferred) and are distributed as **digest-pinned OCI
+bundles**, not versioned directories (ADR 0014).
 
 ```
 attestation/                         # the consumer-agnostic sign+verify seam (ADR 0013)
@@ -168,12 +168,15 @@ deploy/frontend/                     # the per-consumer instantiation for cv_fro
   scripts/lib/frontend.sh               #   frontend_repo_root + the TOOLBOX_ATTESTATION_VERIFY seam
   scripts/tests/*.bats + helper.bash
 
-ci/                                  # reusable Tekton defs → digest-pinned OCI bundles (Phase 2, deferred — ADR 0014)
-  tasks/buildkit-build.yaml            #   T7a — buildctl-daemonless rootless build → push by digest
+ci/                                  # reusable Tekton defs → digest-pinned OCI bundles (ADR 0014)
+  tasks/buildkit-build.yaml            #   T7a ✓ — buildctl-daemonless rootless build → push under a per-run tag (one step, no script:); ci-taskrun.sh resolves the digest
   tasks/{trivy-scan,oras-attach}.yaml  #   T7b — wrap the proven Phase-1 shell steps
   pipelines/build-scan-approve.yaml    #   T7b — wires the tasks; human approval stays attestation-sign.sh
-  runtime/namespace.yaml               #   the `ci` namespace (no RBAC — the build SA needs none)
-  scripts/ci-taskrun.sh + lib/ci.sh + pipeline-bundle-push.sh + tests/
+  runtime/namespace.yaml               #   T7a ✓ — the `ci` namespace (no RBAC — the build SA needs none)
+  scripts/ci-taskrun.sh + ci-kubeconform.sh + ci-chainsaw.sh + lib/ci.sh + tests/   # T7a ✓
+  scripts/pipeline-bundle-push.sh      #   T7b — tkn bundle push → registry digest
+  tests/crd-schemas/task_v1.json       #   T7a ✓ — Tekton v1 CRD schema (vendored from the pinned release) for kubeconform
+  tests/buildkit-build/chainsaw-test.yaml  #   T7a ✓ — [k8s]-gated: Tekton webhook accepts the Task + posture drift guard
 
 environments/local/                  # the ONE deployment target — owns its OpenBao unit + orchestration
   main.tf                               #   applies module "secret_openbao_local" { source = "./openbao" }
@@ -197,10 +200,19 @@ instances. The local OpenBao daemon is machine-global — registered in
 `environments/local/README.md` for the bootstrap/reset/snapshot runbook.
 
 **No embedded scripts in Tekton YAML** — every Task step is a single pinned
-CLI invocation via Kubernetes' native `command`/`args`. `attestation-sign.sh`
-(the one place with real go/no-go logic) is not part of any Task or
-Pipeline — it is a plain script the repo owner runs, exactly as a
-required-reviewer click is "manual" in any CI system.
+CLI invocation via Kubernetes' native `command`/`args`, never a `script:`
+block (CLAUDE.md § Constraints). `buildkit-build.yaml`'s one step is just
+`buildctl-daemonless.sh` + args; anything a CLI can't express — resolving
+the pushed digest, the strict-`sha256` guard, verification, staging,
+teardown, the go/no-go approval (`attestation-sign.sh`) — lives in a
+`shellcheck`-clean, `bats`-tested script the repo owner runs
+(`ci/scripts/ci-taskrun.sh`), never in the Task graph, exactly as a
+required-reviewer click is "manual" in any CI system. (T7a's Task pushes
+under a throwaway tag and `ci-taskrun.sh` does `oras resolve` for the
+digest; T7b re-adds a proper Tekton `IMAGE_DIGEST` result via a committed
+extract script — the shell-free result mechanisms don't fit T7a: step
+stdout→result is `enable-api-fields: alpha`, `buildctl` has no bare-digest
+flag, `coschedule: workspaces` forbids a second PVC workspace.)
 
 ## Phasing
 
@@ -218,18 +230,49 @@ independently (Gall's Law). The full sequencing lives in `TODOS.md`.
   `mise run local:openbao:snapshot` / `local:openbao:snapshot-restore` for backup.
   Registry is **GHCR** — hosted, zero-ops, unmetered on public repos.
 
-- **Phase 2 — Tekton (deferred, T7a–T7d — planned 2026-09-08).** Move the
-  build/scan/attach path into reusable Tekton Tasks + a Pipeline on
+- **Phase 2 — Tekton (T7a–T7d — planned 2026-09-08; T7a spike ✓ + `ci/`
+  skeleton ✓ 2026-09-08).**
+  Move the build/scan/attach path into reusable Tekton Tasks + a Pipeline on
   `orb start k8s` ([ADR 0003](../adr/0003-tekton-pipelines-on-orbstack-k8s.md)),
   packaged as **digest-pinned OCI bundles** in the `ci/` concern
   ([ADR 0014](../adr/0014-tekton-defs-are-oci-bundles-in-ci.md)). Builder is
   **daemonless rootless BuildKit** (`buildctl-daemonless.sh` in the TaskRun
-  pod). **T7a** — feasibility spike (rootless build + in-cluster GHCR push +
-  pod privilege posture), then the `ci/` skeleton. **T7b** — the full
-  pipeline as bundles, `deploy/frontend/` `PipelineRun` with bundles-resolver
-  digest pins, kubeconform + chainsaw harness; retires
-  `build-cv-frontend.yml`. **T7c** — local Flux reconciles `ci/**` +
-  `environments/local/`. **T7d** — GHCR → `zot`. Full detail in `TODOS.md`.
+  pod). **T7a** ✓ — feasibility spike (rootless build + in-cluster GHCR push
+  + pod privilege posture), then the `ci/` concern skeleton:
+  `tasks/buildkit-build.yaml`, `runtime/namespace.yaml`, the taskrun /
+  kubeconform / chainsaw scripts, `mise run ci:taskrun`, and the interim
+  `mise run local:tekton:install` (pinned Tekton v1.6.0, owned by
+  `environments/local/`). **T7b** — the full pipeline as bundles,
+  `deploy/frontend/` `PipelineRun` with bundles-resolver digest pins, a
+  digest-pinned `git-clone` Task, registry cache, full kubeconform +
+  chainsaw harness; retires `build-cv-frontend.yml`. **T7c** — local Flux
+  reconciles `ci/**` + `environments/local/`. **T7d** — GHCR → `zot`. Full
+  detail in `TODOS.md`.
+
+  **T7a Step 1 spike result (2026-09-08, orb k8s v1.35.6, Tekton Pipelines
+  v1.6.0):** daemonless rootless BuildKit built `cv_frontend` in-cluster and
+  pushed `linux/arm64` by digest to GHCR (`docker pull` of that digest
+  verified, config `arch=arm64`). The four answers:
+  1. **Rootless viability** — works, no privileged pod. Minimum pod posture:
+     `runAsUser/Group: 1000`, `runAsNonRoot: true`,
+     `seccompProfile: {type: Unconfined}`, `allowPrivilegeEscalation: true`
+     (setuid-less `newuidmap` uses **file capabilities**, so `no_new_privs`
+     must be OFF), `capabilities: {drop: [ALL], add: [SETUID, SETGID]}` (both
+     must stay in the bounding set for `newuidmap`/`newgidmap`), and
+     `BUILDKITD_FLAGS=--oci-worker-no-process-sandbox` (**required** — without
+     it the dockerfile-frontend step fails to solve; k8s user-namespaces
+     `hostUsers: false` is **not** an option because Tekton's `podTemplate`
+     does not expose it).
+  2. **In-cluster GHCR push** — the `gh auth token` interim credential works,
+     wired as a `docker-registry` Secret and copied to
+     `$DOCKER_CONFIG/config.json` inside the step.
+  3. **Pod privilege posture** — **no** `privileged`, **no** `CAP_SYS_ADMIN`,
+     **no** `CAP_SYS_PTRACE`. The residual surface is `SETUID`/`SETGID` +
+     `allowPrivilegeEscalation` + `seccomp: Unconfined` + the
+     no-process-sandbox flag (host-PID-namespace exposure inside the build
+     pod). Blast radius: the single-user OrbStack VM.
+  4. **Digest** — recorded; cross-builder parity vs the Phase-1 GHA build is
+     not a gate (GHA retires end of T7b); byte reproducibility is T8.
 
 - **Phase 3 — Tekton Chains (T8).** Install Chains; a second OpenBao Transit
   key (`chains-provenance-key`) with an access policy denying it

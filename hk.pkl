@@ -8,11 +8,12 @@
 /// hk.pkl NEVER calls back into a mise task (no cycle, CLAUDE.md § mise).
 ///
 /// Layering:
-///   pre-commit  fast + side-effect-free : shellcheck, pkl, tofu fmt, cue fmt, ls-lint, ast-grep
+///   pre-commit  fast + side-effect-free : shellcheck, pkl, tofu fmt, cue fmt, ls-lint, ast-grep, kubeconform
 ///   pre-push    + offline validation    : tofu validate
-///   check       + the full test matrix  : tofu test, bats
-///                (bats spins real OpenBao/docker daemons - too heavy for a
-///                 file-triggered hook, so it lives in `check` only)
+///   check       + the full test matrix  : tofu test, bats, chainsaw
+///                (bats spins real OpenBao/docker daemons, chainsaw needs an
+///                 orbstack cluster - too heavy for a file-triggered hook, so
+///                 they live in `check` only; chainsaw self-skips with no cluster)
 ///
 /// ls-lint + ast-grep enforce docs/designs/repo-structure.md: directory case
 /// and <domain>-<verb>.sh naming (ls-lint, .ls-lint.yml), and forbidden
@@ -55,6 +56,15 @@ local fast = new Mapping<String, Step> {
     allow_symlinks = true
     batch = false
     check = "ast-grep scan"
+  }
+  // Static schema validation of the ci/ Tekton manifests (CLAUDE.md
+  // § Testing Strategy — no cluster needed, fast pre-merge gate). A wrapper
+  // script: the kubeconform -schema-location template collides with hk's
+  // own command templating. Rationale + CRD-schema caveats in the script.
+  // The glob only gates whether the step runs.
+  ["kubeconform"] {
+    glob = List("ci/tasks/**/*.yaml", "ci/runtime/**/*.yaml", "ci/pipelines/**/*.yaml", "ci/tests/crd-schemas/**/*.json", "ci/scripts/ci-kubeconform.sh")
+    check = "./ci/scripts/ci-kubeconform.sh"
   }
 }
 
@@ -99,6 +109,15 @@ local heavy = new Mapping<String, Step> {
     // CI failure names its cause instead of a bare "assertion failed" (T9a).
     // No-op when everything passes.
     check = "bats --print-output-on-failure {{files}}"
+  }
+  // chainsaw scenarios for the ci/ Tekton defs. [k8s]-gated: the wrapper
+  // prints a skip line and exits 0 without an orbstack cluster + Tekton
+  // (ci/scripts/tests/helper.bash § [k8s] gate — GitHub runners have no
+  // OrbStack, so this must not be fatal in CI, unlike [docker]). The glob
+  // only gates whether the step runs; the wrapper globs ci/tests/ itself.
+  ["chainsaw"] {
+    glob = List("ci/tests/**/*.yaml", "ci/tasks/**/*.yaml", "ci/runtime/**/*.yaml", "ci/scripts/ci-chainsaw.sh", "ci/scripts/lib/ci.sh")
+    check = "./ci/scripts/ci-chainsaw.sh"
   }
   // Silent-coverage-drop guard (F5). Diffs the suites on disk, the
   // committed tests/manifest.txt, and what hk schedules — a mismatch fails

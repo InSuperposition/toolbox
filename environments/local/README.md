@@ -2,13 +2,16 @@
 
 ## Abstract
 
-The repo's local, single-node reference composition — currently just the
-local OpenBao / Transit signing backend the digest-as-source-of-truth
-pipeline's approval gate uses. This environment **owns** that unit
-(`./openbao/`, `module "secret_openbao_local"`) and the scripts that bring
-it up (`scripts/openbao-*.sh`) — ADR 0012. Named `local` (not left at repo
-root) so `environments/production/` can slot in later for real
-`secret-openbao` / `cluster-k0sctl` infra with zero rename.
+The repo's local, single-node reference composition. Today: the local
+OpenBao / Transit signing backend the digest-as-source-of-truth pipeline's
+approval gate uses, plus the interim **Tekton Pipelines** install the
+`ci/` concern's build TaskRun needs (`§ Tekton` below). This environment
+**owns** the OpenBao unit (`./openbao/`, `module "secret_openbao_local"`)
+and the scripts that bring it up (`scripts/openbao-*.sh`) — ADR 0012 — and
+owns vendored-upstream installs like Tekton's controller (never `ci/`,
+same split as OpenBao). Named `local` (not left at repo root) so
+`environments/production/` can slot in later for real `secret-openbao` /
+`cluster-k0sctl` infra with zero rename.
 
 The OpenBao daemon is **machine-global** (one per developer machine, not
 one per git worktree — ADR 0010): a pitchfork *global* daemon
@@ -136,6 +139,48 @@ bao operator generate-root -init
 # recovery-key share; write the new token:
 printf '%s' "<new root token>" > "$OPENBAO_STATE_DIR/root.token" && chmod 600 "$_"
 ```
+
+## Tekton (interim — replaced by Flux in T7c)
+
+The `ci/` concern's `buildkit-build` Task runs on `orb start k8s` and needs
+the Tekton Pipelines controller installed once per cluster:
+
+```
+mise run local:tekton:install          # kubectl apply --server-side, pinned v1.6.0
+```
+
+**Keeping `orb start k8s` up (optional DX).** One OrbStack k8s cluster per
+machine, shared across worktrees — so, like the OpenBao daemon (ADR 0010),
+it belongs in the **machine-global** pitchfork config, not the repo
+`pitchfork.toml`. Add to `~/.config/pitchfork/config.toml`:
+
+```toml
+[daemons.orb-k8s]
+run = "orb start k8s"
+auto = ["start"]
+```
+
+`orb start k8s` is idempotent and returns once the cluster is up; it does
+**not** keep k8s healthy (Codex #8). So `ci/scripts/ci-taskrun.sh` and
+`ci-chainsaw.sh` always run their own `kubectl` readiness check and fail /
+skip with a clear message — the daemon is a convenience, not a guarantee.
+
+Pinned to **Tekton Pipelines v1.6.0**. `previous/v1.6.0/release.yaml` has
+sha256 `d0f6dc1dc7afe7f8725075ee07f6bf8eb01dd246f41ea404ed32e9ab023425ba`
+(GCS bucket path uses the pipeline COMPONENT version, not the GitHub
+release-train tag — `previous/v1.15.1/` 404s). Verify before the first
+apply:
+
+```
+curl -sSL https://storage.googleapis.com/tekton-releases/pipeline/previous/v1.6.0/release.yaml | shasum -a 256
+```
+
+This is **interim**: T7c moves it to a Flux `OCIRepository` /
+`Kustomization` under `environments/local/tekton/`, and the
+`local:tekton:install` task is retired then (`TODOS.md` T7, ADR 0014). The
+`ci/` kubeconform gate validates against Tekton v1 CRD schemas vendored
+from this same version at `ci/tests/crd-schemas/` — refresh both together
+on a version bump.
 
 ## Notes
 
