@@ -66,8 +66,12 @@ build ─▶ scan+gate ─▶ evidence referrers ─▶ human approval ─▶ co
    CycloneDX SBOM, both attached to the image digest as OCI 1.1 referrers
    (`trivy` + `oras attach`, not `buildx --sbom` — that emits SPDX embedded
    in the image index, not a Referrers-API referrer). The scan report is
-   attached *before* the blocking `--severity CRITICAL --exit-code 1` gate,
-   so a reject-worthy image still carries the evidence a human reads. Zero
+   attached (`scan-attach` Task) *before* the blocking gate (`gate` Task —
+   `trivy convert --severity=CRITICAL --exit-code=2` re-reading that same
+   `scan.json`), so a reject-worthy image still carries the evidence a
+   human reads and the gate verdict cannot drift from it. `--exit-code=2`,
+   not 1: trivy returns 1 for both a match and an internal error, so 2
+   marks the real CRITICAL verdict and 1 stays "gate errored". Zero
    suppressions — there is no `.trivyignore`.
 
 3. **Evidence referrers** — the digest ends up carrying a CycloneDX SBOM
@@ -164,23 +168,26 @@ attestation/                         # the consumer-agnostic sign+verify seam (A
 
 deploy/frontend/                     # the per-consumer instantiation for cv_frontend:
   Dockerfile, Dockerfile.dockerignore   #   the distroless build (ADR 0007)
+  pipelinerun.cue                       #   T7b3 — the per-consumer PipelineRun, plain CUE (NOT a Timoni module); cue export -t rev/defsRev
+  scripts/frontend-build.sh            #   T7b3 — mise run frontend:build — render pipelinerun.cue + create + watch + print digest + attestation:sign line
   scripts/frontend-deploy.sh            #   mise run frontend:deploy — verify + record + restart + readiness check
   scripts/frontend-serve.sh            #   pitchfork frontend daemon entrypoint (ADR 0009)
-  scripts/lib/frontend.sh               #   frontend_repo_root + the TOOLBOX_ATTESTATION_VERIFY seam
+  scripts/lib/frontend.sh               #   frontend_repo_root + TOOLBOX_ATTESTATION_VERIFY seam + frontend_kube/tkn/strict_digest/host_image (T7b3)
   scripts/tests/*.bats + helper.bash
 
 ci/                                  # reusable Tekton defs (distribution mechanism decided in the T7c pre-plan — ADR 0014)
   tasks/buildkit-build.yaml            #   T7a ✓ — buildctl-daemonless rootless build (T7b1: push $(IMAGE):$(APP_REVISION) to zot, no result; mirror via buildkitd-config workspace)
   tasks/git-clone.yaml                 #   T7b1 — anonymous clone of cv_frontend + toolbox at pinned SHAs into one workspace (step 0: disable-ipv6 sysctl)
   tasks/scan-attach.yaml               #   T7b2 — trivy json + native cyclonedx (one DB pull) → oras attach ×2 as OCI referrers; never blocks (step 0: disable-ipv6 sysctl)
-  tasks/gate.yaml                      #   T7b3 — trivy convert --exit-code 1 --severity CRITICAL on the same scan.json (LAST)
-  pipelines/build-scan-approve.yaml    #   T7b1/T7b2 — clone-app → clone-defs → build → scan-attach (shared + buildkitd-config workspaces, retries on clones); gate T7b3
+  tasks/gate.yaml                      #   T7b3 ✓ — trivy convert --scanners=vuln --exit-code=2 --severity=CRITICAL on the same scan.json (LAST; no privileged step)
+  pipelines/build-scan-approve.yaml    #   T7b1/T7b2/T7b3 — clone-app → clone-defs → build → scan-attach → gate (shared + buildkitd-config workspaces, retries on clones)
   runtime/namespace.yaml               #   T7a ✓ — the `ci` namespace (no RBAC — the build SA needs none)
   runtime/buildkitd-mirror.yaml        #   T7b1-followup — buildkitd.toml ConfigMap: mirror docker.io + gcr.io → in-cluster zot (interim; OrbStack IPv6-egress defect)
   scripts/registry-seed.sh             #   T7b1-followup — host crane-copy of a Dockerfile's base images into zot (mise run frontend:seed)
   scripts/kubeconform-scan.sh + chainsaw-test.sh + lib/ci.sh + tests/   # T7a ✓ (tekton-taskrun.sh deleted in T7b1)
-  tests/crd-schemas/{task,pipeline}_v1.json  #   Tekton v1 CRD schemas (vendored from the pinned release) for kubeconform
-  tests/build-pipeline/chainsaw-test.yaml    #   [k8s]-gated: webhook accepts git-clone + buildkit-build + the Pipeline; no script:; posture + DAG
+  tests/crd-schemas/{task,pipeline,pipelinerun}_v1.json  #   Tekton v1 CRD schemas (vendored from the pinned release) for kubeconform
+  tests/build-pipeline/chainsaw-test.yaml    #   [k8s]-gated: webhook accepts the 5 defs; no script:; posture + full DAG + G1 standalone gate TaskRun
+  tests/build-pipeline/fixtures/scan-*.yaml  #   trivy-report ConfigMaps (critical/clean/malformed) for the G1 gate test
 
 environments/local/                  # the ONE deployment target — owns its OpenBao unit + orchestration
   main.tf                               #   applies module "secret_openbao_local" { source = "./openbao" }
@@ -251,9 +258,12 @@ independently (Gall's Law). The full sequencing lives in `TODOS.md`.
   step, working around this OrbStack cluster's IPv6-egress defect (the only
   privileged container in the pipeline); **T7b2** `scan-attach` Task (trivy
   json + native cyclonedx, one DB pull, `oras attach` ×2 — its own
-  `disable-ipv6` step for the DB pull); **T7b3** `gate` Task + the full Pipeline + a
-  `deploy/frontend/` Timoni module rendering the on-demand `PipelineRun` + an
-  end-to-end demo. **T7c** — a pre-plan (Flux reconciliation model + the defs
+  `disable-ipv6` step for the DB pull); **T7b3** `gate` Task + the full Pipeline +
+  `deploy/frontend/pipelinerun.cue` (plain CUE + `cue export -t`, NOT a Timoni
+  module — a PipelineRun is fire-and-forget) rendered by `frontend-build.sh`
+  (`mise run frontend:build`) + an end-to-end demo. The first real Timoni
+  module is the `cv_frontend` **app deployment**, authored during/after T7c.
+  **T7c** — a pre-plan (Flux reconciliation model + the defs
   distribution mechanism), then local Flux reconciles `ci/**` +
   `environments/local/`. **Distribution phase** — pin + cosign-sign the defs,
   retire `build-cv-frontend.yml`. **T7d** — Flux-manage zot + a production

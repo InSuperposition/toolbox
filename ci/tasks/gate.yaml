@@ -1,0 +1,72 @@
+# T7b3 — the blocking CRITICAL gate. Runs last (`runAfter: [scan-attach]`)
+# in build-scan-approve.yaml; a CRITICAL finding fails the PipelineRun.
+#
+# Consumer-agnostic (ADR 0014, rules/boundary-ci.yml): no params, no
+# consumer name — it reads a fixed file off the shared workspace.
+#
+# No embedded shell (CLAUDE.md § Constraints): one pinned `trivy`
+# `command` + `args`, never a `script:` block.
+#
+#   trivy convert --scanners=vuln --exit-code=2 --severity=CRITICAL \
+#     --format=table scan.json
+#
+# `--scanners=vuln` is set so `convert` re-emits the vuln report without a
+# "no enabled scanners" warning — scan-attach ran a vuln-only scan.
+#
+# `convert` re-renders the SAME `scan.json` that scan-attach wrote and
+# attached as the `vnd.trivy.report+json` referrer — so the gate verdict
+# cannot drift from the evidence on the image.
+#
+# Exit codes (verified against trivy 0.74.0):
+#   0  no CRITICAL           -> pipeline continues
+#   2  CRITICAL match        -> pipeline fails, a real vulnerability verdict
+#   1  trivy error           -> pipeline fails, NOT a verdict (malformed
+#                               scan.json / missing file / decode error)
+# `--exit-code=2` (not 1) is deliberate: trivy returns 1 for BOTH a match
+# and an internal error, so 1 alone cannot tell them apart. With 2 for the
+# match, `frontend-build.sh` reads this step's terminated exitCode and only
+# shows the loud "CRITICAL found, signing is a deliberate override" box on
+# exactly 2 — a 1 is reported as "gate ERRORED, see logs".
+#
+# No `disable-ipv6` step (unlike git-clone / buildkit-build / scan-attach):
+# `convert` reads a LOCAL file, makes no network call, so nothing here is
+# privileged. This keeps `gate` the simplest Task in the set.
+#
+# Steps run as root (`stepTemplate`, like scan-attach): scan.json is written
+# into the OrbStack `local-path` PVC by trivy running uid 0 in scan-attach,
+# and that PVC is not reliably group-readable under `fsGroup`.
+#
+# Image: the SAME pinned trivy digest scan-attach uses — one digest to bump.
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: gate
+  labels:
+    app.kubernetes.io/part-of: toolbox-ci
+spec:
+  description: >-
+    Fail the pipeline on a CRITICAL vulnerability. Re-renders the scan.json
+    that scan-attach produced (and attached as an OCI referrer) with
+    `trivy convert --exit-code=2 --severity=CRITICAL`, so the blocking
+    verdict is read from the same evidence bytes hung off the image digest.
+  workspaces:
+    - name: shared
+      description: >-
+        The per-run PVC. Reads scan.json from its root — the trivy JSON
+        report scan-attach wrote there.
+  stepTemplate:
+    securityContext:
+      runAsUser: 0
+      runAsGroup: 0
+  steps:
+    - name: gate
+      image: docker.io/aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+      workingDir: $(workspaces.shared.path)
+      command: ["trivy"]
+      args:
+        - convert
+        - --scanners=vuln
+        - --exit-code=2
+        - --severity=CRITICAL
+        - --format=table
+        - scan.json

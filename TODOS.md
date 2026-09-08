@@ -283,9 +283,11 @@ re-cut the arc around a **composable `ci/` concern**. T7a plan:
 - `deploy/frontend/Dockerfile` line 1 `# syntax=` **pinned by digest** in T7a
   (Codex: unpinned frontend = input-trust hole, distinct from timestamp
   reproducibility).
-- **`deploy/frontend/` becomes a Timoni module** for the on-demand `PipelineRun`
-  (T7b3) — the deliberate first step of a `deploy/` → Timoni conversion ahead of
-  the T7c Flux migration.
+- **`deploy/frontend/pipelinerun.cue`** renders the on-demand `PipelineRun`
+  (T7b3, DONE) — **plain CUE + `cue export -t`, not a Timoni module** (a
+  PipelineRun is fire-and-forget; Timoni's footprint only pays off for a
+  reconciled Instance). The first real Timoni module is the `cv_frontend` **app
+  deployment**, during/after T7c.
 
 **T7a — rootless BuildKit feasibility spike, then the `ci/` concern.**
 _Prove first._ **Step 1 ✓ PASSED 2026-09-08** — daemonless rootless BuildKit
@@ -475,22 +477,63 @@ pin mechanism). Sub-phased, each ships + tests on its own:
   shows both referrers on `sha256:7bda3c3e…` —
   `application/vnd.trivy.report+json` + `application/vnd.cyclonedx+json`.
   `mise run check` green.
-- **T7b3** — `ci/tasks/gate.yaml` (`trivy convert --exit-code 1 --severity
-  CRITICAL` on the step-1 `scan.json` — gate + SBOM can't disagree) + full
-  `ci/pipelines/build-scan-approve.yaml` (`clone → build → scan-attach → gate`) +
-  chainsaw harness + `deploy/frontend/` **Timoni module** rendering the on-demand
-  `PipelineRun` + `frontend-build.sh` (render → `kubectl create` → watch to a
-  terminal state, exit non-zero on Failed, LOUD gate-fail warning, `oras resolve`
-  + `ci_is_strict_digest` the digest, print it, delete the run). **End-to-end
-  demo with a known-good `cv_frontend` SHA**: fire a run → `oras resolve` →
-  `mise run attestation:sign` → `mise run frontend:deploy` → container serves the
-  **expected content with HTTP 200**.
-  _Timoni scope note:_ the module also renders the **build/clone Task
-  `podTemplate`** — the T7b1-followup `disable-ipv6` step + the `buildkitd.toml`
-  ConfigMap workspace land here as git-visible rendered YAML (not a Kyverno
-  admission mutation — see the Kyverno entry). One place defines the interim
-  IPv6 workaround; `/investigate` 2026-09-08 recommended Timoni-render over
-  Kyverno-mutate for auditability.
+- **T7b3 — DONE 2026-09-09 (branch `t7b3-gate-timoni`).** Plan
+  `~/.claude/plans/t7b3-gate-cue-render.md` (ENG CLEARED, 9 Codex findings
+  folded). Shipped:
+  - `ci/tasks/gate.yaml` — one step,
+    `trivy convert --scanners=vuln --exit-code=2 --severity=CRITICAL --format=table scan.json`,
+    reads the same `scan.json` `scan-attach` attached. **`--exit-code=2`, not 1**
+    (plan A4 correction): trivy returns 1 for a match AND an internal error, so 2
+    marks the CRITICAL verdict and 1 stays "gate errored". No `disable-ipv6` /
+    privileged step — reads a local file. Wired `runAfter: [scan-attach]`.
+  - `deploy/frontend/pipelinerun.cue` — **plain CUE, not a Timoni module**
+    (plan D1): a PipelineRun is fire-and-forget, so Timoni's module + bundle +
+    ~1.3 MB vendored `cue.mod` footprint doesn't pay off. `_rev` / `_defsRev`
+    are hex-regex `@tag` injection points → `cue export` fails closed on a
+    missing / non-hex value. One place holds both registry hostnames.
+  - `deploy/frontend/scripts/frontend-build.sh` (`mise run frontend:build`) —
+    preflight (context / Pipeline+gate / buildkitd CM / zot / `frontend:seed`) →
+    `cue export -t` → `kubectl create` (namespaced `ci`, 15m timeout) →
+    poll `.status.conditions[Succeeded]` off `Unknown` (client bound ~16m) →
+    success: `oras resolve` + `frontend_strict_digest` (exit 5 on non-canonical),
+    print this run's scan-report referrer digest, delete the run, print the
+    `attestation:sign` line; failure: keep the run, classify by the `gate` step's
+    exitCode (2 = loud CRITICAL box, 1 = "gate ERRORED not a verdict", else a
+    task failed before the gate). `lib/frontend.sh` gained `frontend_kube` /
+    `frontend_tkn` (context + `-n ci` pinned), `frontend_strict_digest`,
+    `frontend_host_image`.
+  - chainsaw: accepts the 5 defs, `gate` 1 step / no `script:` / unprivileged,
+    DAG gains `gate`; **G1** — standalone `gate` TaskRun vs
+    `fixtures/scan-{critical,clean,malformed}.yaml` asserting the step exitCode
+    (2 / 0 / 1). Ran live green.
+  - `ci/tests/crd-schemas/pipelinerun_v1.json` vendored; `frontend-build.bats`
+    (24 cases) renders the real cue file + kubeconforms it.
+  - **First real Timoni module = the `cv_frontend` app deployment**, authored
+    during/after T7c once the Flux reconciliation model + ADR 0009 (pitchfork vs
+    k8s) are settled. The build/clone Task `podTemplate` (the `disable-ipv6`
+    step + `buildkitd.toml` workspace) stays plain committed YAML under `ci/` —
+    it is **not** Timoni-rendered (superseded: the earlier "Timoni renders the
+    podTemplate" note assumed the deploy/frontend module would exist at T7b3).
+  - **End-to-end demo — RUN 2026-09-09 (live, orb k8s).**
+    `mise run frontend:build -- db174d91` → the full DAG ran in-cluster
+    (`clone-app → clone-defs → build → scan-attach → gate`, all Succeeded, gate
+    3s), `frontend-build.sh` resolved `sha256:15f93475…`, printed this run's
+    scan-report referrer `sha256:6709e3b2…`, deleted the run, printed the
+    `attestation:sign` line, exit 0. `mise run attestation:sign` then signed it
+    (attestation `sha256:35df3a31…`) — its evidence summary shows the **same**
+    scan-report referrer `sha256:6709e3b2…`, so the build → sign evidence chain
+    is intact (A5). **Failure path:** `mise run frontend:build --
+    0000…0000` (non-existent SHA) → clone-app Failed → "PipelineRun … failed
+    (Failed) before the gate ran", run KEPT with inspect commands, exit 1.
+    `frontend:deploy` not re-run here — unchanged since T5b (live sign→verify
+    round-trip already proven), and `cv_frontend`'s Remix v3
+    `IMPORT_OUTSIDE_FILE_MAP` crash is an honest PASS of the mechanism (ADR
+    0009). The gate's CRITICAL-block path is proven by chainsaw G1 (exitCode 2 →
+    TaskRun Failed) + `frontend-build.bats` (exitCode 2 → loud override box).
+  - **P3 follow-ups opened by this PR** (see § "T7b3 P3 follow-ups" below):
+    the exact scan-referrer digest threaded through `attestation:sign` →
+    `frontend:deploy` (evidence integrity, Codex #4); `frontend-deploy.sh`
+    readiness tightened to HTTP 2xx + expected body (Codex #8).
 
 **The digest is never a Tekton result** — tasks address the image by
 `$(IMAGE):$(APP_REVISION)`, ordering is `runAfter`, and `oras resolve` produces
@@ -500,6 +543,22 @@ the immutable digest once at the operator boundary (the only value-consumer,
 ADR 0001 holds — the signed chain still pins the digest.
 
 Effort: ~5–6 days across T7b0–T7b3 (T7a's "simple" bits each ran long).
+
+**T7b3 P3 follow-ups** (opened by the T7b3 eng + Codex review, not blocking):
+
+- **Exact scan-referrer digest through the sign → deploy chain** — P3. Today
+  `attestation-sign.sh` picks the `last`-of-type `vnd.trivy.report+json`
+  referrer; on a byte-identical rebuild (same digest) several can co-exist, so
+  the pick is arbitrary. `frontend-build.sh` mitigates by printing this run's
+  referrer digest for the operator to eyeball. Full fix: a new positional arg
+  threaded `attestation:sign` → predicate `scanReportRef` → `frontend:deploy`.
+  Touches the signer's signature + `frontend-deploy.sh` — its own PR. (Codex #4,
+  reclassified **evidence integrity**, not auth.)
+- **Tighten `frontend-deploy.sh` readiness** — P3. `frontend-deploy.sh:~67`
+  accepts any non-`000` HTTP code as "serving". D6 keeps the T5b stance (a
+  `cv_frontend` runtime crash is an honest PASS of the *mechanism*); tightening
+  to HTTP 2xx + an expected body is a separate change to the consume seam.
+  (Codex #8 original.)
 
 **T7c — local Flux + a pre-plan first.** flux2 + flux-operator (already pinned)
 reconciles `ci/**` + `environments/local/` (incl. the interim `local:tekton:install`
@@ -531,8 +590,8 @@ the seed + mirror is still load-bearing or just an optimization.
 push` → digest, or `flux push artifact` → `OCIRepository` digest), `@sha256:`
 pinned in `deploy/frontend/`, cosign-signed; then **delete
 `.github/workflows/build-cv-frontend.yml`** once build + evidence + approval +
-consumption are demonstrated in-cluster end to end (T7b3 already demonstrates the
-chain — this phase adds the pinned distribution and retires the GHA path). **Do
+consumption are demonstrated in-cluster end to end (T7b3 builds the chain; its
+end-to-end demo closes it — this phase adds pinned distribution, retires GHA). **Do
 not carry `build-cv-frontend.yml`'s embedded `run:` shell** (`:48` `tr`
 lowercase, `:98` digest-extract + `case` guard) into anything — extract to a
 tested script or delete with the workflow.

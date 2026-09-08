@@ -28,8 +28,48 @@ consumer.
   local run, `mise run frontend:seed` mirrors this `Dockerfile`'s
   digest-pinned base images into the in-cluster zot (the OrbStack
   IPv6-egress defect — `ci/README.md` § Deterministic builds on OrbStack,
-  `TODOS.md` T7b1-followup). The per-consumer `PipelineRun` lands here in
-  T7b3 (a Timoni module).
+  `TODOS.md` T7b1-followup). The per-consumer `PipelineRun` is
+  `pipelinerun.cue` here (**plain CUE**, not a Timoni module), rendered by
+  `scripts/frontend-build.sh` (`mise run frontend:build`, T7b3).
+
+## Build (T7b3)
+
+```
+mise run frontend:build -- <cv_frontend-sha>
+```
+
+`scripts/frontend-build.sh` is the operator entrypoint for the in-cluster
+build/scan/gate pipeline:
+
+1. Preflights the cluster prerequisites — a reachable `${TOOLBOX_KUBE_CONTEXT:-orbstack}`
+   context, the `build-scan-approve` Pipeline present **and carrying the
+   `gate` task**, the `buildkitd-mirror` ConfigMap in `ns ci`, zot on
+   `localhost:30500`, and (idempotently, via `mise run frontend:seed`) the
+   Dockerfile's base images in zot. Each missing prerequisite names its fix
+   and exits 3.
+2. Renders `pipelinerun.cue` with `cue export -t rev=<sha> -t defsRev=<toolbox-ref>`
+   — a missing or non-hex SHA fails the render closed. `TOOLBOX_DEFS_REF`
+   overrides the toolbox ref (default: `HEAD`); a Dockerfile that differs
+   from that ref is a warning (the pipeline clones the ref, not your tree).
+3. `kubectl create`s the PipelineRun (namespaced `ci`, 15m server-side
+   timeout), streams `tkn` logs, and polls `.status.conditions[Succeeded]`
+   until it leaves `Unknown` (client bound ~16m).
+4. **Succeeded** → `oras resolve` the manifest digest (rejected unless a
+   canonical `sha256:<64hex>` — exit 5), print this run's
+   `vnd.trivy.report+json` referrer digest for the operator to eyeball,
+   delete the run, and print the exact next line:
+   `mise run attestation:sign -- localhost:30500/cv-frontend@<digest>`.
+5. **Failed** → the run + pods are kept. If the `gate` step is what failed,
+   its terminated exitCode classifies the message: `2` → the loud
+   "CRITICAL found, signing is a deliberate override" box; `1` → "gate
+   ERRORED, not a vulnerability verdict"; otherwise a task failed before
+   the gate ran.
+
+The manifest digest is resolved once, here, by the operator — never a
+Tekton result (ADR 0001). `pipelinerun.cue` is the single source of both
+registry hostnames: the pipeline pushes/scans over
+`zot.zot.svc.cluster.local:5000/cv-frontend`, every host-side tool uses
+`localhost:30500/cv-frontend`, the digest is the same.
 
 ## Consume + deploy (T5b)
 

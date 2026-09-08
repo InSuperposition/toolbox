@@ -121,7 +121,7 @@ missing=""
 [ -n "$scan_ref" ] || missing="${missing:+$missing, }trivy scan report ($SCAN_ARTIFACT_TYPE)"
 if [ -n "$missing" ]; then
 	echo "attestation-sign: build evidence missing on this digest: $missing" >&2
-	echo "  run the T4 workflow (.github/workflows/build-cv-frontend.yml) for this SHA first" >&2
+	echo "  build this SHA first: mise run frontend:build -- <cv_frontend-sha>" >&2
 	exit 4
 fi
 

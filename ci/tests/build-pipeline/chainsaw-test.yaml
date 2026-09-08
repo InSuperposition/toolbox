@@ -11,6 +11,12 @@
 # needs registry + git egress and a ~90s build; it is proven by an
 # operator `tkn pipeline start` (recorded in TODOS.md T7b1) the same way
 # T7a's spike proved buildkit. T7b2/T7b3 add scan/attach/gate to this file.
+#
+# T7b3 G1 — the gate's blocking path is proven WITHOUT a build: a standalone
+# `gate` TaskRun reads a fixture scan.json (a ConfigMap workspace) and its
+# terminated exitCode is asserted: 2 on a CRITICAL finding (TaskRun fails),
+# 0 on a LOW-only report (TaskRun succeeds), 1 on a malformed report (TaskRun
+# fails, but as an error not a verdict). Fixtures: fixtures/scan-*.yaml.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -26,6 +32,8 @@ spec:
         - apply:
             file: ../../tasks/scan-attach.yaml
         - apply:
+            file: ../../tasks/gate.yaml
+        - apply:
             file: ../../pipelines/build-scan-approve.yaml
         - assert:
             resource:
@@ -39,6 +47,12 @@ spec:
               kind: Task
               metadata:
                 name: scan-attach
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: gate
         - assert:
             resource:
               apiVersion: tekton.dev/v1
@@ -73,6 +87,15 @@ spec:
                 name: scan-attach
               spec:
                 (length(steps)): 5
+                (steps[?script != null]): []
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: gate
+              spec:
+                (length(steps)): 1
                 (steps[?script != null]): []
     - name: build-posture-has-not-drifted
       try:
@@ -143,6 +166,19 @@ spec:
                     (securityContext.privileged || 'unset'): unset
                   - name: oras-attach-sbom
                     (securityContext.privileged || 'unset'): unset
+    - name: gate-has-no-privileged-step
+      try:
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: gate
+              spec:
+                steps:
+                  - name: gate
+                    command: [trivy]
+                    (securityContext.privileged || 'unset'): unset
     - name: pipeline-shape
       try:
         - assert:
@@ -185,3 +221,94 @@ spec:
                     workspaces:
                       - name: shared
                         workspace: shared
+                  - name: gate
+                    runAfter: [scan-attach]
+                    taskRef:
+                      name: gate
+                    workspaces:
+                      - name: shared
+                        workspace: shared
+    # G1 — the gate's blocking path, no build required. A standalone `gate`
+    # TaskRun reads a fixture scan.json off a ConfigMap workspace; the
+    # terminated exitCode of its one step is the assertion.
+    - name: gate-fails-a-taskrun-on-a-critical-finding
+      try:
+        - apply:
+            file: fixtures/scan-critical.yaml
+        - apply:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: TaskRun
+              metadata:
+                name: gate-critical
+              spec:
+                taskRef:
+                  name: gate
+                workspaces:
+                  - name: shared
+                    configMap:
+                      name: gate-fixture-critical
+        - assert:
+            timeout: 240s
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: TaskRun
+              metadata:
+                name: gate-critical
+              status:
+                (conditions[?type == 'Succeeded'] | [0].status): "False"
+                (steps[?name == 'gate'] | [0].terminated.exitCode): 2
+    - name: gate-passes-a-taskrun-with-no-critical-finding
+      try:
+        - apply:
+            file: fixtures/scan-clean.yaml
+        - apply:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: TaskRun
+              metadata:
+                name: gate-clean
+              spec:
+                taskRef:
+                  name: gate
+                workspaces:
+                  - name: shared
+                    configMap:
+                      name: gate-fixture-clean
+        - assert:
+            timeout: 240s
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: TaskRun
+              metadata:
+                name: gate-clean
+              status:
+                (conditions[?type == 'Succeeded'] | [0].status): "True"
+                (steps[?name == 'gate'] | [0].terminated.exitCode): 0
+    - name: gate-errors-not-a-verdict-on-a-malformed-report
+      try:
+        - apply:
+            file: fixtures/scan-malformed.yaml
+        - apply:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: TaskRun
+              metadata:
+                name: gate-malformed
+              spec:
+                taskRef:
+                  name: gate
+                workspaces:
+                  - name: shared
+                    configMap:
+                      name: gate-fixture-malformed
+        - assert:
+            timeout: 240s
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: TaskRun
+              metadata:
+                name: gate-malformed
+              status:
+                (conditions[?type == 'Succeeded'] | [0].status): "False"
+                (steps[?name == 'gate'] | [0].terminated.exitCode): 1

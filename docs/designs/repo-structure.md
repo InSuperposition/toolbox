@@ -153,7 +153,8 @@ approve                   attestation:sign               → attestation/scripts
 verify-approval           attestation:verify             → attestation/scripts/attestation-verify.sh
 consume                   frontend:deploy                → deploy/frontend/scripts/frontend-deploy.sh
 (new, T7b1-followup)      frontend:seed                  → ci/scripts/registry-seed.sh deploy/frontend/Dockerfile
-(T7a; deleted T7b1)       ci:taskrun                     — replaced by `tkn pipeline start build-scan-approve`
+(new, T7b3)               frontend:build                 → deploy/frontend/scripts/frontend-build.sh
+(T7a; deleted T7b1)       ci:taskrun                     — replaced by `mise run frontend:build` / `tkn pipeline start build-scan-approve`
 (new, T7a)                local:tekton:install           inline: kubectl --context orbstack apply --server-side -f <pinned release.yaml>
 (new, T7b0)               local:zot:install              inline: kubectl --context orbstack apply -f environments/local/zot/zot.yaml
 (new, T7b0)               local:zot:wait                 inline: kubectl --context orbstack -n zot wait --for=condition=Available deploy/zot
@@ -199,11 +200,14 @@ toolbox/
 ├── deploy/
 │   └── frontend/                                     one consumer of an approved image
 │       ├── Dockerfile  Dockerfile.dockerignore  README.md
+│       ├── pipelinerun.cue                           T7b3 — the per-consumer PipelineRun, plain CUE (not a Timoni module); `cue export -t rev=<sha> -t defsRev=<toolbox-ref>`
 │       └── scripts/
+│           ├── frontend-build.sh                     T7b3 — `mise run frontend:build` — render + create + watch the pipeline, print the digest + attestation:sign line
 │           ├── frontend-deploy.sh                    (was consume.sh)
 │           ├── frontend-serve.sh                     (was run.sh — pitchfork entrypoint)
 │           ├── lib/frontend.sh
 │           └── tests/
+│               ├── frontend-build.bats               fake cluster/registry/git/mise; real cue renders pipelinerun.cue
 │               ├── frontend-deploy.bats
 │               ├── frontend-serve.bats               (one case uses the DEFAULT verify path)
 │               └── fixtures/
@@ -240,9 +244,10 @@ toolbox/
 │   ├── tasks/
 │   │   ├── git-clone.yaml                             T7b1 — blobless shallow clone at a pinned SHA; no script: (step 0: disable-ipv6 sysctl)
 │   │   ├── buildkit-build.yaml                        T7a posture — buildctl-daemonless rootless build → push $(IMAGE):$(APP_REVISION); mirror via buildkitd-config workspace
-│   │   └── scan-attach.yaml                           T7b2 — trivy JSON + native CycloneDX (one DB pull) → oras attach ×2 as OCI referrers; never blocks; no script:
+│   │   ├── scan-attach.yaml                           T7b2 — trivy JSON + native CycloneDX (one DB pull) → oras attach ×2 as OCI referrers; never blocks; no script:
+│   │   └── gate.yaml                                  T7b3 — trivy convert --exit-code=2 --severity=CRITICAL over scan.json; fails the run on CRITICAL; no privileged step
 │   ├── pipelines/
-│   │   └── build-scan-approve.yaml                    T7b1/T7b2 — clone-app → clone-defs → build → scan-attach (shared + buildkitd-config workspaces, retries on clones); gate T7b3
+│   │   └── build-scan-approve.yaml                    T7b1/T7b2/T7b3 — clone-app → clone-defs → build → scan-attach → gate (shared + buildkitd-config workspaces, retries on clones)
 │   ├── runtime/
 │   │   ├── namespace.yaml                             the `ci` namespace (no RBAC)
 │   │   └── buildkitd-mirror.yaml                      T7b1-followup — buildkitd.toml ConfigMap: mirror docker.io + gcr.io → in-cluster zot (interim; OrbStack IPv6-egress defect)
@@ -252,8 +257,9 @@ toolbox/
 │   │   ├── lib/ci.sh                                  repo-root, strict sha256 digest guard, kube-context guard
 │   │   └── tests/*.bats + helper.bash                 gate-script skip/fail cases (no [k8s] bats)
 │   └── tests/
-│       ├── build-pipeline/chainsaw-test.yaml          [k8s]-gated — webhook accepts the 4 defs, no script:, per-Task posture + the clone→build→scan-attach DAG
-│       └── crd-schemas/{task,pipeline}_v1.json        vendored Tekton v1 CRD schemas for kubeconform
+│       ├── build-pipeline/chainsaw-test.yaml          [k8s]-gated — webhook accepts the 5 defs, no script:, per-Task posture, clone→…→gate DAG + G1 standalone gate TaskRun vs fixtures
+│       ├── build-pipeline/fixtures/scan-*.yaml        trivy-report ConfigMaps (critical/clean/malformed) for the G1 gate test
+│       └── crd-schemas/{task,pipeline,pipelinerun}_v1.json  vendored Tekton v1 CRD schemas for kubeconform
 │
 ├── modules/
 │   └── README.md                                     "reusable, versioned, URL-consumed OT modules only"
