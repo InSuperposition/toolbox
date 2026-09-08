@@ -40,3 +40,41 @@ frontend_attestation_verify() {
 	fi
 	"$verify" "$@"
 }
+
+# --- frontend-build.sh helpers (T7b3) --------------------------------------
+# frontend-build.sh fires the in-cluster build/scan/gate PipelineRun and
+# watches it. deploy/frontend may NOT depend on ci/ (repo-structure.md
+# § concerns), so the strict-digest check that ci/scripts/lib/ci.sh also
+# carries is INLINED here, not sourced.
+
+# frontend_kube_context — the kube-context every kubectl/tkn call is pinned
+# to (A3 / Codex #7: never act on whatever context is current). Test seam.
+frontend_kube_context() { printf '%s\n' "${TOOLBOX_KUBE_CONTEXT:-orbstack}"; }
+
+# frontend_kube <args...> / frontend_tkn <args...> — kubectl / tkn with the
+# context AND the `ci` namespace forced. Use these, never a bare kubectl/tkn
+# (the default-vs-ci namespace bug that bit twice in T7b1fu / T7b2).
+frontend_kube() { kubectl --context "$(frontend_kube_context)" -n ci "$@"; }
+frontend_tkn() { tkn --context "$(frontend_kube_context)" -n ci "$@"; }
+
+# frontend_strict_digest <s> — true only for a canonical manifest digest:
+# literally "sha256:" + exactly 64 lowercase hex. The digest IS the trust
+# boundary (ADR 0001); a tag, a short digest, or uppercase hex is a hard
+# reject. (Same logic as ci_is_strict_digest — deliberately duplicated
+# across the concern boundary rather than sourced.)
+frontend_strict_digest() {
+	case "$1" in
+	sha256:*)
+		local hex="${1#sha256:}"
+		[ "${#hex}" -eq 64 ] && [ -z "${hex//[0-9a-f]/}" ]
+		;;
+	*) return 1 ;;
+	esac
+}
+
+# frontend_host_image — cv_frontend's loopback registry ref (no tag), read
+# from the ONE place both hostnames live (deploy/frontend/pipelinerun.cue).
+frontend_host_image() {
+	cue export "$(frontend_repo_root)/deploy/frontend/pipelinerun.cue" \
+		-e image.host --out text
+}

@@ -1,11 +1,13 @@
-# T7b1/T7b2 — the in-cluster build pipeline:
-#   clone-app -> clone-defs -> build -> scan-attach.
-# T7b3 adds `gate` (last, blocking on CRITICAL).
+# T7b1/T7b2/T7b3 — the in-cluster build pipeline:
+#   clone-app -> clone-defs -> build -> scan-attach -> gate.
+# `gate` (ci/tasks/gate.yaml) runs last and fails the run on a CRITICAL
+# finding, reading the same scan.json scan-attach attached as evidence.
 #
 # Consumer-agnostic (ADR 0014, rules/boundary-ci.yml): every concrete value
 # is a param. The per-consumer PipelineRun that binds cv_frontend's repo
-# URLs + SHAs + image ref lives in deploy/<consumer>/ (a Timoni module,
-# T7b3). Human approval (`attestation-sign.sh`) and consumption
+# URLs + SHAs + image ref lives in deploy/<consumer>/, rendered from plain
+# CUE (`deploy/frontend/pipelinerun.cue`, T7b3 — not a Timoni module).
+# Human approval (`attestation-sign.sh`) and consumption
 # (`frontend-deploy.sh`) stay OUTSIDE this pipeline.
 #
 # Workspace `shared` is backed by a per-run `volumeClaimTemplate` in the
@@ -35,8 +37,9 @@ metadata:
 spec:
   description: >-
     Clone an app + the toolbox Dockerfile at pinned revisions, build and
-    push a SHA-tagged image with daemonless rootless BuildKit, then scan it
-    with trivy and attach the JSON report + CycloneDX SBOM as OCI referrers.
+    push a SHA-tagged image with daemonless rootless BuildKit, scan it with
+    trivy and attach the JSON report + CycloneDX SBOM as OCI referrers, then
+    fail the run on a CRITICAL finding (the `gate` task).
   params:
     - name: IMAGE
       type: string
@@ -108,5 +111,11 @@ spec:
         - { name: IMAGE, value: $(params.IMAGE) }
         - { name: APP_REVISION, value: $(params.APP_REVISION) }
         - { name: REGISTRY_INSECURE, value: $(params.REGISTRY_INSECURE) }
+      workspaces:
+        - { name: shared, workspace: shared }
+    - name: gate
+      runAfter: [scan-attach]
+      taskRef:
+        name: gate
       workspaces:
         - { name: shared, workspace: shared }

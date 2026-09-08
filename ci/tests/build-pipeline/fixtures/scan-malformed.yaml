@@ -1,0 +1,12 @@
+# G1 fixture: scan.json is not valid JSON. `trivy convert` exits 1 (a decode
+# error), NOT 2 (a CRITICAL match). The TaskRun still fails, but `gate`'s
+# step exitCode is 1 — the signal `frontend-build.sh` uses to report
+# "gate ERRORED, not a vulnerability verdict" instead of the loud override
+# box. This fixture pins that 1-vs-2 distinction at the cluster level.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gate-fixture-malformed
+data:
+  scan.json: |
+    { "SchemaVersion": 2, "Results": [ { "Target": "truncated on purpose

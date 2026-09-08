@@ -9,11 +9,14 @@ digest-as-source-of-truth pipeline
 of the CI pipeline (`TODOS.md` T7) moves the build off GitHub Actions and
 into `orb start k8s`: a `git-clone` Task fetches the app + the toolbox
 Dockerfile at pinned SHAs, a daemonless rootless BuildKit Task builds and
-pushes a **SHA-tagged** image to the local zot, then a `scan-attach` Task
-runs `trivy` and hangs the JSON report + a CycloneDX SBOM off the image
-digest as OCI 1.1 referrers. The work steps are unprivileged; each Task's
-one-shot `disable-ipv6` `sysctl` step is the only privileged container
-(§ Deterministic builds on OrbStack).
+pushes a **SHA-tagged** image to the local zot, a `scan-attach` Task runs
+`trivy` and hangs the JSON report + a CycloneDX SBOM off the image digest
+as OCI 1.1 referrers, and a `gate` Task fails the run on a CRITICAL
+finding (reading the same `scan.json` scan-attach attached, so the verdict
+can't drift from the evidence). The work steps are unprivileged; each
+Task's one-shot `disable-ipv6` `sysctl` step is the only privileged
+container (§ Deterministic builds on OrbStack) — `gate` has none, it reads
+a local file.
 
 This concern **owns** the Task/Pipeline YAML, the `ci` namespace, and the
 scripts that drive a chainsaw run. It **may depend on** `tests/lib` only.
@@ -21,7 +24,10 @@ Like `attestation/`, it **never names a consumer** — the forbidden edge
 `ci ─╳▶ deploy/*` is machine-checked (`rules/boundary-ci.yml`,
 `docs/designs/repo-structure.md` § Enforcement). The per-consumer
 instantiation — a `PipelineRun` binding one consumer's repo URLs, SHAs and
-image ref — lives in `deploy/<consumer>/` (a Timoni module, T7b3).
+image ref — lives in `deploy/<consumer>/`, rendered from **plain CUE**
+(`deploy/frontend/pipelinerun.cue` + `cue export -t`, T7b3 — not a Timoni
+module: a PipelineRun is fire-and-forget, so Timoni's module + bundle +
+vendored `cue.mod` footprint doesn't pay off).
 
 The Tekton **controller** install and **zot** are vendored upstreams, not
 our reusable code — they are `environments/local/`'s concern (interim
@@ -46,14 +52,16 @@ post-T7c distribution phase, once the pinned in-cluster path is stable
 | `tasks/git-clone.yaml` | T7b1 — blobless shallow clone of a public repo at a pinned `REVISION` into `<output>/<SUBDIR>`. Three steps (`disable-ipv6` `sysctl`, `git clone --no-checkout`, `git checkout --detach`), pinned `command` + `args`, **no `script:`**. Reuses the pinned `moby/buildkit:rootless` image (it ships `git`) — one image digest for the whole pipeline. Steps run as root; see § Workspaces. |
 | `tasks/buildkit-build.yaml` | T7a posture, T7b1-rewired — `buildctl-daemonless.sh` rootless build. Context = the `source` workspace; Dockerfile = `$(DOCKERFILE_DIR)` in `build-defs`; `--config /cfg/buildkitd.toml` from the `buildkitd-config` workspace (the registry mirror). Pushes `$(IMAGE):$(APP_REVISION)` (the app git SHA as the tag), `registry.insecure=$(REGISTRY_INSECURE)` (default `true`, for the loopback zot). Two steps (`disable-ipv6`, `build`), pinned `command` + `args`, **no `script:`**, **no Tekton result** (see below), no `dockerconfig` workspace (zot is credential-free). Params only; never names `cv_frontend`. |
 | `tasks/scan-attach.yaml` | T7b2 — `trivy image` × 2 (JSON report → `shared/scan.json`, native CycloneDX SBOM → `shared/sbom.cdx.json`, one shared `--cache-dir` so the vuln DB is pulled once) then `oras attach` × 2 (referrer types `application/vnd.trivy.report+json`, `application/vnd.cyclonedx+json`). Five steps (`disable-ipv6` + 4), pinned `command` + `args`, **no `script:`**, **never blocks** (the CRITICAL gate is a separate Task, T7b3). `TRIVY_INSECURE` / `oras --plain-http=` carry `$(REGISTRY_INSECURE)`. Params only. |
-| `pipelines/build-scan-approve.yaml` | T7b1/T7b2 — the `clone-app → clone-defs → build → scan-attach` DAG over the `shared` workspace + a `buildkitd-config` ConfigMap workspace. `retries: 2` on the clone tasks (OrbStack DNS-timeout mode). T7b3 adds `gate` (last). Consumer values are PipelineRun params. |
+| `tasks/gate.yaml` | T7b3 — the blocking CRITICAL gate. One step: `trivy convert --scanners=vuln --exit-code=2 --severity=CRITICAL --format=table scan.json` over the `shared` workspace. `--exit-code=2` (not 1) so a CRITICAL match and a trivy error are distinguishable — `frontend-build.sh` shows the loud override box only on exactly 2. No `disable-ipv6` step (reads a local file, no network → nothing privileged). Params-free, never names a consumer. |
+| `pipelines/build-scan-approve.yaml` | T7b1/T7b2/T7b3 — the `clone-app → clone-defs → build → scan-attach → gate` DAG over the `shared` workspace + a `buildkitd-config` ConfigMap workspace. `retries: 2` on the clone tasks (OrbStack DNS-timeout mode). Consumer values are PipelineRun params. |
 | `runtime/namespace.yaml` | the `ci` Namespace — nothing else. No `Role`/`RoleBinding`: the steps touch a mounted workspace + a registry, never the k8s API (`automountServiceAccountToken: false` on the pods). |
 | `runtime/buildkitd-mirror.yaml` | the `buildkitd-mirror` ConfigMap — a `buildkitd.toml` mirroring `docker.io` + `gcr.io` to the in-cluster zot. Bound to the build Task's `buildkitd-config` workspace by the PipelineRun. INTERIM + local-specific (§ Deterministic builds on OrbStack). |
 | `scripts/registry-seed.sh` | host-side: `crane copy` every `# syntax=` / `FROM …@sha256:` ref in a Dockerfile into the local zot, digests preserved, so the mirror has the base images. `mise run frontend:seed`. Consumer-agnostic — the Dockerfile is an argument. |
 | `scripts/chainsaw-test.sh` / `kubeconform-scan.sh` / `lib/ci.sh` | the hk `chainsaw` (`[k8s]`-gated) + `kubeconform` gates and their shared shell (repo-root, the strict `^sha256:[0-9a-f]{64}$` guard `ci_is_strict_digest`, the `--context orbstack` guard). |
 | `scripts/tests/*.bats`, `scripts/tests/helper.bash` | pure-shell cases for the gate scripts' skip / fail decisions. No `[k8s]` bats case (the fake-bin shim would fake the gate true, then exec the real binary — a runner failure). |
-| `tests/build-pipeline/chainsaw-test.yaml` | `[k8s]`-gated — the Tekton webhook accepts all four defs, none carries a `script:` field, the spike-proven build `securityContext` (the ceiling) has not drifted, the only privileged container in each Task is its `disable-ipv6` `sysctl` step, and the Pipeline DAG is `clone-app → clone-defs → build → scan-attach` over the `shared` + `buildkitd-config` workspaces. The full `clone → build → push → scan → attach → oras resolve` run is an operator `tkn pipeline start` (recorded in `TODOS.md` T7b1/T7b2), the way T7a's spike proved buildkit. |
-| `tests/crd-schemas/{task,pipeline}_v1.json` | Tekton v1 CRD schemas vendored from the pinned release for `kubeconform` (regenerate on a Tekton bump — `environments/local/README.md` § Tekton). |
+| `tests/build-pipeline/chainsaw-test.yaml` | `[k8s]`-gated — the Tekton webhook accepts all five defs, none carries a `script:` field, the spike-proven build `securityContext` (the ceiling) has not drifted, the only privileged container in each Task is its `disable-ipv6` `sysctl` step (`gate` has none), and the Pipeline DAG is `clone-app → clone-defs → build → scan-attach → gate` over the `shared` + `buildkitd-config` workspaces. **G1** — a standalone `gate` TaskRun against `fixtures/scan-{critical,clean,malformed}.yaml` (ConfigMap workspaces) asserts the step's terminated exitCode: `2` on a CRITICAL (run fails), `0` on a LOW-only report (run passes), `1` on a malformed report (run fails, but an error not a verdict). The full `clone → build → push → scan → attach → gate → oras resolve` run is an operator `mise run frontend:build` (recorded in `TODOS.md` T7b1/T7b2/T7b3). |
+| `tests/build-pipeline/fixtures/scan-{critical,clean,malformed}.yaml` | minimal trivy-JSON-report ConfigMaps for the G1 gate test. |
+| `tests/crd-schemas/{task,pipeline,pipelinerun}_v1.json` | Tekton v1 CRD schemas vendored from the pinned release for `kubeconform` (regenerate on a Tekton bump — `environments/local/README.md` § Tekton). `pipelinerun_v1.json` lets the `frontend-build.bats` render validate the rendered PipelineRun. |
 
 ## Why there is no Tekton `IMAGE_DIGEST` result
 
