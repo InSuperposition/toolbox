@@ -151,8 +151,11 @@ export-approval-pubkey    attestation:export-pubkey      inline: cosign public-k
 approve                   attestation:sign               → attestation/scripts/attestation-sign.sh
 verify-approval           attestation:verify             → attestation/scripts/attestation-verify.sh
 consume                   frontend:deploy                → deploy/frontend/scripts/frontend-deploy.sh
-(new, T7a)                ci:taskrun                     → ci/scripts/tekton-taskrun.sh
+(new, T7a)                ci:taskrun                     → ci/scripts/tekton-taskrun.sh  (deleted in T7b1)
 (new, T7a)                local:tekton:install           inline: kubectl --context orbstack apply --server-side -f <pinned release.yaml>
+(new, T7b0)               local:zot:install              inline: kubectl --context orbstack apply -f environments/local/zot/zot.yaml
+(new, T7b0)               local:zot:wait                 inline: kubectl --context orbstack -n zot wait --for=condition=Available deploy/zot
+(new, T7b0)               local:zot:uninstall            inline: kubectl --context orbstack delete -f environments/local/zot/zot.yaml --ignore-not-found
 check / fix               check / fix                    unchanged
 (future)                  local:bootstrap               aggregate → local:openbao:bootstrap + …
 ```
@@ -217,14 +220,18 @@ toolbox/
 │       │       ├── openbao-reset.bats
 │       │       ├── openbao-snapshot.bats
 │       │       ├── mise-env.bats
+│       │       ├── zot-manifests.bats               T7b0 — static invariants of environments/local/zot/zot.yaml
 │       │       └── fixtures/
-│       └── openbao/                                  the tofu unit only (leaf)
-│           ├── main.tf  variables.tf  outputs.tf  versions.tf  README.md
-│           ├── templates/openbao.hcl.tftpl
-│           └── tests/
-│               ├── config_render.tftest.hcl
-│               ├── keys.tftest.hcl
-│               └── policies.tftest.hcl
+│       ├── openbao/                                  the tofu unit only (leaf)
+│       │   ├── main.tf  variables.tf  outputs.tf  versions.tf  README.md
+│       │   ├── templates/openbao.hcl.tftpl
+│       │   └── tests/
+│       │       ├── config_render.tftest.hcl
+│       │       ├── keys.tftest.hcl
+│       │       └── policies.tftest.hcl
+│       └── zot/                                      T7b0 — interim local registry (kubectl apply; Flux-managed in T7c/T7d)
+│           └── zot.yaml                              one multi-doc manifest, pinned by image digest, credential-free, GC off
+│           (T7c: → environments/local/tekton/ + zot/ as Flux OCIRepository/Kustomization)
 │
 ├── ci/                                              reusable Tekton build defs → digest-pinned OCI bundles (ADR 0014; T7)
 │   ├── README.md                                     the job; ci/ (our defs) vs .github/workflows/ (runner + trigger)

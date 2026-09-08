@@ -1,0 +1,169 @@
+# Interim local zot registry — TODOS.md T7b0,
+# `~/.claude/plans/t7b-pipeline-recut.md`.
+#
+# Vendored upstream (project-zot v2.1.20), applied by
+# `mise run local:zot:install` (`kubectl apply` — the same interim pattern as
+# `local:tekton:install`, owned by `environments/local/`, never `ci/`;
+# docs/designs/repo-structure.md § environments/local). T7c/T7d move this to a
+# Flux `OCIRepository`/`Kustomization` and retire the interim task.
+#
+# Credential-free on the single-user OrbStack VM: no `auth` block, HTTP only,
+# loopback / cluster-internal. Stated threat model + the P2 "zot registry auth"
+# planning session: TODOS.md. Reachable two ways:
+#   - `zot.zot.svc.cluster.local:5000`  — in-cluster build / scan / attach pods
+#   - `localhost:30500`                 — the host (NodePort), for the operator's
+#                                         `oras` / `docker` in the consume demo
+#
+# GC is OFF: this is a throwaway dev store, nothing is ever deleted, which
+# subsumes the `deleteUntagged: false` / `deleteReferrers: false` intent
+# (Codex #7 — a digest-only push must not be garbage-collected; T7b1 pushes
+# SHA-tagged refs anyway). A production zot (T7d / environments/production/)
+# revisits retention + a backup policy.
+#
+# Regenerate the image digest on a version bump:
+#   oras resolve ghcr.io/project-zot/zot-linux-arm64:v<VERSION>
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: zot
+  labels:
+    app.kubernetes.io/part-of: toolbox-ci
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: zot-data
+  namespace: zot
+  labels:
+    app.kubernetes.io/part-of: toolbox-ci
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: zot-config
+  namespace: zot
+  labels:
+    app.kubernetes.io/part-of: toolbox-ci
+data:
+  config.json: |
+    {
+      "storage": {
+        "rootDirectory": "/var/lib/registry",
+        "dedupe": true,
+        "gc": false
+      },
+      "http": {
+        "address": "0.0.0.0",
+        "port": "5000"
+      },
+      "log": {
+        "level": "info"
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zot
+  namespace: zot
+  labels:
+    app.kubernetes.io/part-of: toolbox-ci
+    app.kubernetes.io/name: zot
+spec:
+  replicas: 1
+  strategy:
+    # ReadWriteOnce PVC — a rolling update would deadlock the new pod on the
+    # volume the old one still holds.
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zot
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zot
+        app.kubernetes.io/part-of: toolbox-ci
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: zot
+          image: ghcr.io/project-zot/zot-linux-arm64:v2.1.20@sha256:56230c5a589eb55acc57afc34307f6ea1b2efe5cf8e0057ccca64099ba837ff6
+          args: ["serve", "/etc/zot/config.json"]
+          env:
+            - name: HOME
+              value: /tmp
+          ports:
+            - name: http
+              containerPort: 5000
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          readinessProbe:
+            httpGet:
+              path: /v2/
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /v2/
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/zot
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/registry
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: zot-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: zot-data
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: zot
+  namespace: zot
+  labels:
+    app.kubernetes.io/part-of: toolbox-ci
+spec:
+  # NodePort, NOT LoadBalancer: the exposure boundary is exactly one host port
+  # (localhost:30500 on OrbStack). zot-manifests.bats guards this.
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: zot
+  ports:
+    - name: http
+      port: 5000
+      targetPort: http
+      nodePort: 30500

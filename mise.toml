@@ -111,3 +111,20 @@ run = "./ci/scripts/tekton-taskrun.sh"
 [tasks."local:tekton:install"]
 description = "Interim: install pinned Tekton Pipelines v1.6.0 controllers on orb k8s (kubectl apply --server-side). Replaced by Flux in T7c."
 run = "kubectl --context orbstack apply --server-side -f https://storage.googleapis.com/tekton-releases/pipeline/previous/v1.6.0/release.yaml"
+
+# Interim local registry — TODOS.md T7b0. Same environments/local/-owns-the-
+# -install split as Tekton. Committed manifests (not an upstream release URL —
+# zot ships no all-in-one), pinned by image digest. Replaced by a Flux
+# OCIRepository/Kustomization in T7c/T7d. Details: environments/local/README.md
+# § zot.
+[tasks."local:zot:install"]
+description = "Interim: install the pinned local zot registry on orb k8s (kubectl apply). Replaced by Flux in T7c/T7d."
+run = "kubectl --context orbstack apply -f ./environments/local/zot/zot.yaml"
+
+[tasks."local:zot:wait"]
+description = "Block until the local zot Deployment is Available (frontend-build.sh calls this before a pipeline run)."
+run = "kubectl --context orbstack -n zot wait --for=condition=Available deploy/zot --timeout=90s"
+
+[tasks."local:zot:uninstall"]
+description = "Remove the local zot registry — namespace, Deployment, Service, ConfigMap and the PVC (its stored images go too)."
+run = "kubectl --context orbstack delete -f ./environments/local/zot/zot.yaml --ignore-not-found"

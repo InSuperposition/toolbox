@@ -71,6 +71,15 @@ local fast = new Mapping<String, Step> {
     glob = List("ci/tasks/**/*.yaml", "ci/runtime/**/*.yaml", "ci/pipelines/**/*.yaml", "ci/tests/crd-schemas/**/*.json", "ci/scripts/kubeconform-scan.sh")
     check = "./ci/scripts/kubeconform-scan.sh"
   }
+  // The interim local zot registry manifests (TODOS.md T7b0). All core-API
+  // kinds (Namespace/PVC/ConfigMap/Deployment/Service) — the default schema
+  // location covers them, so no `-schema-location` template and no wrapper
+  // (unlike the ci/ Tekton CRDs above). Inline is safe: no `{{ }}` in the
+  // command for hk's templater to choke on.
+  ["kubeconform-zot"] {
+    glob = List("environments/local/zot/**/*.yaml")
+    check = "kubeconform -strict -summary -schema-location default ./environments/local/zot/"
+  }
 }
 
 /// Offline correctness. pre-push and check.

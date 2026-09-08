@@ -354,14 +354,19 @@ distribution and `build-cv-frontend.yml` retirement are **deferred to a phase
 after the T7c pre-plan** (that pre-plan decides the reconciler, which owns the
 pin mechanism). Sub-phased, each ships + tests on its own:
 
-- **T7b0** — interim **zot** on orb (pulled forward from T7d): `environments/local/zot/`
-  (pinned `2.1.20`, `kubectl apply`, `deleteUntagged: false`) + `mise run
-  local:zot:install` + a `zot.<ns>.svc` Service + an OrbStack NodePort for host
-  reach. Removes the interim `gh` push token from the pipeline entirely (loopback
-  zot, no credential — threat model: single-user VM, all cluster writers trusted;
-  a **P2 TODO** opens real zot auth, below). _Verify the real clients_ (`buildctl
-  registry.insecure=true` push from a pod; `docker pull` from the host; exposure
-  is the NodePort only).
+- **T7b0** — interim **zot** on orb (pulled forward from T7d). ✅ **DONE.**
+  `environments/local/zot/zot.yaml` (one multi-doc manifest, image pinned by
+  digest `sha256:56230c…`, credential-free, **GC off** which subsumes
+  `deleteUntagged: false`) + `mise run local:zot:{install,wait,uninstall}` +
+  `zot-manifests.bats` (7) + a `kubeconform-zot` hk step + `environments/local/README.md`
+  § zot. **Live verify passed 2026-09-08** on `orb start k8s` (v1.35.6): host
+  NodePort reach `localhost:30500/v2/` → HTTP 200; host + in-cluster
+  (`zot.zot.svc.cluster.local:5000`) `oras` push/pull round-trips; native OCI 1.1
+  Referrers (`oras discover` tree); exposure is the NodePort only (no
+  Ingress/LoadBalancer). The `buildctl registry.insecure=true` push proof rides
+  with T7b1 (buildkit runs only in the build Task). Threat model: single-user VM,
+  all cluster writers trusted; the P2 "zot registry auth" TODO opens real auth.
+  **zot left running** for T7b1.
 - **T7b1** — `ci/tasks/git-clone.yaml` (anonymous clone of both public repos —
   `cv_frontend` + `toolbox` — at pinned SHAs, `mkdir -p` the subPath dirs) +
   modify `buildkit-build.yaml` (drop `TAG` + the per-run `gh` Secret + the

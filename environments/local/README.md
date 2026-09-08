@@ -182,6 +182,89 @@ This is **interim**: T7c moves it to a Flux `OCIRepository` /
 from this same version at `ci/tests/crd-schemas/` — refresh both together
 on a version bump.
 
+## zot (interim — replaced by Flux in T7c/T7d)
+
+The T7b pipeline builds, scans and attaches evidence **against a local
+registry**, not GHCR (`TODOS.md` T7b0, `~/.claude/plans/t7b-pipeline-recut.md`).
+A loopback zot removes the per-run `gh auth token` push Secret entirely and
+gives a native OCI-1.1 Referrers API.
+
+```
+mise run local:zot:install     # kubectl apply, pinned zot v2.1.20 by image digest
+mise run local:zot:wait        # block until the Deployment is Available
+```
+
+Manifests: `environments/local/zot/zot.yaml` (one multi-doc file, applied in
+order — Namespace → PVC → ConfigMap → Deployment → Service). `zot-manifests.bats`
+guards the digest pin, the absence of an auth block, `gc: false`, and
+NodePort-only exposure. `kubeconform` validates the manifests in `mise run
+check`.
+
+**Credential-free, by design.** No `auth` block; HTTP only. On the single-user
+OrbStack VM every cluster workload is the operator's, so "all cluster writers
+trusted" is the stated threat model. A second operator, a shared cluster, or
+`environments/production/` needs real auth — the **P2 "zot registry auth"**
+planning session (`TODOS.md`).
+
+**GC is OFF.** Nothing is ever deleted from the interim store, which subsumes
+`deleteUntagged: false` (Codex #7 — a digest-only push must not be
+garbage-collected). Production revisits retention.
+
+Reachable two ways — same registry, two names:
+
+| From | Address | Used by |
+|---|---|---|
+| in-cluster pods | `zot.zot.svc.cluster.local:5000` | the build / scan / attach TaskRun steps (T7b1+) |
+| the host | `localhost:30500` (NodePort) | the operator's `oras` / `docker` in the consume demo |
+
+### Verify (once, after install — the real clients)
+
+`kubeconform` + `zot-manifests.bats` are static. Prove the running registry
+by hand (the in-cluster build proof rides with T7b1, exactly as T7a proved
+buildkit in a spike):
+
+```
+# 1. Deployment healthy
+kubectl --context orbstack -n zot get deploy,pod,svc
+
+# 2. host reach + a real push/pull round-trip via the NodePort
+oras push --plain-http localhost:30500/smoke:v1 --artifact-type application/vnd.test ./README.md:text/plain
+oras pull --plain-http localhost:30500/smoke:v1 -o /tmp/zot-smoke && rm -rf /tmp/zot-smoke
+
+# 3. native Referrers API (a fallback-tag response means it is NOT native)
+oras attach --plain-http --artifact-type application/vnd.test.note \
+  localhost:30500/smoke:v1 ./README.md:text/plain
+oras discover --plain-http --format tree localhost:30500/smoke:v1
+
+# 4. in-cluster reach (a throwaway pod)
+kubectl --context orbstack -n zot run smoke --rm -it --restart=Never \
+  --image=ghcr.io/oras-project/oras:v1.3.4 -- \
+  push --plain-http zot.zot.svc.cluster.local:5000/incluster:v1 /etc/hostname:text/plain
+
+# 5. exposure boundary — NodePort only, no LoadBalancer / Ingress
+kubectl --context orbstack -n zot get svc,ingress
+
+# cleanup
+oras manifest delete --plain-http --force localhost:30500/smoke:v1 || true
+```
+
+If OrbStack does not surface the NodePort on `localhost:30500`, switch the
+Service `type` to `LoadBalancer` (OrbStack maps those to `localhost` too) and
+update `zot-manifests.bats` + this doc.
+
+### Uninstall
+
+```
+mise run local:zot:uninstall   # deletes the namespace + PVC — stored images go too
+```
+
+### T7c/T7d hand-off
+
+`environments/local/zot/` becomes a Flux `OCIRepository` / `Kustomization`;
+`local:zot:install` is retired then, same as `local:tekton:install`
+(`TODOS.md` T7, ADR 0014). Regenerate the image digest on a version bump:
+`oras resolve ghcr.io/project-zot/zot-linux-arm64:v<VERSION>`.
+
 ## Notes
 
 - **Not the production `secret-openbao` module.** That module is deferred
