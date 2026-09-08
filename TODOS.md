@@ -384,11 +384,49 @@ pin mechanism). Sub-phased, each ships + tests on its own:
   spike-proven posture — then hit **docker.io unreachable over IPv6** fetching the
   `# syntax=docker/dockerfile:1@sha256:` frontend (environmental egress, same as
   the T7a spike needed a network day). chainsaw green (webhook + no-`script:` +
-  posture + DAG). **Owed:** a full `clone → build → push → oras resolve → docker
-  pull` run once docker.io egress is available — every image build needs it.
-  **Follow-up (P3):** mirror the `# syntax=` frontend + base images into zot so
-  the build has no docker.io dependency (belongs with T7d / the zot-everything
-  cutover).
+  posture + DAG).
+- **T7b1-followup — hermetic build (deterministic; prereq for T7b2+)** — P1.
+  Investigation 2026-09-08 (`/investigate`): the intermittent `build` failure is
+  **not** our defs. This OrbStack cluster gives pods a working `AF_INET6` stack +
+  AAAA DNS but **no routable IPv6 egress** (node's only v6 is the non-routable
+  ULA `fd07:b51a:cc66::2`); CoreDNS `loadbalance` shuffles the A/AAAA answer, so
+  any Go registry client (buildkit/containerd remotes, **and zot's own
+  `regclient`** — both verified) can pick an unreachable AAAA and hard-fail
+  `connect: network is unreachable`. ~50% per external image fetch. A separate
+  ~10% `git-clone` failure is `Could not resolve host: github.com (Timeout while
+  contacting DNS servers)` — the OrbStack DNS proxy timing out.
+  **Fix (chosen — Z2 + N1, both proven live 5/5):**
+  - **Z2 — seed zot + buildkit mirror.** `mise run local:zot:seed` = `crane
+    copy` (pin `crane` in `mise.toml` — only `oras` is pinned today) the base +
+    `# syntax=` digests **extracted from `deploy/frontend/Dockerfile`'s `FROM`
+    lines** (one source of truth; a bats/`check` asserts seed-manifest ==
+    Dockerfile `FROM` set) into the T7b0 zot. The seed runs on the host, where
+    IPv4 works. The `build` Task mounts a `buildkitd.toml` ConfigMap and adds
+    `--config /cfg/buildkitd.toml` to `BUILDKITD_FLAGS`; that file mirrors
+    `docker.io` + `gcr.io` → `zot.zot.svc.cluster.local:5000`. buildkit then
+    never contacts docker.io/gcr.io — **build-time egress shrinks to zot only**
+    (security win). Rejected: zot `onDemand` sync (its `regclient` inherits the
+    same IPv6 bug + zot #3795 docker.io-auth + #2584 tag@digest); Dockerfile
+    `FROM` rewrites (couples the app Dockerfile to infra).
+  - **N1 — scoped privileged init on `git-clone` + the seed job** (they must
+    still reach github / registries): an initContainer `disable-ipv6` running
+    `sysctl -w net.ipv6.conf.all.disable_ipv6=1` (proven — removes the pod's v6
+    addrs, **DNS/AAAA untouched**, every dialer then uses v4). The `ci` ns is
+    already PSA `privileged`; the build/clone steps stay rootless. The kubelet
+    can't be told to use the unsafe sysctl directly (OrbStack), hence the init.
+    Rejected: `no-aaaa` dnsConfig (changes resolution semantics — kept as the
+    documented rollback); CoreDNS AAAA suppression (cluster-wide); `hostAliases`
+    (Cloudflare/AWS IPs rotate).
+  - **N4 — `retries: 2` on `git-clone`** — the only lever for the DNS-timeout
+    mode (N1/N2 don't touch it); the failure is fast (~6s) so cheap.
+  - **Not viable:** seeding the `moby/buildkit` step image into zot — the
+    OrbStack kubelet refuses http zot (`http: server gave HTTP response to HTTPS
+    client`). That pod image stays a docker.io pull; it is node-cached after
+    first pull and resolves via `registry-1.docker.io` (A-heavy) — low one-time
+    risk, accepted.
+  - **Durable:** the Cilium planning session (this file) settles single- vs
+    dual-stack; a v4-only Cilium datapath makes N1 unnecessary. Do not
+    pre-commit.
 - **T7b2** — `ci/tasks/scan-attach.yaml` (one Task: `trivy image -f json` →
   `trivy image -f cyclonedx` (native, keeps CVE ratings) → `oras attach` ×2, all
   pinned `command`/`args`) + shared trivy `--cache-dir` on the workspace (one DB
@@ -403,6 +441,12 @@ pin mechanism). Sub-phased, each ships + tests on its own:
   demo with a known-good `cv_frontend` SHA**: fire a run → `oras resolve` →
   `mise run attestation:sign` → `mise run frontend:deploy` → container serves the
   **expected content with HTTP 200**.
+  _Timoni scope note:_ the module also renders the **build/clone Task
+  `podTemplate`** — the T7b1-followup `disable-ipv6` init + the `buildkitd.toml`
+  ConfigMap volume land here as git-visible rendered YAML (not a Kyverno
+  admission mutation — see the Kyverno entry). One place defines the interim
+  IPv6 workaround; `/investigate` 2026-09-08 recommended Timoni-render over
+  Kyverno-mutate for auditability.
 
 **The digest is never a Tekton result** — tasks address the image by
 `$(IMAGE):$(APP_REVISION)`, ordering is `runAfter`, and `oras resolve` produces
@@ -428,6 +472,14 @@ _Observability (from the CI-log-visibility review):_ once Flux reconciles
 the API). **Not** Tekton Chains. Acceptance test: a failed step's logs are
 retrievable *after* the TaskRun + Pod are deleted. Mirrors the GHA-side fix
 (`check.yml` uploads `$HK_STATE_DIR/{output.log,hk.log}`).
+_Flux scope note (from `/investigate` 2026-09-08):_ Flux reconciles the
+T7b1-followup `buildkitd.toml` ConfigMap and the `zot:seed` Job/CronJob as
+`ci/**` resources — Flux is the delivery/reconcile mechanism for the interim
+IPv6 workaround, not Kyverno. The seed Job re-runs on a `deploy/frontend/Dockerfile`
+`FROM`-digest change (a `mise run local:zot:seed` invocation or a Flux
+`Kustomization` post-build hook — decide in the T7c pre-plan). Once Cilium's
+datapath is settled (Cilium planning session), revisit whether the seed +
+mirror is still load-bearing or just an optimization.
 
 **T7c/T7d distribution phase (was T7b4/T7b5).** After the T7c pre-plan:
 `ci/pipelines/*` + `ci/tasks/*` distributed by the chosen mechanism (`tkn bundle
@@ -505,11 +557,14 @@ the session:
   `gcr.io`, `ghcr.io`, the OpenBao listener, and the API server all need
   explicit `ToFQDNs` / CIDR allow rules. The A/AAAA set a policy must allow is
   entangled with the single/dual-stack choice above — design them together.
-- **Interim (pre-Cilium) is being handled in T7b** via a zot pull-through /
-  seed strategy so the pipeline stops touching docker.io/gcr.io at build time
-  (`~/.claude/plans/t7b-pipeline-recut.md`, T7b2 / T7b-followup). That interim
-  choice should be revisited once Cilium lands — a v4-only datapath would make
-  much of it unnecessary; a dual-stack one would keep it load-bearing.
+- **Interim (pre-Cilium) is handled in T7b1-followup** (this file): Z2 (seed
+  zot from the host + a `buildkitd.toml` mirror so the build stops touching
+  docker.io/gcr.io) + N1 (a `disable-ipv6` privileged initContainer on the
+  `git-clone` + seed pods — they still need github/registry egress). Revisit
+  once Cilium lands: a **v4-only datapath deletes the `disable-ipv6` init
+  entirely** (and shrinks the Kyverno "scope `ci` privileged" input to nothing);
+  the seed + mirror stays useful as a rate-limit / speed optimization but is no
+  longer load-bearing. A dual-stack datapath keeps both load-bearing.
 
 **Design lenses:** the CNI datapath (single/dual-stack, IPAM, kube-proxy
 replacement), the L7 DNS proxy, the default-deny bootstrap allow-list (DNS, API
@@ -694,6 +749,47 @@ the digest-equivalent for git-sourced modules.
 **Effort:** M
 **Priority:** P2
 **Depends on:** digest-as-source-of-truth Phase 1-2 landing and proving out
+
+### Kyverno module — accumulating design inputs — P2/P3, planning session
+
+Collects what the Kyverno module must cover before it is built (CLAUDE.md
+§ Tool Boundaries pins Kyverno for admission policy; mechanics are deferred —
+§ Deferred). Runs after `cluster-k0sctl` exists (the production cluster —
+enforcing policy on the throwaway OrbStack dev cluster is not the point), and
+likely alongside the Cilium planning session (this file — the two policy
+engines' overlap is an open question there).
+
+Known inputs so far:
+
+- **Scope the `ci` namespace privileged allowance** (from `/investigate`
+  2026-09-08). T7b1-followup adds one privileged initContainer (`disable-ipv6`,
+  runs `sysctl -w net.ipv6.conf.all.disable_ipv6=1`, then exits) to the
+  `git-clone` + seed pods — the interim IPv6 workaround. Today the `ci` ns is
+  blanket PSA `privileged`. A Kyverno `validate` policy should turn that into a
+  scalpel: permit `privileged: true` **only** on an initContainer named
+  `disable-ipv6` whose command is `sysctl`, and deny every other privileged
+  container in `ns=ci`. This hardens N1 and is the right long-term home for it.
+  (Note: if the Cilium planning session settles on a v4-only datapath, the
+  `disable-ipv6` init goes away and this input is moot — sequence Kyverno after
+  Cilium.)
+- **Build-pod posture enforcement** (from `ci/README.md` § Residual privilege
+  surface). The spike-proven `buildkit-build` `securityContext` ceiling
+  (`SETUID`/`SETGID` only, `seccomp: Unconfined`, `allowPrivilegeEscalation`,
+  `--oci-worker-no-process-sandbox`) is currently guarded by a chainsaw
+  drift-test. A Kyverno policy scoped to `ns=ci` could enforce it at admission —
+  deny anything looser, and deny `SYS_ADMIN`/`SYS_PTRACE`/`privileged` on the
+  build step outright.
+- **ImageValidatingPolicy** — the approval-referrer admission check (its own
+  entry below).
+
+**Design lens (from `/investigate`):** prefer Timoni-render / Flux-reconcile for
+*delivering* config (git-visible, reviewable); reserve Kyverno for *enforcing*
+invariants at admission (deny what shouldn't exist). Do not use Kyverno-mutate
+to inject workarounds — an invisible admission rewrite is worse for review than
+rendered YAML.
+
+**Depends on:** `cluster-k0sctl` module built; the Cilium planning session (run
+first — its datapath choice may delete the `disable-ipv6` input).
 
 ### Kyverno ImageValidatingPolicy for real admission-time enforcement
 
