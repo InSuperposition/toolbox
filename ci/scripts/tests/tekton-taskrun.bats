@@ -122,3 +122,95 @@ run_taskrun() { run "$CI_SCRIPTS/tekton-taskrun.sh" "$CTX_DIR" "$DF" "$IMG"; }
 	[ -n "$a" ] && [ -n "$b" ]
 	[ "$a" != "$b" ]
 }
+
+# --- common_prefix (via the dry-run stage-root line) ---------------
+# stage-root = deepest dir containing BOTH the context and the Dockerfile;
+# the two subpaths are what is left below it.
+
+dryrun_line() { # <ctx> <df> -> the `dry-run: stage-root=...` line
+	TOOLBOX_CI_DRY_RUN=1 run "$CI_SCRIPTS/tekton-taskrun.sh" "$1" "$2" "$IMG"
+	[ "$status" -eq 0 ] || {
+		echo "$output"
+		return 1
+	}
+	sed -n 's/^dry-run: //p' <<<"$output" | grep '^stage-root='
+}
+
+@test "common_prefix: shared grandparent -> stage-root is the grandparent" {
+	mkdir -p "$BATS_TEST_TMPDIR/w/app" "$BATS_TEST_TMPDIR/w/defs"
+	printf 'FROM scratch\n' >"$BATS_TEST_TMPDIR/w/defs/Dockerfile"
+	run dryrun_line "$BATS_TEST_TMPDIR/w/app" "$BATS_TEST_TMPDIR/w/defs/Dockerfile"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"stage-root=$BATS_TEST_TMPDIR/w "* ]]
+	[[ "$output" == *"source-subpath=app "* ]]
+	[[ "$output" == *"build-defs-subpath=defs "* ]]
+}
+
+@test "common_prefix: component boundary — /w/ab and /w/abc share /w, not /w/ab" {
+	mkdir -p "$BATS_TEST_TMPDIR/w/ab" "$BATS_TEST_TMPDIR/w/abc"
+	printf 'FROM scratch\n' >"$BATS_TEST_TMPDIR/w/abc/Dockerfile"
+	run dryrun_line "$BATS_TEST_TMPDIR/w/ab" "$BATS_TEST_TMPDIR/w/abc/Dockerfile"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"stage-root=$BATS_TEST_TMPDIR/w "* ]]
+	[[ "$output" == *"source-subpath=ab "* ]]
+}
+
+@test "common_prefix: context IS the Dockerfile dir -> stage-root is it, both subpaths ." {
+	mkdir -p "$BATS_TEST_TMPDIR/w"
+	printf 'FROM scratch\n' >"$BATS_TEST_TMPDIR/w/Dockerfile"
+	run dryrun_line "$BATS_TEST_TMPDIR/w" "$BATS_TEST_TMPDIR/w/Dockerfile"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"stage-root=$BATS_TEST_TMPDIR/w "* ]]
+	[[ "$output" == *"source-subpath=. "* ]]
+	[[ "$output" == *"build-defs-subpath=. "* ]]
+}
+
+@test "common_prefix: context and Dockerfile share only / -> exit 1, names the constraint" {
+	# /bin exists and holds regular files; its only common ancestor with a
+	# path under BATS_TEST_TMPDIR is /.
+	run "$CI_SCRIPTS/tekton-taskrun.sh" "$CTX_DIR" /bin/sh "$IMG"
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"must share a parent directory below /"* ]]
+}
+
+# --- cleanup teardown scoping ------------------------------------
+# --teardown reaches cleanup() with CREATED populated (the fake cluster
+# makes the TaskRun "not succeed"); every delete must target this run's
+# own objects, never the namespace.
+
+@test "cleanup --teardown: deletes only this run's objects, never the namespace" {
+	export STUB_KUBECTL_DELETE_LOG="$BATS_TEST_TMPDIR/deletes"
+	: >"$STUB_KUBECTL_DELETE_LOG"
+	run "$CI_SCRIPTS/tekton-taskrun.sh" "$CTX_DIR" "$DF" "$IMG" --teardown
+	[ "$status" -eq 1 ] # the fake TaskRun never "succeeds"
+	[ -s "$STUB_KUBECTL_DELETE_LOG" ] # something WAS torn down
+	while IFS= read -r line; do
+		[[ "$line" == *"tekton-taskrun-"* ]] || {
+			echo "delete not scoped to a per-run object: $line"
+			return 1
+		}
+		[[ "$line" != *"delete namespace"* && "$line" != *"delete ns/"* ]] || {
+			echo "delete targeted the namespace: $line"
+			return 1
+		}
+	done <"$STUB_KUBECTL_DELETE_LOG"
+}
+
+@test "cleanup --keep: deletes nothing" {
+	export STUB_KUBECTL_DELETE_LOG="$BATS_TEST_TMPDIR/deletes"
+	: >"$STUB_KUBECTL_DELETE_LOG"
+	run "$CI_SCRIPTS/tekton-taskrun.sh" "$CTX_DIR" "$DF" "$IMG" --keep
+	[ "$status" -eq 1 ]
+	[ ! -s "$STUB_KUBECTL_DELETE_LOG" ]
+	[[ "$output" == *"--keep: leaving"* ]]
+}
+
+# --- the dockerconfigjson temp file -----------------------------
+
+@test "DCJ_FILE: the push Secret's config.json is handed over at mode 600" {
+	export STUB_KUBECTL_DCJ_MODE="$BATS_TEST_TMPDIR/dcjmode"
+	: >"$STUB_KUBECTL_DCJ_MODE"
+	run "$CI_SCRIPTS/tekton-taskrun.sh" "$CTX_DIR" "$DF" "$IMG" --teardown
+	[ "$status" -eq 1 ]
+	[ "$(cat "$STUB_KUBECTL_DCJ_MODE")" = 600 ]
+}
