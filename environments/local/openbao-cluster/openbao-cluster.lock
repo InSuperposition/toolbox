@@ -1,0 +1,53 @@
+# openbao (in-cluster) — pinned chart + image.
+#
+# Hand-maintained (NOT generated). T7c Increment 4a
+# (~/.claude/plans/t7c-increment4-in-cluster-openbao.md, docs/adr/0016).
+#
+# The digest/checksum IS the trust boundary (ADR 0001) — a tag is never the
+# pin. BUT the OpenTofu helm provider cannot pin an OCI chart by digest
+# (hashicorp/terraform-provider-helm#1596 — it takes a tag/version and
+# ignores any digest). So the enforcement is split:
+#
+#   - environments/local/openbao-cluster/main.tf pins `chart_version` (a tag)
+#   - environments/local/scripts/openbao-cluster-helm-verify.sh (the 4a
+#     failable check) AND the bootstrap bridge (Increment 4b), before ANY
+#     `tofu apply`, run `crane digest <chart_repository>/<chart_name>:<chart_version>`
+#     and assert it equals `chart_digest` below — fail closed on a mismatch.
+#   - the verify script also `helm template`s the chart BY DIGEST
+#     (`oci://…@<chart_digest>`, which the helm CLI accepts) for its
+#     structural asserts, so what it checks is the digest's bytes, not the
+#     tag's.
+#
+# The OpenBao chart is NOT cosign-signed (verified 2026-09-09:
+# `cosign tree` empty, `cosign verify` → "no signatures found"), so there is
+# no signature step — the committed digest is the whole pin.
+#
+# The server image IS pinned by digest, via the chart value
+# `server.image.tag = "<image_tag>@<image_digest>"` (kubelet pins the digest;
+# same `tag@digest` form as flux-operator.lock).
+#
+# To bump the chart:
+#   1. pick the new chart version V
+#   2. helm show chart oci://ghcr.io/openbao/charts/openbao --version V   -> confirm appVersion
+#   3. crane digest ghcr.io/openbao/charts/openbao:V                      -> chart_digest
+#   4. crane digest quay.io/openbao/openbao:<new appVersion without the v>  -> image_digest
+#   5. update every line below + variables.tf defaults (chart_version, server_image_ref)
+#   6. re-run: mise run local:openbao-cluster:helm-verify
+
+chart_repository=oci://ghcr.io/openbao/charts
+chart_name=openbao
+chart_version=0.29.4
+chart_digest=sha256:42437a9d485fca3b23b744ce4f8542c0e1013f429b9d54255ef9e0f0936fbf41
+chart_signed=false
+
+app_version=v2.6.2
+image_ref=quay.io/openbao/openbao
+image_tag=2.6.2
+image_digest=sha256:11fd73a2102cda9c55d5d881a8c3210303146a7ec1e8ac76f526e175c6d24641
+
+# Static seal key id — a stable label (not the key). MUST equal the host
+# daemon's (environments/local/main.tf `static_seal_key_id`) so a
+# key-preserving raft snapshot restore unseals cleanly (Increment 4b). Also
+# variables.tf's `static_seal_key_id` default. openbao-cluster-verify.sh
+# substitutes it into the committed openbao.hcl.tftpl before rendering.
+static_seal_key_id=toolbox-local

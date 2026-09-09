@@ -1,0 +1,76 @@
+# cert-manager — in-cluster PKI for the local dev cluster (T7c Increment 4a,
+# docs/adr/0016). Issues the TLS server cert the in-cluster OpenBao listener
+# needs (environments/local/openbao-cluster/); the loopback listener of
+# environments/local/openbao/ cannot serve pods, and TLS on a ClusterIP
+# listener is not optional (plan § B4).
+#
+# Reconciled by helm-controller (already in FluxInstance.spec.components) —
+# cert-manager is a HELPER component, not the secret store, so unlike OpenBao
+# (which stays OpenTofu-owned substrate, ADR 0015 / plan § B5) it is fine
+# behind the GitOps loop.
+#
+# PINNING: the OCIRepository pins `ref.digest` (immutable, content
+# addressed — ADR 0001). cert-manager charts are signed with a STATIC cosign
+# key, not keyless, so there is NO `spec.verify` block (it would need a
+# committed third-party key + a Secret for no gain over the digest — see
+# cert-manager.lock, decision d8e2b203). All four component images are
+# digest-pinned via chart values.
+#
+# CRDs: installed by the chart (`crds.enabled: true`, `crds.keep: true` so a
+# HelmRelease delete does not garbage-collect Certificates cluster-wide).
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: cert-manager
+  namespace: flux-system
+spec:
+  interval: "30m"
+  url: "oci://quay.io/jetstack/charts/cert-manager"
+  ref:
+    digest: "sha256:15c0b46d9006ce8eb9ff14d1bf54d1bbfcc587bb9e24cd9fe186fb8fec56af1f"
+  layerSelector:
+    mediaType: "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
+    operation: "copy"
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: cert-manager
+  namespace: flux-system
+spec:
+  interval: "30m"
+  releaseName: "cert-manager"
+  storageNamespace: "cert-manager"
+  targetNamespace: "cert-manager"
+  chartRef:
+    kind: OCIRepository
+    name: cert-manager
+  install:
+    createNamespace: true
+    crds: "CreateReplace"
+    remediation:
+      retries: 3
+  upgrade:
+    crds: "CreateReplace"
+  values:
+    crds:
+      enabled: true
+      keep: true
+    # Digest-pinned images (tag stays readable in `kubectl describe`;
+    # only the digest is used to pull). Digests: cert-manager.lock.
+    image:
+      tag: "v1.21.1"
+      digest: "sha256:416a2d76870d996460e62bd7f521bf14fa017be9e3e904aab92163a331fcb61a"
+    webhook:
+      image:
+        tag: "v1.21.1"
+        digest: "sha256:d8b3961b51c8c7320633f8208dc46bf88aa13804d0f7cbe48a096b2c523cee42"
+    cainjector:
+      image:
+        tag: "v1.21.1"
+        digest: "sha256:ccf6b919ec0500745a47a910118f834f9636d0aac1ff221245cd2557ed8c7c98"
+    startupapicheck:
+      image:
+        tag: "v1.21.1"
+        digest: "sha256:d8ab6416e6e7303a86fa0a8daa82c94a8001f21c9d78eb2e7db20534e5d07ae8"

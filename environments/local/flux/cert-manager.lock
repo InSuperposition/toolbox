@@ -1,0 +1,45 @@
+# cert-manager — pinned. In-cluster PKI for the local dev cluster (T7c
+# Increment 4a, docs/adr/0016). Issues the TLS server cert for the
+# in-cluster OpenBao listener (environments/local/openbao-cluster/).
+#
+# Hand-maintained (NOT generated). The digest IS the trust boundary
+# (ADR 0001).
+#
+# SIGNATURE: cert-manager charts + images are signed with a STATIC cosign
+# key (NOT keyless / Fulcio — `cosign verify` keyless returns "no matching
+# signatures: empty key"). Verified ONCE at authoring, 2026-09-09:
+#
+#   curl -sSL -o cm.pem https://cert-manager.io/public-keys/cert-manager-pubkey-2021-09-20.pem
+#   cosign verify --key cm.pem --insecure-ignore-tlog \
+#     quay.io/jetstack/charts/cert-manager@sha256:15c0b46d…   -> Verified OK
+#
+# The committed `chart_digest` below is the whole runtime pin — the
+# OCIRepository in cert-manager-helmrelease.yaml pins `ref.digest` (content
+# addressed, immutable) with NO `spec.verify` block. A runtime static-key
+# `verify.secretRef` would add a committed third-party key + a Secret + key
+# rotation surface and buys nothing over an immutable digest (decision
+# d8e2b203, 2026-09-09). This matches how the OpenBao chart is pinned.
+#
+# DEV vs PROD: the selfSigned root -> CA -> leaf chain in
+# cert-manager-pki.yaml is the acknowledged dev limitation. Production
+# points the leaf's `issuerRef` at a real backend (ACME, an org
+# intermediate CA, or an OpenBao PKI engine) — the `Certificate` and every
+# consumer stay unchanged, only `issuerRef` moves.
+#
+# To bump:
+#   1. pick version V (e.g. v1.21.2)
+#   2. crane digest quay.io/jetstack/charts/cert-manager:V              -> chart_digest
+#   3. crane digest quay.io/jetstack/cert-manager-controller:V          -> controller_image_digest
+#   4. …-webhook:V / …-cainjector:V / …-startupapicheck:V               -> the other three
+#   5. cosign verify --key <the pem above> --insecure-ignore-tlog quay.io/jetstack/charts/cert-manager@<chart_digest>
+#   6. update every line below + cert-manager-helmrelease.yaml
+
+version=v1.21.1
+chart_repo=oci://quay.io/jetstack/charts/cert-manager
+chart_digest=sha256:15c0b46d9006ce8eb9ff14d1bf54d1bbfcc587bb9e24cd9fe186fb8fec56af1f
+cosign_pubkey_url=https://cert-manager.io/public-keys/cert-manager-pubkey-2021-09-20.pem
+
+controller_image_digest=sha256:416a2d76870d996460e62bd7f521bf14fa017be9e3e904aab92163a331fcb61a
+webhook_image_digest=sha256:d8b3961b51c8c7320633f8208dc46bf88aa13804d0f7cbe48a096b2c523cee42
+cainjector_image_digest=sha256:ccf6b919ec0500745a47a910118f834f9636d0aac1ff221245cd2557ed8c7c98
+startupapicheck_image_digest=sha256:d8ab6416e6e7303a86fa0a8daa82c94a8001f21c9d78eb2e7db20534e5d07ae8

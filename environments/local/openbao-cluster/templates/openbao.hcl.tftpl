@@ -1,0 +1,40 @@
+# Rendered by environments/local/openbao-cluster/main.tf into the helm value
+# server.ha.raft.config. The chart stores it in a ConfigMap; the server runs
+# `bao server -config=/openbao/config`.
+#
+# In-cluster shape (T7c Increment 4, docs/adr/0016): an HTTPS listener (cert
+# from the cert-manager-issued TLS Secret mounted at /openbao/tls), raft
+# single-voter storage, static-seal auto-unseal from the seal Secret mounted
+# at /openbao/seal, and kubernetes service registration. Secret names are
+# main.tf's var.tls_secret_name / var.seal_secret_name.
+#
+# There is NO `tls_disable = true`: the "loopback only" justification that
+# carried environments/local/openbao/templates/openbao.hcl.tftpl dies on the
+# move to a ClusterIP listener (plan § B4). A missing/empty cert Secret makes
+# the listener fail to start — fail closed, not fall back to plaintext.
+
+ui = false
+
+listener "tcp" {
+  address         = "[::]:8200"
+  cluster_address = "[::]:8201"
+  tls_disable     = false
+  tls_cert_file   = "/openbao/tls/tls.crt"
+  tls_key_file    = "/openbao/tls/tls.key"
+}
+
+storage "raft" {
+  path = "/openbao/data"
+}
+
+# Static seal — the daemon auto-unseals from the mounted 32-byte key on every
+# start (plan § B1). current_key_id MUST match the host daemon's so a
+# key-preserving raft snapshot restore (Increment 4b) unseals cleanly; the
+# file PATH differs from the host and that is immaterial (the key_id + the
+# 32 bytes are the match criteria — plan confirm #5).
+seal "static" {
+  current_key_id = "${static_seal_key_id}"
+  current_key    = "file:///openbao/seal/seal.key"
+}
+
+service_registration "kubernetes" {}

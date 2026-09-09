@@ -15,3 +15,5 @@ resources:
   - zot-sync.yaml
   - ci-runtime.yaml
   - ci-defs.yaml
+  - cert-manager-helmrelease.yaml
+  - cert-manager-pki.yaml
