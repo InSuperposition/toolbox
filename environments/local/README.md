@@ -216,12 +216,35 @@ From then on **helm-controller owns the operator** (`flux-operator-helmrelease.y
 the bridge's release). An operator or Flux upgrade is a digest bump in
 `flux-operator.lock` + the committed YAML — no more shell.
 
+**What Flux reconciles** (the `flux-system` Kustomization applies
+`environments/local/flux/kustomization.yaml`'s inventory — `flux-instance.yaml`
+is excluded, it is the bridge-owned acyclic anchor):
+
+- `zot-sync.yaml` → `environments/local/zot/` — the interim local registry.
+- `ci-runtime.yaml` → `ci/runtime/` — the `ci` namespace + `buildkitd-mirror`
+  ConfigMap. `wait: false` with `healthChecks` on the two Tekton CRDs + the
+  controller/webhook Deployments (usable Tekton, not just types registered);
+  `deletionPolicy: Orphan`.
+- `ci-defs.yaml` → `ci/tasks/` + `ci/pipelines/` (two Kustomizations,
+  `targetNamespace: ci`, `dependsOn: [ci-runtime]`, `ci-pipelines` also
+  `[ci-tasks]`) — the reusable Task + Pipeline defs.
+
+`ci/` owns those manifests + their per-path `kustomization.yaml` inventories;
+`environments/local/` owns the deployment policy (the Flux `Kustomization` CRs
+here). ADR 0015; `docs/designs/repo-structure.md` § deployment-composition
+edge. **Tekton-absent:** `ci-runtime` goes NotReady (the CRD/Deployment health
+checks), `ci-defs` stays blocked on `dependsOn` and retries — no notification
+(no notification-controller); fix is `mise run local:tekton:install`.
+
 | file | role |
 |---|---|
 | `flux/flux-operator.lock` | the three pinned + verified digests (chart, operator image, distribution manifests) |
 | `flux/flux-instance.yaml` | the one `FluxInstance` — Flux 2.9.5, `source`+`kustomize`+`helm` controllers, syncs `environments/local/flux/` from `main` |
 | `flux/flux-operator-helmrelease.yaml` | operator self-management (`OCIRepository` + `HelmRelease`) |
+| `flux/kustomization.yaml` | the explicit inventory for the generated `flux-system` Kustomization (excludes `flux-instance.yaml`) |
 | `flux/zot-sync.yaml` | the Flux `Kustomization` that reconciles `environments/local/zot/` |
+| `flux/ci-runtime.yaml` | Flux `Kustomization` `ci-runtime` → `ci/runtime/` (T7c Increment 2, ADR 0015) |
+| `flux/ci-defs.yaml` | Flux `Kustomization`s `ci-tasks` + `ci-pipelines` → `ci/tasks/` + `ci/pipelines/` (T7c Increment 2) |
 | `flux/tests/crd-schemas/*.json` | v1/v2 CRD schemas vendored from Flux 2.9.5 + flux-operator v0.59.0 for the `kubeconform-flux` gate — **regenerate on a bump** (`crane digest` + `cosign verify` per the lock-file header; CRDs from `github.com/fluxcd/flux2/releases/download/v2.9.5/manifests.tar.gz` and `controlplaneio-fluxcd/flux-operator` tag `v0.59.0`) |
 | `tests/flux/flux-reconcile/chainsaw-test.yaml` | `[k8s]`-gated server-side check (`flux-chainsaw.sh` — skips in CI and until `local:flux:bootstrap` has run): the operator accepted the FluxInstance, source-controller fetched an artifact from git, the OCIRepository is cosign-verified, the HelmRelease self-manages, the zot Kustomization applied. Asserts running state; does not bootstrap or tear down. |
 | `tests/flux/ci-reconcile/chainsaw-test.yaml` | `[k8s]`-gated (T7c Increment 2): the `ci-runtime` / `ci-tasks` / `ci-pipelines` Kustomizations are Ready, ns `ci` + the Tekton defs reconciled and Flux-owned, `ci/tests/**` not slurped. `flux-chainsaw.sh` runs it only once the CRs are on the synced ref (probe: `kustomization ci-runtime`). |
@@ -230,13 +253,17 @@ the bridge's release). An operator or Flux upgrade is a digest bump in
 --install` from the bridge task, needs a reachable cluster first (`orb start
 k8s` — a human step, or the optional machine-global pitchfork daemon, § Tekton).
 Pod restart / reboot: k8s restarts the controllers; source artifacts live in
-`emptyDir` and are re-fetched (seconds). Cluster rebuild: re-run
-`local:flux:bootstrap`, then `local:tekton:install` (Flux cannot install an
-absent Tekton), then Flux reconciles the rest. Operator/Flux upgrade: a
-reviewed digest bump in git — a recurring **decision**, not a manual apply.
-Disaster (disk loss): recover the checkout + re-bootstrap; zot data and
-OpenBao signing state are separate recovery problems. No memorized secret (the
-repo is public — anonymous HTTPS sync, no pull Secret).
+`emptyDir` and are re-fetched (seconds). The `zot` / `ci-runtime` / `ci-tasks`
+/ `ci-pipelines` Kustomization CRs persist in etcd and re-reconcile with no
+manual step. Cluster rebuild: re-run `local:flux:bootstrap`, then
+`local:tekton:install` (Flux cannot install an absent Tekton — it is the named
+prerequisite for `ci-runtime`'s health checks), then Flux reconciles `zot` +
+`ci/**` in dependency order, then reseed the registry (`mise run
+frontend:seed`). Operator/Flux upgrade: a reviewed digest bump in git — a
+recurring **decision**, not a manual apply. Disaster (disk loss): recover the
+checkout + re-bootstrap; zot data and OpenBao signing state are separate
+recovery problems. No memorized secret (the repo is public — anonymous HTTPS
+sync, no pull Secret).
 
 ## zot (interim — install reconciled by Flux)
 

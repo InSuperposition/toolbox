@@ -560,32 +560,35 @@ Effort: ~5–6 days across T7b0–T7b3 (T7a's "simple" bits each ran long).
   to HTTP 2xx + an expected body is a separate change to the consume seam.
   (Codex #8 original.)
 
-**T7c — local Flux + a pre-plan first.** flux2 + flux-operator (already pinned)
-reconciles `ci/**` + `environments/local/` (incl. the interim `local:tekton:install`
-+ `local:zot:install`). **Run a short T7c pre-plan first** to settle: the
-reconciliation model (`GitRepository` vs `OCIRepository`, what Flux owns), the
-Tekton-defs distribution mechanism (deferred out of T7b), and Tekton Results.
-The build *run* stays operator-triggered (`frontend-build.sh`), **not**
+**T7c — local Flux.** Pre-plan DONE (`~/.claude/plans/t7c-substrate-ordering.md`,
+ADR 0015): `GitRepository` + plain YAML, per-path `kustomization.yaml`
+inventories, Flux precedes the in-cluster OpenBao move, Crossplane not
+sequenced. **Increments 0/1a/1b/2 SHIPPED** (PRs #18–#21): checksum-gated
+Tekton install (the *controller* stays on `tekton-install.sh`, a named Flux
+prerequisite) → digest-pinned self-managing flux-operator + `FluxInstance` +
+chainsaw harness → Flux reconciles `zot` + `ci/{runtime,tasks,pipelines}` from
+`main`. The build *run* stays operator-triggered (`frontend-build.sh`), **not**
 Flux-reconciled — Pipelines-as-Code is the eventual git-event trigger, still
-deferred. Effort: ~1-2d + the pre-plan (includes the one-time Flux bootstrap:
-operator install + first `FluxInstance` + deploy-key).
-_Observability (from the CI-log-visibility review):_ once Flux reconciles
-`ci/**` TaskRuns, persist **failed-step logs beyond `tkn taskrun logs`** via
-**Tekton Results** (needs log-collection + a durable-storage backend, not just
-the API). **Not** Tekton Chains. Acceptance test: a failed step's logs are
-retrievable *after* the TaskRun + Pod are deleted. Mirrors the GHA-side fix
-(`check.yml` uploads `$HK_STATE_DIR/{output.log,hk.log}`).
+deferred.
+_Remaining T7c:_ **Increment 4+ — in-cluster OpenBao** (its own plan, 6
+blockers B1–B6 + a separate `transit/keys/sops` AES key). Until then the host
+OpenBao daemon keeps serving loopback and T8 (Tekton Chains provenance) stays
+blocked.
+_Observability (from the CI-log-visibility review):_ persist **failed-step
+logs beyond `tkn taskrun logs`** via **Tekton Results** (needs log-collection +
+a durable-storage backend, not just the API). **Not** Tekton Chains. Acceptance
+test: a failed step's logs are retrievable *after* the TaskRun + Pod are
+deleted. Mirrors the GHA-side fix (`check.yml` uploads
+`$HK_STATE_DIR/{output.log,hk.log}`).
 _Flux scope note (from `/investigate` 2026-09-08):_ Flux reconciles the
-T7b1-followup `ci/runtime/buildkitd-mirror.yaml` ConfigMap as a `ci/**`
-resource — Flux is the delivery/reconcile mechanism for the interim IPv6
-workaround, not Kyverno. The host seed (`mise run frontend:seed` →
-`ci/scripts/registry-seed.sh`) stays a host step for now (it needs host IPv4
-egress); moving it in-cluster as a Job that re-runs on a
-`deploy/frontend/Dockerfile` `FROM`-digest change is a T7c-pre-plan call.
-Once Cilium's datapath is settled (Cilium planning session), revisit whether
-the seed + mirror is still load-bearing or just an optimization.
+T7b1-followup `ci/runtime/buildkitd-mirror.yaml` ConfigMap (done, Increment 2).
+The host seed (`mise run frontend:seed` → `ci/scripts/registry-seed.sh`) stays
+a host step for now (it needs host IPv4 egress); moving it in-cluster as a Job
+that re-runs on a `deploy/frontend/Dockerfile` `FROM`-digest change is still
+open. Once Cilium's datapath is settled (Cilium planning session), revisit
+whether the seed + mirror is still load-bearing or just an optimization.
 
-**T7c/T7d distribution phase (was T7b4/T7b5).** After the T7c pre-plan:
+**T7c/T7d distribution phase (was T7b4/T7b5).**
 `ci/pipelines/*` + `ci/tasks/*` distributed by the chosen mechanism (`tkn bundle
 push` → digest, or `flux push artifact` → `OCIRepository` digest), `@sha256:`
 pinned in `deploy/frontend/`, cosign-signed; then **delete
@@ -596,13 +599,15 @@ not carry `build-cv-frontend.yml`'s embedded `run:` shell** (`:48` `tr`
 lowercase, `:98` digest-extract + `case` guard) into anything — extract to a
 tested script or delete with the workflow.
 
-**T7d — Flux-manage zot + production repoint.** zot's interim install (T7b0)
-becomes a Flux `OCIRepository`/`Kustomization`; the eventual `environments/production/`
-gets a zot with a real backup policy (the local zot's disaster path is
-rebuild → re-approve → re-pin — acceptable for dev, not prod). Effort: ~1d.
+**T7d — production repoint.** The local zot is already Flux-reconciled
+(`environments/local/flux/zot-sync.yaml`, Increment 1a). The eventual
+`environments/production/` gets a zot with a real backup policy (the local
+zot's disaster path is rebuild → re-approve → re-pin — acceptable for dev, not
+prod). Effort: ~1d.
 
-**Priority:** P2 · **Depends on:** ~~T5 + T5b~~ done. **T7b0 → T7b1 → T7b2 →
-T7b3**, then the **T7c pre-plan**, then the distribution phase + T7c/T7d.
+**Priority:** P2 · **Depends on:** ~~T5 + T5b~~ done. **T7b0–T7b3** ✓ →
+**T7c pre-plan + Increments 0/1a/1b/2** ✓ → Increment 4+ (in-cluster OpenBao) +
+the distribution phase + T7d.
 
 ### zot registry auth — planning session — P2
 
