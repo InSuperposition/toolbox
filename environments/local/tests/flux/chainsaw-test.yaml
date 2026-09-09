@@ -1,0 +1,97 @@
+# [k8s]-gated (environments/local/scripts/flux-chainsaw.sh skips without an
+# orbstack cluster running a bootstrapped Flux). Server-side checks the static
+# kubeconform-flux gate cannot do: the operator ACCEPTED the committed
+# FluxInstance and reconciled it; source-controller actually fetched from git
+# (an artifact revision, not just a host clone — the OrbStack IPv6-egress
+# defect, TODOS.md); the OCIRepository is Ready, which means its
+# `spec.verify` cosign check passed (it fails closed); helm-controller adopted
+# the bridge's release into ONE HelmRelease; and the zot Kustomization
+# applied.
+#
+# It asserts the RUNNING state — it does not bootstrap or tear down. The
+# bootstrap path + the drift-and-revert are the documented `mise run
+# local:flux:bootstrap` acceptance run (PR #19).
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: flux-reconcile
+spec:
+  steps:
+    - name: fluxinstance-is-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: fluxcd.controlplane.io/v1
+              kind: FluxInstance
+              metadata:
+                name: flux
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] | [0].status): "True"
+
+    - name: source-controller-fetched-from-git
+      try:
+        - assert:
+            resource:
+              apiVersion: source.toolkit.fluxcd.io/v1
+              kind: GitRepository
+              metadata:
+                name: flux-system
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] | [0].status): "True"
+                (artifact.revision != null): true
+                (artifact.digest != null): true
+
+    - name: operator-chart-is-cosign-verified
+      try:
+        # OCIRepository Ready == the spec.verify cosign check passed (it fails
+        # closed — an unverified chart digest blocks the artifact).
+        - assert:
+            resource:
+              apiVersion: source.toolkit.fluxcd.io/v1
+              kind: OCIRepository
+              metadata:
+                name: flux-operator
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] | [0].status): "True"
+                (artifact.digest != null): true
+
+    - name: operator-self-manages-via-helmrelease
+      try:
+        # HelmRelease Ready => helm-controller adopted the bridge's release
+        # (name+namespace match) and drives it. That it is an ADOPT, not a
+        # reinstall, is proven by `helm history` in the PR #19 acceptance run
+        # (revision 1 Install -> 2 Upgrade, one release).
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: flux-operator
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] | [0].status): "True"
+                (lastAttemptedRevision != null): true
+
+    - name: zot-kustomization-applied
+      try:
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: zot
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] | [0].status): "True"
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: zot
+                namespace: zot
+              status:
+                (availableReplicas): 1

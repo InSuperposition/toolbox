@@ -141,6 +141,13 @@ local heavy = new Mapping<String, Step> {
     glob = List("ci/tests/**/*.yaml", "ci/tasks/**/*.yaml", "ci/runtime/**/*.yaml", "ci/scripts/chainsaw-test.sh", "ci/scripts/lib/ci.sh")
     check = "./ci/scripts/chainsaw-test.sh"
   }
+  // The environments/local/ Flux setup, server-side. Same [k8s] gate — skips
+  // in CI (no OrbStack) and skips locally until `mise run local:flux:bootstrap`
+  // has run. Asserts the RUNNING Flux state; does not bootstrap or tear down.
+  ["chainsaw-flux"] {
+    glob = List("environments/local/tests/flux/**/*.yaml", "environments/local/flux/**/*.yaml", "environments/local/scripts/flux-chainsaw.sh")
+    check = "./environments/local/scripts/flux-chainsaw.sh"
+  }
   // Silent-coverage-drop guard (F5). Diffs the suites on disk, the
   // committed tests/manifest.txt, and what hk schedules — a mismatch fails
   // the gate. Runs last: it reads `hk check --plan`, it does not re-run
