@@ -193,17 +193,60 @@ The `ci/` kubeconform gate validates against Tekton v1 CRD schemas vendored
 from this same version at `ci/tests/crd-schemas/` — refresh both together
 on a version bump.
 
-## zot (interim — replaced by Flux in T7c/T7d)
+## Flux (the GitOps reconciler)
+
+Flux reconciles this environment's platform manifests from git. One
+**imperative bridge** installs it; everything after is declarative.
+
+```
+mise run local:flux:bootstrap   # once per cluster — idempotent
+mise run local:flux:status      # FluxInstance + every source/Kustomization/HelmRelease
+```
+
+`environments/local/scripts/flux-bootstrap.sh`:
+
+1. `cosign verify`s the **pinned** flux-operator chart digest
+   (`environments/local/flux/flux-operator.lock`, keyless — Fulcio/Rekor, the
+   GitHub OIDC identity). No `--insecure-ignore-tlog` fallback.
+2. `helm upgrade --install`s **that digest** (never a tag — ADR 0001).
+3. waits for the operator + its CRD, applies `flux-instance.yaml`, waits Ready.
+
+From then on **helm-controller owns the operator** (`flux-operator-helmrelease.yaml`
+— an `OCIRepository` with `spec.verify: cosign` + a `HelmRelease` that adopts
+the bridge's release). An operator or Flux upgrade is a digest bump in
+`flux-operator.lock` + the committed YAML — no more shell.
+
+| file | role |
+|---|---|
+| `flux/flux-operator.lock` | the three pinned + verified digests (chart, operator image, distribution manifests) |
+| `flux/flux-instance.yaml` | the one `FluxInstance` — Flux 2.9.5, `source`+`kustomize`+`helm` controllers, syncs `environments/local/flux/` from `main` |
+| `flux/flux-operator-helmrelease.yaml` | operator self-management (`OCIRepository` + `HelmRelease`) |
+| `flux/zot-sync.yaml` | the Flux `Kustomization` that reconciles `environments/local/zot/` |
+| `flux/tests/crd-schemas/*.json` | v1/v2 CRD schemas vendored from Flux 2.9.5 + flux-operator v0.59.0 for the `kubeconform-flux` gate — **regenerate on a bump** (`crane digest` + `cosign verify` per the lock-file header; CRDs from `github.com/fluxcd/flux2/releases/download/v2.9.5/manifests.tar.gz` and `controlplaneio-fluxcd/flux-operator` tag `v0.59.0`) |
+
+**Lifecycle trace** (CLAUDE.md § planning gate): bootstrap = one `helm upgrade
+--install` from the bridge task, needs a reachable cluster first (`orb start
+k8s` — a human step, or the optional machine-global pitchfork daemon, § Tekton).
+Pod restart / reboot: k8s restarts the controllers; source artifacts live in
+`emptyDir` and are re-fetched (seconds). Cluster rebuild: re-run
+`local:flux:bootstrap`, then `local:tekton:install` (Flux cannot install an
+absent Tekton), then Flux reconciles the rest. Operator/Flux upgrade: a
+reviewed digest bump in git — a recurring **decision**, not a manual apply.
+Disaster (disk loss): recover the checkout + re-bootstrap; zot data and
+OpenBao signing state are separate recovery problems. No memorized secret (the
+repo is public — anonymous HTTPS sync, no pull Secret).
+
+## zot (interim — install reconciled by Flux)
 
 The T7b pipeline builds, scans and attaches evidence **against a local
 registry**, not GHCR (`TODOS.md` T7b0, `~/.claude/plans/t7b-pipeline-recut.md`).
 A loopback zot removes the per-run `gh auth token` push Secret entirely and
 gives a native OCI-1.1 Referrers API.
 
-```
-mise run local:zot:install     # kubectl apply, pinned zot v2.1.20 by image digest
-mise run local:zot:wait        # block until the Deployment is Available
-```
+Installed by Flux — `environments/local/flux/zot-sync.yaml` reconciles
+`environments/local/zot/zot.yaml` (`mise run local:flux:bootstrap` brings Flux
+up; Flux does the rest). `mise run local:zot:wait` still blocks until the
+Deployment is Available.
 
 Manifests: `environments/local/zot/zot.yaml` (one multi-doc file, applied in
 order — Namespace → PVC → ConfigMap → Deployment → Service). `zot-manifests.bats`
@@ -265,16 +308,15 @@ update `zot-manifests.bats` + this doc.
 
 ### Uninstall
 
+Flux won't do it — the Namespace + PVC are annotated
+`kustomize.toolkit.fluxcd.io/prune: disabled` and `zot-sync.yaml` is
+`deletionPolicy: Orphan`. A deliberate teardown is manual:
+
 ```
-mise run local:zot:uninstall   # deletes the namespace + PVC — stored images go too
+kubectl --context orbstack delete -f ./environments/local/zot/zot.yaml
 ```
 
-### T7c hand-off
-
-`environments/local/zot/` becomes a Flux `Kustomization` and
-`local:zot:install` / `local:zot:uninstall` are retired then (`TODOS.md` T7,
-ADR 0014). The Tekton **controller** install is **not** retired in T7c — see
-§ Tekton. Regenerate the image digest on a version bump:
+Regenerate the image digest on a version bump:
 `oras resolve ghcr.io/project-zot/zot-linux-arm64:v<VERSION>`.
 
 ## Notes

@@ -24,6 +24,8 @@ bats    environments/local/scripts/tests/openbao-snapshot.bats   3
 bats    environments/local/scripts/tests/mise-env.bats           3
 bats    environments/local/scripts/tests/zot-manifests.bats      7
 bats    environments/local/scripts/tests/tekton-install.bats     5
+bats    environments/local/scripts/tests/flux-bootstrap.bats     6
+bats    environments/local/scripts/tests/flux-kubeconform.bats   4
 bats    ci/scripts/tests/chainsaw-test.bats                   3
 bats    ci/scripts/tests/kubeconform-scan.bats               3
 bats    ci/scripts/tests/registry-seed.bats                  6

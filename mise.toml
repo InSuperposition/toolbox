@@ -13,6 +13,7 @@ crossplane = "2.5.0"
 cue = "0.17.1"
 flux2 = "2.9.5"
 gh = "2.100.0"
+helm = "3.21.4"   # one-time flux-operator bootstrap only (flux-bootstrap.sh); helm-controller drives it after
 hk = "1.57.0"
 jq = "1.8.2"
 k0sctl = "0.32.2"
@@ -133,19 +134,26 @@ run = "./environments/local/scripts/tekton-install.sh"
 description = "Block until the Tekton Pipelines control plane (controller + webhook) is Available — the T7c ci-runtime Flux Kustomization and any PipelineRun admission assume Tekton is up."
 run = "kubectl --context orbstack -n tekton-pipelines wait --for=condition=Available deploy/tekton-pipelines-controller deploy/tekton-pipelines-webhook --timeout=120s"
 
-# Interim local registry — TODOS.md T7b0. Same environments/local/-owns-the-
-# -install split as Tekton. Committed manifests (not an upstream release URL —
-# zot ships no all-in-one), pinned by image digest. Replaced by a Flux
-# OCIRepository/Kustomization in T7c/T7d. Details: environments/local/README.md
-# § zot.
-[tasks."local:zot:install"]
-description = "Interim: install the pinned local zot registry on orb k8s (kubectl apply). Replaced by Flux in T7c/T7d."
-run = "kubectl --context orbstack apply -f ./environments/local/zot/zot.yaml"
+# Flux — the one-time imperative bridge, then declarative. `local:flux:bootstrap`
+# runs ONCE per cluster: cosign-verify the pinned flux-operator chart digest,
+# `helm upgrade --install` it, apply the FluxInstance. After that the committed
+# environments/local/flux/ (FluxInstance + operator HelmRelease + the zot
+# Kustomization) is reconciled from git — no more shell. Details:
+# environments/local/README.md § Flux.
+[tasks."local:flux:bootstrap"]
+description = "One-time per cluster: verify + install flux-operator and apply the FluxInstance. Idempotent (disaster-recovery re-run safe)."
+run = "./environments/local/scripts/flux-bootstrap.sh"
 
+[tasks."local:flux:status"]
+description = "Show the FluxInstance + every Flux source/Kustomization/HelmRelease and its Ready condition."
+run = "flux --context orbstack get all --all-namespaces"
+
+# Interim local registry — TODOS.md T7b0. Committed manifests (zot ships no
+# all-in-one release), pinned by image digest. The INSTALL is now a Flux
+# Kustomization (environments/local/flux/zot-sync.yaml) reconciled from git —
+# `local:zot:install` / `:uninstall` are retired. `local:zot:wait` stays
+# (frontend-build.sh calls it before a pipeline run). Details:
+# environments/local/README.md § zot.
 [tasks."local:zot:wait"]
 description = "Block until the local zot Deployment is Available (frontend-build.sh calls this before a pipeline run)."
 run = "kubectl --context orbstack -n zot wait --for=condition=Available deploy/zot --timeout=90s"
-
-[tasks."local:zot:uninstall"]
-description = "Remove the local zot registry — namespace, Deployment, Service, ConfigMap and the PVC (its stored images go too)."
-run = "kubectl --context orbstack delete -f ./environments/local/zot/zot.yaml --ignore-not-found"

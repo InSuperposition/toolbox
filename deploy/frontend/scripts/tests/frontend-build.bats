@@ -68,10 +68,10 @@ setup() {
 	[[ "$output" == *"buildkitd-mirror"* ]]
 }
 
-@test "frontend-build: zot down -> exit 3, names local:zot:install" {
+@test "frontend-build: zot down -> exit 3, points at the Flux bootstrap" {
 	STUB_ZOT_RC=7 run "$SCRIPTS/frontend-build.sh" "$REV"
 	[ "$status" -eq 3 ]
-	[[ "$output" == *"local:zot:install"* ]]
+	[[ "$output" == *"local:flux:bootstrap"* ]]
 }
 
 @test "frontend-build: base-image seed failure -> exit 3" {
