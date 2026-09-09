@@ -153,4 +153,14 @@ check "TLS Secret mounted at /openbao/tls" \
 	"grep -qE 'mountPath: /openbao/tls' '$rendered'"
 
 [ "$fail" = 0 ] || die "rendered chart does not match the Increment 4a shape"
-echo "openbao-cluster-verify: OK — chart $chart_version @ $chart_digest, image @ $image_digest"
+
+# --- 4. anti-rotation guard: this unit must NEVER tofu-manage the transit
+#        mount or approval-key (both are created by the 4b snapshot restore;
+#        a tofu recreate = a key rotation = every past approval attestation
+#        stops verifying, plan § B3). Matches an actual resource block /
+#        `name = "approval-key"` arg, not the validation string or a comment.
+if grep -REn 'resource[[:space:]]+"vault_mount"|name[[:space:]]*=[[:space:]]*"approval-key"' "$UNIT_DIR"/*.tf; then
+	die "environments/local/openbao-cluster/*.tf tofu-manages the transit mount or approval-key — those are restore-managed, tofu must not touch them"
+fi
+
+echo "openbao-cluster-verify: OK — chart $chart_version @ $chart_digest, image @ $image_digest; no approval-key / vault_mount in the unit"

@@ -241,7 +241,7 @@ toolbox/
 │       │   ├── flux-chainsaw.sh  flux-kubeconform.sh T7c — the [k8s] chainsaw wrapper + the kubeconform-flux gate wrapper
 │       │   ├── cert-manager-kubeconform.sh           T7c Inc.4 — kubeconform-cert-manager wrapper (vendored cert-manager.io/v1 schemas)
 │       │   ├── openbao-cluster-verify.sh             T7c Inc.4a — the chart-pin gate (crane digest == lock, then helm template by digest)
-│       │   ├── openbao-cluster-bootstrap.sh          T7c Inc.4b — the one-time bridge: snapshot host → ns + seal Secret → tofu apply → init → key-preserving -force restore → assert approval-key unchanged
+│       │   ├── openbao-cluster-bootstrap.sh          T7c Inc.4b/4c — the one-time bridge: snapshot host → ns + seal Secret → tofu apply Phase A → init → key-preserving -force restore → assert approval-key unchanged → tofu apply Phase C
 │       │   ├── openbao-cluster-chainsaw.sh           T7c Inc.4b — [k8s] running-state wrapper (skips without a cluster / until the bridge has run)
 │       │   ├── lib/openbao.sh                        state-dir resolution, daemon wait-loop, atomic 0600 write
 │       │   └── tests/                                *.bats beside each script (openbao-*, openbao-cluster-{verify,bootstrap,chainsaw}, tekton-install, flux-*, mise-env, zot-manifests)
@@ -269,10 +269,10 @@ toolbox/
 │       │       ├── keys.tftest.hcl
 │       │       └── policies.tftest.hcl
 │       ├── openbao-cluster/                          T7c Inc.4 — the in-cluster tofu unit (leaf; → renamed `openbao` at 4d)
-│       │   ├── main.tf (Phase A helm_release)  variables.tf  versions.tf  provider.tf  README.md
+│       │   ├── main.tf (Phase A helm_release + Phase C vault_*)  variables.tf  outputs.tf  versions.tf  provider.tf  README.md
 │       │   ├── openbao-cluster.lock                  pinned chart + image digests (helm provider can't pin a digest — verify.sh + the bridge enforce it)
 │       │   ├── templates/openbao.hcl.tftpl           HTTPS listener + raft + seal "static"
-│       │   └── tests/helm_values.tftest.hcl
+│       │   └── tests/{helm_values,phase_c}.tftest.hcl   Phase A values + Phase C (sops key AES, decrypt-only policy, role scoped to Flux, approval-key rejected)
 │       └── zot/                                      T7b0 — interim local registry; reconciled by environments/local/flux/zot-sync.yaml (T7c Inc.1a)
 │           └── zot.yaml                              one multi-doc manifest, pinned by image digest, credential-free, GC off
 │

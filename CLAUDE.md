@@ -384,10 +384,14 @@ Stated explicitly rather than guessed:
   ns + seal Secret → `tofu apply` → `bao operator init` → key-preserving
   `raft snapshot restore -force` → hard-assert `approval-key` byte-identical
   to `attestation/cosign-approval.pub` (**never rotated** — a fresh init
-  strands every past approval attestation). Idempotent. **4c:**
-  `transit/keys/sops` + k8s-ServiceAccount auth + policies (tofu Phase C).
-  **4d:** retire the host daemon + pitchfork, repoint `provider.tf`, rename
-  `openbao-cluster` → `openbao`.
+  strands every past approval attestation). Idempotent. **4c (shipped):**
+  the bridge's final `tofu apply` — a new `sops` Transit key
+  (`aes256-gcm96`), a decrypt-only policy, the Kubernetes ServiceAccount
+  auth method + a `flux_sops` role. `approval-key` + the `transit` mount are
+  never tofu-managed (`openbao-cluster-verify.sh` greps the `.tf`). **4d:**
+  retire the host daemon + pitchfork, repoint `provider.tf`, rename
+  `openbao-cluster` → `openbao`. **4e (deferred):** wire
+  `--sops-vault-configmap`.
 - **Kyverno/Cilium enforcement mechanics** — scope, exceptions,
   webhook-failure mode, and default-deny bootstrap allow-list are undefined
   until those modules are built.

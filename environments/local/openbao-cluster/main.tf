@@ -122,3 +122,83 @@ resource "helm_release" "openbao" {
 
   values = [local.helm_values]
 }
+
+# ─── Phase C (Increment 4c) — API config against the RESTORED instance ────
+#
+# Applied by the bootstrap bridge's final `tofu apply`, AFTER the
+# key-preserving snapshot restore — so the `transit` mount + `approval-key`
+# already exist (restore-managed) and VAULT_TOKEN is the bundle's original
+# root token. Everything here is NEW: the `sops` key, the decrypt policy,
+# the k8s-ServiceAccount auth method. Nothing here touches `approval-key`.
+#
+# The chart already ships the `system:auth-delegator` ClusterRoleBinding for
+# the `openbao` ServiceAccount (server.authDelegator.enabled default true —
+# confirmed at 4a), so there is NO `kubernetes_cluster_role_binding` here.
+
+# The Flux SOPS AES key — approval-key (ecdsa-p256, signing) cannot serve
+# AES decryption. Non-exportable, undeletable (same invariant as the host
+# unit's keys).
+resource "vault_transit_secret_backend_key" "sops" {
+  backend          = "transit" # the pre-existing restore-managed mount, by literal path
+  name             = var.sops_key_name
+  type             = "aes256-gcm96"
+  exportable       = false
+  deletion_allowed = false
+
+  depends_on = [helm_release.openbao]
+}
+
+# The extension point — future consumers (a chains-provenance key for T8, a
+# crossplane-system key) add entries to var.transit_keys. approval-key is
+# rejected by the variable's validation.
+resource "vault_transit_secret_backend_key" "extra" {
+  for_each = { for k in var.transit_keys : k.name => k }
+
+  backend          = "transit"
+  name             = each.value.name
+  type             = each.value.type
+  exportable       = false
+  deletion_allowed = false
+
+  depends_on = [helm_release.openbao]
+}
+
+# Decrypt-only. Encryption (transit/encrypt/sops) is granted separately to
+# whatever identity seals secrets — not here, not needed until a secret
+# exists.
+resource "vault_policy" "flux_sops_decrypt" {
+  name = "flux_sops_decrypt"
+
+  policy = <<-HCL
+    path "transit/decrypt/${var.sops_key_name}" {
+      capabilities = ["update"]
+    }
+  HCL
+
+  depends_on = [helm_release.openbao]
+}
+
+# k8s-ServiceAccount auth — no static BAO_TOKEN for cluster workloads.
+resource "vault_auth_backend" "kubernetes" {
+  type = "kubernetes"
+
+  depends_on = [helm_release.openbao]
+}
+
+# Same-cluster shortcut: kubernetes_host only. OpenBao reads its own pod SA
+# token + CA from /var/run/secrets/... so token_reviewer_jwt and
+# kubernetes_ca_cert are omitted (plan § Verified upstream facts).
+resource "vault_kubernetes_auth_backend_config" "this" {
+  backend         = vault_auth_backend.kubernetes.path
+  kubernetes_host = var.kubernetes_host
+}
+
+resource "vault_kubernetes_auth_backend_role" "flux_sops" {
+  backend                          = vault_auth_backend.kubernetes.path
+  role_name                        = "flux_sops"
+  bound_service_account_names      = [var.sops_auth.service_account_name]
+  bound_service_account_namespaces = [var.sops_auth.service_account_namespace]
+  audience                         = var.openbao_cluster_endpoint
+  token_policies                   = [vault_policy.flux_sops_decrypt.name]
+  token_ttl                        = var.sops_auth.token_ttl_seconds
+}

@@ -2,10 +2,12 @@
 # without an orbstack cluster, and skips until openbao-cluster-bootstrap.sh
 # has run once — probe: the `openbao` StatefulSet).
 #
-# Asserts the RUNNING post-migration state (T7c Increment 4b) — it does NOT
-# run the bridge or tear anything down. The full migration + the
-# approval-key-preserved proof are the bridge's own hard assertion and the
-# documented `mise run local:openbao-cluster:bootstrap` acceptance run.
+# Asserts the RUNNING post-migration state (T7c Increments 4b + 4c) — it
+# does NOT run the bridge or tear anything down. The full migration, the
+# approval-key-preserved proof, and the in-OpenBao Phase-C state (the sops
+# key exists, the k8s-auth role denies signing) are the bridge's own hard
+# assertions (`tofu apply` fails if the API calls fail), `tofu output`, and
+# the documented `mise run local:openbao-cluster:bootstrap` acceptance run.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -82,3 +84,19 @@ spec:
                 namespace: openbao
               spec:
                 (ports[?name == 'https'] | [0].port): 8200
+
+    - name: auth-delegator-binding-for-k8s-auth
+      try:
+        # the chart ships this (server.authDelegator.enabled default true);
+        # the Phase-C k8s-ServiceAccount auth method's TokenReview calls fail
+        # without it.
+        - assert:
+            resource:
+              apiVersion: rbac.authorization.k8s.io/v1
+              kind: ClusterRoleBinding
+              metadata:
+                name: openbao-server-binding
+              roleRef:
+                kind: ClusterRole
+                name: system:auth-delegator
+              (subjects[?kind == 'ServiceAccount'] | [0].namespace): openbao

@@ -165,10 +165,18 @@ ADR 0016.
   in-cluster `approval-key` public half is not byte-identical to
   `attestation/cosign-approval.pub`. Idempotent / disaster-recovery
   re-runnable. `[k8s]` chainsaw asserts the running post-migration state.
-- **4c:** `transit/keys/sops` + k8s-ServiceAccount auth + policies (tofu
-  Phase C).
+- **4c (shipped):** the bridge's final `tofu apply` — Phase C against the
+  restored instance: a new `sops` Transit key (`aes256-gcm96`), a
+  decrypt-only `flux_sops_decrypt` policy, the Kubernetes ServiceAccount
+  auth method + a `flux_sops` role bound to `kustomize-controller` in
+  `flux-system`. `approval-key` + the `transit` mount are **never**
+  tofu-managed (restore-managed — `openbao-cluster-verify.sh` enforces it).
+  This UNBLOCKS Flux SOPS; wiring `--sops-vault-configmap` is 4e.
 - **4d:** retire the host daemon + its pitchfork registration, repoint
   `provider.tf`, rename `openbao-cluster` → `openbao`.
+- **4e (deferred):** `--sops-vault-configmap` on the `FluxInstance` + the
+  ConfigMap + `spec.decryption` on Kustomizations — gated on a named secret
+  needing SOPS.
 
 The migration is a **trust migration**: `approval-key` is never rotated (a
 fresh `bao operator init` would strand every past approval attestation), so
