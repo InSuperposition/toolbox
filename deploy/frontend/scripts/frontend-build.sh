@@ -85,17 +85,24 @@ pipeline_tasks="$(frontend_kube get pipeline build-scan-approve \
 case " $pipeline_tasks " in
 *" gate "*) ;;
 *)
-	miss "Pipeline build-scan-approve is absent or has no 'gate' task — apply the ci/ defs:
-  kubectl --context $(frontend_kube_context) -n ci apply -f ci/tasks -f ci/pipelines"
+	miss "Pipeline build-scan-approve is absent or has no 'gate' task — Flux reconciles the ci/ defs:
+  mise run local:tekton:install   # once — Flux cannot install an absent Tekton
+  mise run local:flux:bootstrap   # once per cluster
+  # then wait for the reconcile: mise run local:flux:status"
 	;;
 esac
 
 frontend_kube get configmap buildkitd-mirror >/dev/null 2>&1 ||
-	miss "ConfigMap buildkitd-mirror is missing in ns ci — apply it:
-  kubectl --context $(frontend_kube_context) -n ci apply -f ci/runtime/buildkitd-mirror.yaml"
+	miss "ConfigMap buildkitd-mirror is missing in ns ci — Flux reconciles it (the ci-runtime Kustomization):
+  mise run local:tekton:install   # once — Flux cannot install an absent Tekton
+  mise run local:flux:bootstrap   # once per cluster
+  # then wait for the reconcile: mise run local:flux:status"
 
 curl -sf -o /dev/null http://localhost:30500/v2/ ||
-	miss "zot is not answering on localhost:30500 — Flux reconciles it: \`mise run local:flux:bootstrap\` (once) then \`mise run local:zot:wait\`"
+	miss "zot is not answering on localhost:30500 — Flux reconciles it (the zot Kustomization):
+  mise run local:tekton:install   # once — Flux cannot install an absent Tekton
+  mise run local:flux:bootstrap   # once per cluster
+  # then wait for the reconcile: mise run local:flux:status"
 
 # Base images: reseed is idempotent (crane copy skips manifests already
 # present), so just run it. Uses the WORKING-TREE Dockerfile — the dirty

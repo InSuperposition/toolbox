@@ -89,7 +89,22 @@ Runtime-only edges (env vars / mise-task calls, not file paths — allowed, not 
   attestation/scripts/openbao-preflight.sh       ··▶  OpenBao daemon        via $VAULT_ADDR
   deploy/frontend/scripts/frontend-serve.sh      ··▶  attestation-verify    via $TOOLBOX_ATTESTATION_VERIFY
   environments/local/scripts/openbao-bootstrap.sh ··▶ `mise run attestation:export-pubkey`  (task call, not a file write)
+
+Deployment-composition edge (a manifest-ref, not a shell path — select + target-namespace + order + reconciliation policy; ownership stays with the target):
+  environments/local/  ──▶  ci/{runtime,tasks,pipelines}   Flux `Kustomization` CRs in environments/local/flux/ point at ci/ paths (T7c Increment 2)
 ```
+
+**The 3-way split for the `ci/` reconcile (T7c Increment 2):** `ci/` owns
+the reusable definitions **and their per-path `kustomization.yaml`
+inventories** (`ci/runtime/kustomization.yaml`, `ci/tasks/kustomization.yaml`,
+`ci/pipelines/kustomization.yaml` — each enumerating only real manifests so
+Flux's recursive walk never reaches `ci/tests/**`). `environments/local/`
+owns **deployment selection, target namespace, ordering and reconciliation
+policy** — the Flux `Kustomization` CRs (`environments/local/flux/ci-runtime.yaml`,
+`ci-defs.yaml`). **Flux** manages the resulting live resources. One source
+owner per file, unchanged. Moving the Flux `Kustomization` CRs into `ci/`
+would couple the reusable defs to local source names + deployment policy, so
+they stay in `environments/local/flux/`.
 
 | concern | owns | may depend on |
 |---|---|---|
@@ -98,7 +113,7 @@ Runtime-only edges (env vars / mise-task calls, not file paths — allowed, not 
 | `deploy/frontend/` | one consumer of an approved image: build, deploy, serve | `attestation` (the verify seam, via env), `tests/lib` |
 | `environments/local/` | one deployment target: the tofu composition, the orchestration scripts that bring its units up | its own `openbao/` unit, `tests/lib`; calls `attestation:export-pubkey` as a task |
 | `environments/local/openbao/` | the local-OpenBao **tofu unit** only | `tests/lib` (for its `.tftest.hcl`) — leaf |
-| `ci/` | reusable Tekton Task/Pipeline defs → digest-pinned OCI bundles; `ci/runtime/` namespace; the bundle-push + taskrun scripts | `tests/lib`. **Never names a consumer** (like `attestation/`) — machine-checked (`rules/boundary-ci.yml`). `deploy/<consumer>/` consumes `ci/` bundles by digest via a pinned `PipelineRun`. Tekton controller + `zot` installs are `environments/local/`, not `ci/`. |
+| `ci/` | reusable Tekton Task/Pipeline defs → digest-pinned OCI bundles; `ci/runtime/` namespace; each path's `kustomization.yaml` inventory; the bundle-push + taskrun scripts | `tests/lib`. **Never names a consumer** (like `attestation/`) — machine-checked (`rules/boundary-ci.yml`). `deploy/<consumer>/` consumes `ci/` bundles by digest via a pinned `PipelineRun`. Tekton **controller** + `zot` installs are `environments/local/`, not `ci/`; from T7c Increment 2 the Task/Pipeline **defs** are reconciled by Flux `Kustomization` CRs that live in `environments/local/flux/` (deployment policy is `environments/local/`'s, the defs + inventories stay `ci/`'s). |
 | `modules/` | reusable, versioned, URL-consumed OpenTofu modules only | — (empty today; a README states the rule) |
 
 ## Naming
@@ -242,13 +257,16 @@ toolbox/
 ├── ci/                                              reusable Tekton build defs, content-digest-pinned (ADR 0014; T7)
 │   ├── README.md                                     the job; ci/ (our defs) vs .github/workflows/ (runner + trigger)
 │   ├── tasks/
+│   │   ├── kustomization.yaml                         T7c Inc.2 — per-path inventory (the 4 Task defs only); keeps Flux's recursive walk out of ci/tests/**
 │   │   ├── git-clone.yaml                             T7b1 — blobless shallow clone at a pinned SHA; no script: (step 0: disable-ipv6 sysctl)
 │   │   ├── buildkit-build.yaml                        T7a posture — buildctl-daemonless rootless build → push $(IMAGE):$(APP_REVISION); mirror via buildkitd-config workspace
 │   │   ├── scan-attach.yaml                           T7b2 — trivy JSON + native CycloneDX (one DB pull) → oras attach ×2 as OCI referrers; never blocks; no script:
 │   │   └── gate.yaml                                  T7b3 — trivy convert --exit-code=2 --severity=CRITICAL over scan.json; fails the run on CRITICAL; no privileged step
 │   ├── pipelines/
+│   │   ├── kustomization.yaml                         T7c Inc.2 — per-path inventory (the Pipeline def only)
 │   │   └── build-scan-approve.yaml                    T7b1/T7b2/T7b3 — clone-app → clone-defs → build → scan-attach → gate (shared + buildkitd-config workspaces, retries on clones)
 │   ├── runtime/
+│   │   ├── kustomization.yaml                         T7c Inc.2 — per-path inventory (namespace + mirror CM only)
 │   │   ├── namespace.yaml                             the `ci` namespace (no RBAC)
 │   │   └── buildkitd-mirror.yaml                      T7b1-followup — buildkitd.toml ConfigMap: mirror docker.io + gcr.io → in-cluster zot (interim; OrbStack IPv6-egress defect)
 │   ├── scripts/
@@ -299,6 +317,13 @@ They do **not** catch: a path assembled from variables, `source "$x"`
 resolution, cross-language task references, or **anything in the HCL
 layer** — `ast-grep` ships no Terraform/HCL grammar, so the tofu unit's
 edges (`environments/local/openbao ─╳▶ …`) are not machine-checked here.
+They also do **not** catch **manifest-ref edges** — a Flux `Kustomization`
+`spec.path` or a kustomize `resources:` entry pointing across a concern
+boundary (e.g. `environments/local/flux/ci-runtime.yaml` → `./ci/runtime`).
+The `boundary-*.yml` rules match shell path refs only; the
+`environments/local/ ──▶ ci/{runtime,tasks,pipelines}` deployment-composition
+edge is **not machine-checked** and relies on review + the per-path
+`kustomization.yaml` inventories as the selection control.
 The lint is paired with a review checklist for the rest.
 
 A real resolved-dependency-graph check — a generated manifest validated by
@@ -324,6 +349,7 @@ tasks T1–T6). This table is kept as the record of what moved.
 | 4 | `attestation/` split out of `deploy/frontend/` (one PR, 4a–4d): the sign/verify/preflight seam → `attestation/`; `consume.sh`/`run.sh` → `frontend-deploy.sh`/`frontend-serve.sh` + the `TOOLBOX_ATTESTATION_VERIFY` seam; `openbao-preflight.sh` 5-state + corrected static-seal advice; `openbao-bootstrap.sh` calls `mise run attestation:export-pubkey` (all boundary rules now closed, no lint exceptions). | done |
 | 5 | docs-accuracy sweep — `digest-as-source-of-truth.md`, ADRs 0004/0005/0006/0009/0011, `main.tf` comments re-verified against the moved code; link-check clean | done |
 | T7a | new `ci/` concern (skeleton) — `README.md`, `tasks/buildkit-build.yaml`, `runtime/namespace.yaml`, `scripts/tekton-taskrun.sh` + `lib/ci.sh` + `tests/`; `rules/boundary-ci.yml` + `ci` added to the concern-climb sibling list; `ci:taskrun` + `local:tekton:install` mise tasks | done |
+| T7c Inc. 2 | `ci/{runtime,tasks,pipelines}` reconciled by Flux — per-path `kustomization.yaml` inventories (`ci/`-owned) + `environments/local/flux/{ci-runtime,ci-defs}.yaml` (deployment policy, `environments/local/`-owned) + the deployment-composition edge above; `frontend-build.sh` hand-apply hints → Flux-bootstrap remedy | done |
 
 ## Negative space (deliberately not here)
 

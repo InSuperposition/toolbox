@@ -22,7 +22,9 @@ teardown() {
 	run "$SW"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"Invalid: 0"* ]]
-	[[ "$output" == *"Valid: 4"* ]]
+	# flux-instance (1) + operator OCIRepository+HelmRelease (2) + zot-sync (1)
+	# + ci-runtime (1) + ci-defs ci-tasks/ci-pipelines (2) = 7 (T7c Increment 2).
+	[[ "$output" == *"Valid: 7"* ]]
 }
 
 @test "the vendored CRD schemas are actually used (not skipped)" {

@@ -1,0 +1,15 @@
+# Explicit inventory for the ci/runtime path.
+#
+# Flux's kustomize-controller auto-generates a recursive inventory when a
+# reconciled path has no kustomization.yaml — that walk would slurp anything
+# added here later. This file enumerates ONLY the real runtime manifests, the
+# same reason environments/local/flux/kustomization.yaml is explicit.
+#
+# ci/ owns this file (the per-path inventory of its own defs);
+# environments/local/flux/ci-runtime.yaml owns the deployment policy that
+# points a Flux Kustomization at it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - buildkitd-mirror.yaml

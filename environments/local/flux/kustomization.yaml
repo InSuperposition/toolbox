@@ -13,3 +13,5 @@ kind: Kustomization
 resources:
   - flux-operator-helmrelease.yaml
   - zot-sync.yaml
+  - ci-runtime.yaml
+  - ci-defs.yaml
