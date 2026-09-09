@@ -146,8 +146,14 @@ The `ci/` concern's `buildkit-build` Task runs on `orb start k8s` and needs
 the Tekton Pipelines controller installed once per cluster:
 
 ```
-mise run local:tekton:install          # kubectl apply --server-side, pinned v1.6.0
+mise run local:tekton:install          # checksum-verified, then kubectl apply --server-side
 ```
+
+`environments/local/scripts/tekton-install.sh` downloads the pinned
+`release.yaml`, verifies its SHA-256 against
+`environments/local/tekton/release.lock`, and only then applies the
+**verified local file**. `kubectl apply -f <url>` is never used — the
+checksum is the trust boundary (ADR 0001); a mismatch is a hard refusal.
 
 **Keeping `orb start k8s` up (optional DX).** One OrbStack k8s cluster per
 machine, shared across worktrees — so, like the OpenBao daemon (ADR 0010),
@@ -165,14 +171,13 @@ auto = ["start"]
 `chainsaw-test.sh` always run their own `kubectl` readiness check and fail /
 skip with a clear message — the daemon is a convenience, not a guarantee.
 
-Pinned to **Tekton Pipelines v1.6.0**. `previous/v1.6.0/release.yaml` has
-sha256 `d0f6dc1dc7afe7f8725075ee07f6bf8eb01dd246f41ea404ed32e9ab023425ba`
-(GCS bucket path uses the pipeline COMPONENT version, not the GitHub
-release-train tag — `previous/v1.15.1/` 404s). Verify before the first
-apply:
+Pinned in `environments/local/tekton/release.lock` (`version` + `sha256`) to
+**Tekton Pipelines v1.6.0**. The GCS bucket path uses the pipeline COMPONENT
+version, not the GitHub release-train tag (`previous/v1.15.1/` 404s). To
+re-pin on a bump, recompute and update both lines:
 
 ```
-curl -sSL https://storage.googleapis.com/tekton-releases/pipeline/previous/v1.6.0/release.yaml | shasum -a 256
+curl -sSfL https://storage.googleapis.com/tekton-releases/pipeline/previous/<v>/release.yaml | shasum -a 256
 ```
 
 This is **interim**: T7c moves it to a Flux `OCIRepository` /
