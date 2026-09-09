@@ -1,0 +1,77 @@
+# Flux Kustomizations — reconcile the reusable Tekton Task + Pipeline defs
+# (ci/tasks/, ci/pipelines/) from the flux-system GitRepository into ns `ci`.
+#
+# Ownership (docs/designs/repo-structure.md § deployment-composition edge):
+# ci/ owns the manifests + each path's kustomization.yaml inventory;
+# environments/local/ owns THIS file — deployment selection, target namespace,
+# ordering, reconciliation policy.
+#
+# TWO Kustomization CRs, not one parent inventory: `spec.path` is a single
+# string and cannot name both ./ci/tasks and ./ci/pipelines. A new
+# ci/kustomization.yaml listing both was rejected — `ci/` root is not a
+# deploy unit and a root inventory would also pull ci/runtime + ci/tests.
+#
+# targetNamespace: ci — the Task/Pipeline manifests omit metadata.namespace.
+# `targetNamespace` does NOT create the namespace; ci-runtime does that. Safe
+# here (unlike ci-runtime) because ci/tasks + ci/pipelines are all
+# namespaced kinds with no namespace pinned and no Namespace object.
+#
+# dependsOn chains real Kustomizations (NOT health checks — dependsOn accepts
+# Kustomization refs only). ci-tasks + ci-pipelines both wait on ci-runtime
+# (the `ci` namespace + usable Tekton). ci-pipelines also waits on ci-tasks:
+# the Pipeline references the Tasks by name, so applying them first gives a
+# clean first reconcile even though Tekton resolves task refs lazily.
+#
+# deletionPolicy Orphan (defs are regenerable, but a `flux delete` / git
+# revert should not tear down a running Pipeline mid-build — consistent with
+# ci-runtime + zot-sync). wait: true is fine — Task/Pipeline objects become
+# Ready fast.
+#
+# Tekton-absent failure mode: ci-runtime NotReady (its CRD/Deployment health
+# checks) => these stay blocked on dependsOn and retry, NOT partially
+# applied. No notification (no notification-controller); observe via
+# `flux get kustomizations`. Fix: `mise run local:tekton:install`. The
+# destructive end-to-end test (uninstall Tekton, watch the block) is deferred
+# — the shared dev cluster is not torn down in a test; the wiring that
+# produces this mode is asserted structurally in
+# environments/local/tests/flux/ci-reconcile-test.yaml.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: ci-tasks
+  namespace: flux-system
+spec:
+  interval: "10m"
+  retryInterval: "1m"
+  timeout: "5m"
+  prune: true
+  deletionPolicy: "Orphan"
+  wait: true
+  targetNamespace: "ci"
+  dependsOn:
+    - name: ci-runtime
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: "./ci/tasks"
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: ci-pipelines
+  namespace: flux-system
+spec:
+  interval: "10m"
+  retryInterval: "1m"
+  timeout: "5m"
+  prune: true
+  deletionPolicy: "Orphan"
+  wait: true
+  targetNamespace: "ci"
+  dependsOn:
+    - name: ci-runtime
+    - name: ci-tasks
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: "./ci/pipelines"

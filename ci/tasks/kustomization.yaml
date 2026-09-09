@@ -1,0 +1,18 @@
+# Explicit inventory for the ci/tasks path.
+#
+# Flux's kustomize-controller auto-generates a recursive inventory when a
+# reconciled path has no kustomization.yaml — that walk would reach the
+# chainsaw Test CRs + fixtures under ci/tests/**. This file enumerates ONLY
+# the four reusable Tekton Task defs, the same reason
+# environments/local/flux/kustomization.yaml is explicit.
+#
+# ci/ owns this file (the per-path inventory of its own defs);
+# environments/local/flux/ci-defs.yaml owns the deployment policy (target
+# namespace, ordering) that points a Flux Kustomization at it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - buildkit-build.yaml
+  - gate.yaml
+  - git-clone.yaml
+  - scan-attach.yaml

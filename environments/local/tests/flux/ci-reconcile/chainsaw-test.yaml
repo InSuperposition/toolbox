@@ -1,0 +1,186 @@
+# [k8s]-gated (environments/local/scripts/flux-chainsaw.sh skips without an
+# orbstack cluster running a bootstrapped Flux — same wrapper + gate as
+# ../chainsaw-test.yaml).
+#
+# In its own subdir so chainsaw discovers it (chainsaw's default --test-file
+# is the fixed name `chainsaw-test`; a sibling second test needs a subdir —
+# same layout as ci/tests/<name>/chainsaw-test.yaml). flux-chainsaw.sh runs
+# `flux-reconcile/` ONLY (skipping this test) until the Increment-2
+# Kustomization CRs are on the branch the FluxInstance syncs — the probe is
+# `kubectl -n flux-system get kustomization ci-runtime`.
+#
+# Asserts the RUNNING state of the ci/{runtime,tasks,pipelines} reconcile
+# (T7c Increment 2) — it does NOT bootstrap or tear down (same discipline as
+# ../chainsaw-test.yaml). The dev cluster normally has Tekton via
+# `mise run local:tekton:install`, so this is the Tekton-PRESENT reconcile.
+#
+# Tekton-ABSENT behaviour is NOT tested destructively — the shared dev
+# cluster is not torn down in a test. Instead the WIRING that produces the
+# documented failure mode is asserted from the CR `spec` (last step):
+# ci-defs dependsOn ci-runtime, and ci-runtime health-checks the two Tekton
+# CRDs — so "ci-defs blocked on ci-runtime, ci-runtime NotReady without the
+# CRDs" holds structurally. Full runtime failure mode (NotReady, retries, no
+# notification) is documented in ci-runtime.yaml / ci-defs.yaml headers.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: ci-reconcile
+spec:
+  steps:
+    - name: ci-runtime-kustomization-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: ci-runtime
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] | [0].status): "True"
+
+    - name: ci-defs-kustomizations-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: ci-tasks
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] | [0].status): "True"
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: ci-pipelines
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] | [0].status): "True"
+
+    - name: ci-namespace-present-with-psa-privileged
+      try:
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: ci
+                labels:
+                  pod-security.kubernetes.io/enforce: privileged
+
+    - name: buildkitd-mirror-configmap-present
+      try:
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: buildkitd-mirror
+                namespace: ci
+
+    - name: tekton-task-defs-present
+      try:
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: git-clone
+                namespace: ci
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: buildkit-build
+                namespace: ci
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: scan-attach
+                namespace: ci
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: gate
+                namespace: ci
+
+    - name: build-pipeline-present-and-flux-owned
+      try:
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Pipeline
+              metadata:
+                name: build-scan-approve
+                namespace: ci
+                labels:
+                  kustomize.toolkit.fluxcd.io/name: ci-pipelines
+
+    - name: ci-tests-fixtures-not-reconciled
+      try:
+        # If the recursive kustomize walk had reached ci/tests/** the gate
+        # fixture ConfigMaps would land in ns ci. The per-path
+        # kustomization.yaml inventories keep them out.
+        - error:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: gate-fixture-clean
+                namespace: ci
+        - error:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: gate-fixture-critical
+                namespace: ci
+        - error:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: gate-fixture-malformed
+                namespace: ci
+
+    - name: tekton-absent-failure-mode-is-wired-structurally
+      try:
+        # ci-defs is blocked on ci-runtime (a real Kustomization dependency)…
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: ci-tasks
+                namespace: flux-system
+              spec:
+                (dependsOn[?name == 'ci-runtime'] | [0].name): ci-runtime
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: ci-pipelines
+                namespace: flux-system
+              spec:
+                (dependsOn[?name == 'ci-runtime'] | [0].name): ci-runtime
+        # …and ci-runtime is NotReady without the two Tekton CRDs it
+        # health-checks, so the whole chain stalls closed.
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: ci-runtime
+                namespace: flux-system
+              spec:
+                (healthChecks[?name == 'tasks.tekton.dev'] | [0].kind): CustomResourceDefinition
+                (healthChecks[?name == 'pipelines.tekton.dev'] | [0].kind): CustomResourceDefinition

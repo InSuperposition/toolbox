@@ -15,6 +15,11 @@ set -euo pipefail
 #
 # ci/tests/**.yaml are chainsaw Tests (a different CRD), not Tekton
 # manifests — only the manifest dirs are validated.
+#
+# Each manifest dir also carries a kustomization.yaml (kustomize.config.k8s.io,
+# not a cluster kind — the per-path inventory Flux reconciles, T7c Increment
+# 2). It has no CRD schema and is skipped by filename, same as the
+# environments/local/flux/ gate does.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CI_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -26,6 +31,7 @@ for d in tasks runtime pipelines; do
 done
 
 exec kubeconform -strict -summary \
+	-ignore-filename-pattern 'kustomization.yaml' \
 	-schema-location default \
 	-schema-location "$SCHEMAS" \
 	"${dirs[@]}"

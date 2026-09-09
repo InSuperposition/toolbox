@@ -49,10 +49,11 @@ setup() {
 	[[ "$output" == *"unreachable"* ]]
 }
 
-@test "frontend-build: Pipeline missing -> exit 3, names the apply command" {
+@test "frontend-build: Pipeline missing -> exit 3, points at the Flux reconcile path" {
 	STUB_NO_PIPELINE=1 run "$SCRIPTS/frontend-build.sh" "$REV"
 	[ "$status" -eq 3 ]
-	[[ "$output" == *"apply -f ci/tasks -f ci/pipelines"* ]]
+	[[ "$output" == *"local:tekton:install"* ]]
+	[[ "$output" == *"local:flux:bootstrap"* ]]
 }
 
 @test "frontend-build: Pipeline present but has no 'gate' task -> exit 3" {
@@ -62,16 +63,18 @@ setup() {
 	[[ "$output" == *"no 'gate' task"* ]]
 }
 
-@test "frontend-build: buildkitd-mirror ConfigMap missing -> exit 3" {
+@test "frontend-build: buildkitd-mirror ConfigMap missing -> exit 3, points at the Flux reconcile path" {
 	STUB_NO_CM=1 run "$SCRIPTS/frontend-build.sh" "$REV"
 	[ "$status" -eq 3 ]
 	[[ "$output" == *"buildkitd-mirror"* ]]
+	[[ "$output" == *"local:flux:bootstrap"* ]]
 }
 
-@test "frontend-build: zot down -> exit 3, points at the Flux bootstrap" {
+@test "frontend-build: zot down -> exit 3, points at the Flux reconcile path" {
 	STUB_ZOT_RC=7 run "$SCRIPTS/frontend-build.sh" "$REV"
 	[ "$status" -eq 3 ]
 	[[ "$output" == *"local:flux:bootstrap"* ]]
+	[[ "$output" == *"local:tekton:install"* ]]
 }
 
 @test "frontend-build: base-image seed failure -> exit 3" {

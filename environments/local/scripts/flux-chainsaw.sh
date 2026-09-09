@@ -34,5 +34,27 @@ kubectl --context "$CONTEXT" cluster-info >/dev/null 2>&1 ||
 kubectl --context "$CONTEXT" -n flux-system get fluxinstance flux >/dev/null 2>&1 ||
 	skip "Flux not bootstrapped (mise run local:flux:bootstrap)"
 
-echo "flux-chainsaw: running chainsaw test over environments/local/tests/flux/"
-exec chainsaw test --kube-context "$CONTEXT" "$TESTS_DIR"
+# tests/flux/ has one subdir per Test (chainsaw's default --test-file is the
+# fixed name `chainsaw-test`, so a second Test needs its own subdir — same
+# layout as ci/tests/<name>/chainsaw-test.yaml):
+#
+#   flux-reconcile/  the PR #19/#20 running-Flux checks — always run
+#   ci-reconcile/    the T7c Increment 2 ci/{runtime,tasks,pipelines} reconcile
+#
+# ci-reconcile asserts the ci-runtime / ci-tasks / ci-pipelines Kustomization
+# CRs, which exist on the cluster only once this branch's
+# environments/local/flux/{ci-runtime,ci-defs}.yaml are on the ref the
+# FluxInstance syncs. Until then, run flux-reconcile only. Probe: the
+# ci-runtime Kustomization in flux-system. (chainsaw 0.2.15's
+# --exclude-test-regex does not filter reliably — scope by --test-dir.)
+if kubectl --context "$CONTEXT" -n flux-system \
+	get kustomization.kustomize.toolkit.fluxcd.io ci-runtime >/dev/null 2>&1; then
+	target="$TESTS_DIR"
+	echo "flux-chainsaw: running chainsaw over environments/local/tests/flux/ (all tests)"
+else
+	target="$TESTS_DIR/flux-reconcile"
+	echo "flux-chainsaw: ci-runtime Kustomization absent — running flux-reconcile only" \
+		"(ci-reconcile needs the T7c Increment 2 CRs on the synced ref)"
+fi
+
+exec chainsaw test --kube-context "$CONTEXT" "$target"

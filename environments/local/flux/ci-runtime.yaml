@@ -1,0 +1,71 @@
+# Flux Kustomization — reconciles ci/runtime/ (the `ci` Namespace + the
+# interim `buildkitd-mirror` ConfigMap) from the flux-system GitRepository.
+#
+# Ownership (docs/designs/repo-structure.md § deployment-composition edge):
+# ci/ owns the manifests + ci/runtime/kustomization.yaml inventory;
+# environments/local/ owns THIS file — the deployment selection, ordering and
+# reconciliation policy. Moving it into ci/ would couple the reusable defs to
+# local source names.
+#
+# targetNamespace is DELIBERATELY OMITTED (a documented departure from the
+# plan's literal `targetNamespace: ci` wording, plan ≈ line 746): ci/runtime
+# holds a cluster-scoped Namespace object plus a ConfigMap that already pins
+# `namespace: ci`. A kustomize `namespace` transformer over a resource set
+# that includes the Namespace it names is the fragile case; the plan's INTENT
+# (resources land in ns `ci`) is already satisfied by the manifests as
+# written.
+#
+# deletionPolicy Orphan + a manual teardown: deleting this Kustomization (a
+# git edit removing it from kustomization.yaml, a `flux delete`) must NOT
+# garbage-collect the `ci` namespace and the mirror CM as a side effect —
+# same reasoning as zot-sync.yaml. A deliberate teardown is a manual
+# `kubectl delete -k ci/runtime`.
+#
+# healthChecks are kstatus-native and assert USABLE Tekton, not just
+# "types registered": the two CRDs must be Established AND the controller +
+# webhook Deployments Available. Health-checking a CRD or a Deployment does
+# NOT add it to this Kustomization's apply/prune inventory — only
+# ci/runtime/kustomization.yaml's `resources:` are applied/pruned.
+#
+# Tekton-absent failure mode (documented, not tested destructively — same
+# "running-state only" discipline as Increment 1b): with no Tekton controller
+# this Kustomization goes NotReady (the CRD/Deployment health checks fail) and
+# retries every retryInterval. ci-tasks / ci-pipelines stay blocked on their
+# `dependsOn: [ci-runtime]`. There is NO human notification — no
+# notification-controller — the state is visible only via
+# `flux get kustomizations` / `kubectl get kustomization -n flux-system`.
+# Fix: `mise run local:tekton:install` (the Increment-0 checksum installer —
+# Flux cannot install an absent Tekton; the split "Flux owns the defs, a
+# script owns the CRDs they need" is coherent only as an explicit external
+# prerequisite).
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: ci-runtime
+  namespace: flux-system
+spec:
+  interval: "10m"
+  retryInterval: "1m"
+  timeout: "5m"
+  prune: true
+  deletionPolicy: "Orphan"
+  wait: false
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: "./ci/runtime"
+  healthChecks:
+    - apiVersion: apiextensions.k8s.io/v1
+      kind: CustomResourceDefinition
+      name: tasks.tekton.dev
+    - apiVersion: apiextensions.k8s.io/v1
+      kind: CustomResourceDefinition
+      name: pipelines.tekton.dev
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: tekton-pipelines-controller
+      namespace: tekton-pipelines
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: tekton-pipelines-webhook
+      namespace: tekton-pipelines
