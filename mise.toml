@@ -117,15 +117,21 @@ run = "./ci/scripts/registry-seed.sh deploy/frontend/Dockerfile"
 description = "Build + scan + gate cv_frontend in-cluster from a commit SHA, then print the digest and the attestation:sign line — arg: <cv_frontend-sha>."
 run = "./deploy/frontend/scripts/frontend-build.sh"
 
-# Interim platform install — environments/local/ owns vendored-upstream
-# installs (same split as OpenBao), NOT ci/. Replaced by Flux reconciliation
-# in T7c. The script downloads the pinned release.yaml, verifies its SHA-256
-# against environments/local/tekton/release.lock, then applies the verified
-# local file — never `kubectl apply -f <url>` (ADR 0001). Details:
+# Platform install — environments/local/ owns vendored-upstream installs (same
+# split as OpenBao), NOT ci/. The Tekton *controller* stays on this script
+# through T7c (Flux cannot install an absent Tekton — it is a named
+# prerequisite for the T7c `ci-runtime` Flux Kustomization). The script
+# downloads the pinned release.yaml, verifies its SHA-256 against
+# environments/local/tekton/release.lock, then applies the verified local
+# file — never `kubectl apply -f <url>` (ADR 0001). Details:
 # environments/local/README.md § Tekton.
 [tasks."local:tekton:install"]
-description = "Interim: checksum-verify + install pinned Tekton Pipelines controllers on orb k8s. Replaced by Flux in T7c."
+description = "Checksum-verify + install the pinned Tekton Pipelines controller on orb k8s (a Flux prerequisite — Flux cannot install an absent Tekton)."
 run = "./environments/local/scripts/tekton-install.sh"
+
+[tasks."local:tekton:wait"]
+description = "Block until the Tekton Pipelines control plane (controller + webhook) is Available — the T7c ci-runtime Flux Kustomization and any PipelineRun admission assume Tekton is up."
+run = "kubectl --context orbstack -n tekton-pipelines wait --for=condition=Available deploy/tekton-pipelines-controller deploy/tekton-pipelines-webhook --timeout=120s"
 
 # Interim local registry — TODOS.md T7b0. Same environments/local/-owns-the-
 # -install split as Tekton. Committed manifests (not an upstream release URL —

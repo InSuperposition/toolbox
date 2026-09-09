@@ -12,8 +12,10 @@ set -euo pipefail
 # LOCAL FILE. `kubectl apply -f <url>` is never used — the digest/checksum is
 # the trust boundary (ADR 0001). A mismatch is a hard refusal, not a warning.
 #
-# Retired in T7c: Flux reconciles environments/local/tekton/ from a
-# digest-pinned OCIRepository and this task goes away (README § Tekton).
+# Stays this script through T7c: Flux cannot install an absent Tekton, so the
+# controller install is a named external prerequisite for the T7c `ci-runtime`
+# Flux Kustomization. T7c moves the Task/Pipeline *defs* (ci/tasks, ci/pipelines)
+# to Flux, not the controller (README § Tekton, ADR 0014).
 #
 # Test seams (environments/local/scripts/tests/tekton-install.bats):
 #   TOOLBOX_TEKTON_LOCK              override the lock-file path

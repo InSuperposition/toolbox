@@ -140,7 +140,7 @@ bao operator generate-root -init
 printf '%s' "<new root token>" > "$OPENBAO_STATE_DIR/root.token" && chmod 600 "$_"
 ```
 
-## Tekton (interim — replaced by Flux in T7c)
+## Tekton (controller install — a Flux prerequisite)
 
 The `ci/` concern's `buildkit-build` Task runs on `orb start k8s` and needs
 the Tekton Pipelines controller installed once per cluster:
@@ -180,10 +180,16 @@ re-pin on a bump, recompute and update both lines:
 curl -sSfL https://storage.googleapis.com/tekton-releases/pipeline/previous/<v>/release.yaml | shasum -a 256
 ```
 
-This is **interim**: T7c moves it to a Flux `OCIRepository` /
-`Kustomization` under `environments/local/tekton/`, and the
-`local:tekton:install` task is retired then (`TODOS.md` T7, ADR 0014). The
-`ci/` kubeconform gate validates against Tekton v1 CRD schemas vendored
+**T7c scope:** T7c moves the reusable Task/Pipeline **defs** (`ci/tasks`,
+`ci/pipelines`) and `ci/runtime` to Flux `Kustomization`s — **not** this
+controller install. Flux cannot install an absent Tekton, so
+`local:tekton:install` stays a **named prerequisite** for the T7c
+`ci-runtime` Flux Kustomization (its `tasks.tekton.dev` /
+`pipelines.tekton.dev` CRD health checks depend on this having run).
+Moving the controller itself to Flux is revisited at the ADR-0014 OCI-bundle
+distribution phase, if a Tekton OCI artifact exists by then.
+
+The `ci/` kubeconform gate validates against Tekton v1 CRD schemas vendored
 from this same version at `ci/tests/crd-schemas/` — refresh both together
 on a version bump.
 
@@ -263,11 +269,12 @@ update `zot-manifests.bats` + this doc.
 mise run local:zot:uninstall   # deletes the namespace + PVC — stored images go too
 ```
 
-### T7c/T7d hand-off
+### T7c hand-off
 
-`environments/local/zot/` becomes a Flux `OCIRepository` / `Kustomization`;
-`local:zot:install` is retired then, same as `local:tekton:install`
-(`TODOS.md` T7, ADR 0014). Regenerate the image digest on a version bump:
+`environments/local/zot/` becomes a Flux `Kustomization` and
+`local:zot:install` / `local:zot:uninstall` are retired then (`TODOS.md` T7,
+ADR 0014). The Tekton **controller** install is **not** retired in T7c — see
+§ Tekton. Regenerate the image digest on a version bump:
 `oras resolve ghcr.io/project-zot/zot-linux-arm64:v<VERSION>`.
 
 ## Notes
