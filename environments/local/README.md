@@ -140,14 +140,20 @@ bao operator generate-root -init
 printf '%s' "<new root token>" > "$OPENBAO_STATE_DIR/root.token" && chmod 600 "$_"
 ```
 
-## Tekton (interim — replaced by Flux in T7c)
+## Tekton (controller install — a Flux prerequisite)
 
 The `ci/` concern's `buildkit-build` Task runs on `orb start k8s` and needs
 the Tekton Pipelines controller installed once per cluster:
 
 ```
-mise run local:tekton:install          # kubectl apply --server-side, pinned v1.6.0
+mise run local:tekton:install          # checksum-verified, then kubectl apply --server-side
 ```
+
+`environments/local/scripts/tekton-install.sh` downloads the pinned
+`release.yaml`, verifies its SHA-256 against
+`environments/local/tekton/release.lock`, and only then applies the
+**verified local file**. `kubectl apply -f <url>` is never used — the
+checksum is the trust boundary (ADR 0001); a mismatch is a hard refusal.
 
 **Keeping `orb start k8s` up (optional DX).** One OrbStack k8s cluster per
 machine, shared across worktrees — so, like the OpenBao daemon (ADR 0010),
@@ -165,20 +171,25 @@ auto = ["start"]
 `chainsaw-test.sh` always run their own `kubectl` readiness check and fail /
 skip with a clear message — the daemon is a convenience, not a guarantee.
 
-Pinned to **Tekton Pipelines v1.6.0**. `previous/v1.6.0/release.yaml` has
-sha256 `d0f6dc1dc7afe7f8725075ee07f6bf8eb01dd246f41ea404ed32e9ab023425ba`
-(GCS bucket path uses the pipeline COMPONENT version, not the GitHub
-release-train tag — `previous/v1.15.1/` 404s). Verify before the first
-apply:
+Pinned in `environments/local/tekton/release.lock` (`version` + `sha256`) to
+**Tekton Pipelines v1.6.0**. The GCS bucket path uses the pipeline COMPONENT
+version, not the GitHub release-train tag (`previous/v1.15.1/` 404s). To
+re-pin on a bump, recompute and update both lines:
 
 ```
-curl -sSL https://storage.googleapis.com/tekton-releases/pipeline/previous/v1.6.0/release.yaml | shasum -a 256
+curl -sSfL https://storage.googleapis.com/tekton-releases/pipeline/previous/<v>/release.yaml | shasum -a 256
 ```
 
-This is **interim**: T7c moves it to a Flux `OCIRepository` /
-`Kustomization` under `environments/local/tekton/`, and the
-`local:tekton:install` task is retired then (`TODOS.md` T7, ADR 0014). The
-`ci/` kubeconform gate validates against Tekton v1 CRD schemas vendored
+**T7c scope:** T7c moves the reusable Task/Pipeline **defs** (`ci/tasks`,
+`ci/pipelines`) and `ci/runtime` to Flux `Kustomization`s — **not** this
+controller install. Flux cannot install an absent Tekton, so
+`local:tekton:install` stays a **named prerequisite** for the T7c
+`ci-runtime` Flux Kustomization (its `tasks.tekton.dev` /
+`pipelines.tekton.dev` CRD health checks depend on this having run).
+Moving the controller itself to Flux is revisited at the ADR-0014 OCI-bundle
+distribution phase, if a Tekton OCI artifact exists by then.
+
+The `ci/` kubeconform gate validates against Tekton v1 CRD schemas vendored
 from this same version at `ci/tests/crd-schemas/` — refresh both together
 on a version bump.
 
@@ -258,11 +269,12 @@ update `zot-manifests.bats` + this doc.
 mise run local:zot:uninstall   # deletes the namespace + PVC — stored images go too
 ```
 
-### T7c/T7d hand-off
+### T7c hand-off
 
-`environments/local/zot/` becomes a Flux `OCIRepository` / `Kustomization`;
-`local:zot:install` is retired then, same as `local:tekton:install`
-(`TODOS.md` T7, ADR 0014). Regenerate the image digest on a version bump:
+`environments/local/zot/` becomes a Flux `Kustomization` and
+`local:zot:install` / `local:zot:uninstall` are retired then (`TODOS.md` T7,
+ADR 0014). The Tekton **controller** install is **not** retired in T7c — see
+§ Tekton. Regenerate the image digest on a version bump:
 `oras resolve ghcr.io/project-zot/zot-linux-arm64:v<VERSION>`.
 
 ## Notes

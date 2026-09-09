@@ -1,0 +1,22 @@
+# Tekton Pipelines — pinned interim install.
+#
+# Hand-maintained (NOT generated). `environments/local/scripts/tekton-install.sh`
+# downloads `<base-url>/<version>/release.yaml`, verifies its SHA-256 against
+# `sha256` below, and only then `kubectl apply`s the verified local file — the
+# repo's thesis is that the digest/checksum IS the trust boundary (ADR 0001),
+# so `kubectl apply -f <url>` is never used.
+#
+# The Tekton *controller* install stays this script through T7c — Flux cannot
+# install an absent Tekton, so it is a named external prerequisite for the
+# T7c `ci-runtime` Flux Kustomization (whose CRD health checks depend on it).
+# T7c moves the reusable Task/Pipeline *defs* (`ci/tasks`, `ci/pipelines`) to
+# Flux, not the controller. Moving the controller itself is revisited at the
+# ADR-0014 OCI-bundle distribution phase, if a Tekton OCI artifact exists then.
+#
+# To re-pin on a Tekton bump:
+#   curl -sSfL https://storage.googleapis.com/tekton-releases/pipeline/previous/<v>/release.yaml | shasum -a 256
+# then update both lines. (The GCS path uses the pipeline COMPONENT version,
+# not the GitHub release-train tag.)
+
+version=v1.6.0
+sha256=d0f6dc1dc7afe7f8725075ee07f6bf8eb01dd246f41ea404ed32e9ab023425ba
