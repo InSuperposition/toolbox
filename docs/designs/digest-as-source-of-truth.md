@@ -151,10 +151,15 @@ a trust input. Per-member identity is a `TODOS.md` planning task.
 
 Each top-level concern owns its files and declares which other concerns it
 may name (`docs/designs/repo-structure.md`, ADR 0012/0013). The reusable
-Tekton definitions live in a `ci/` concern (Phase 2 — the T7a skeleton is
-on disk; T7b1–T7b3 add the rest of the Pipeline). They are versioned by
-content digest, not by path (ADR 0014); the exact distribution mechanism
-(`tkn bundle push` vs Flux `OCIRepository`) is decided in the T7c pre-plan.
+Tekton definitions live in a `ci/` concern (T7a–T7b3 built the Pipeline).
+They are versioned by content digest, not by path (ADR 0014). Since the T7c
+pre-plan (ADR 0015): local Flux reconciles the defs from a `GitRepository`
+via plain `Kustomization` CRs — the declarative interim that replaced the
+hand-`kubectl apply`; the digest-pinned OCI-bundle form (ADR 0014) stays
+the eventual target. The Flux `Kustomization` CRs live in
+`environments/local/flux/`; each reconciled `ci/` path carries its own
+`kustomization.yaml` inventory so the recursive kustomize walk never
+reaches `ci/tests/**`.
 
 ```
 attestation/                         # the consumer-agnostic sign+verify seam (ADR 0013)
@@ -175,26 +180,28 @@ deploy/frontend/                     # the per-consumer instantiation for cv_fro
   scripts/lib/frontend.sh               #   frontend_repo_root + TOOLBOX_ATTESTATION_VERIFY seam + frontend_kube/tkn/strict_digest/host_image (T7b3)
   scripts/tests/*.bats + helper.bash
 
-ci/                                  # reusable Tekton defs (distribution mechanism decided in the T7c pre-plan — ADR 0014)
-  tasks/buildkit-build.yaml            #   T7a ✓ — buildctl-daemonless rootless build (T7b1: push $(IMAGE):$(APP_REVISION) to zot, no result; mirror via buildkitd-config workspace)
-  tasks/git-clone.yaml                 #   T7b1 — anonymous clone of cv_frontend + toolbox at pinned SHAs into one workspace (step 0: disable-ipv6 sysctl)
-  tasks/scan-attach.yaml               #   T7b2 — trivy json + native cyclonedx (one DB pull) → oras attach ×2 as OCI referrers; never blocks (step 0: disable-ipv6 sysctl)
-  tasks/gate.yaml                      #   T7b3 ✓ — trivy convert --scanners=vuln --exit-code=2 --severity=CRITICAL on the same scan.json (LAST; no privileged step)
+ci/                                  # reusable Tekton defs — Flux-reconciled from a GitRepository, OCI-bundle form eventual (ADR 0014/0015)
+  tasks/{buildkit-build,git-clone,scan-attach,gate}.yaml   #   T7b1–T7b3 — clone → build → scan-attach → gate; no script:; disable-ipv6 sysctl step 0
+  tasks/kustomization.yaml            #   T7c Inc.2 — per-path inventory (the 4 Task defs only)
   pipelines/build-scan-approve.yaml    #   T7b1/T7b2/T7b3 — clone-app → clone-defs → build → scan-attach → gate (shared + buildkitd-config workspaces, retries on clones)
+  pipelines/kustomization.yaml        #   T7c Inc.2 — per-path inventory (the Pipeline def only)
   runtime/namespace.yaml               #   T7a ✓ — the `ci` namespace (no RBAC — the build SA needs none)
   runtime/buildkitd-mirror.yaml        #   T7b1-followup — buildkitd.toml ConfigMap: mirror docker.io + gcr.io → in-cluster zot (interim; OrbStack IPv6-egress defect)
+  runtime/kustomization.yaml          #   T7c Inc.2 — per-path inventory (namespace + mirror CM only)
   scripts/registry-seed.sh             #   T7b1-followup — host crane-copy of a Dockerfile's base images into zot (mise run frontend:seed)
   scripts/kubeconform-scan.sh + chainsaw-test.sh + lib/ci.sh + tests/   # T7a ✓ (tekton-taskrun.sh deleted in T7b1)
   tests/crd-schemas/{task,pipeline,pipelinerun}_v1.json  #   Tekton v1 CRD schemas (vendored from the pinned release) for kubeconform
   tests/build-pipeline/chainsaw-test.yaml    #   [k8s]-gated: webhook accepts the 5 defs; no script:; posture + full DAG + G1 standalone gate TaskRun
   tests/build-pipeline/fixtures/scan-*.yaml  #   trivy-report ConfigMaps (critical/clean/malformed) for the G1 gate test
 
-environments/local/                  # the ONE deployment target — owns its OpenBao unit + orchestration
+environments/local/                  # the ONE deployment target — owns its OpenBao unit + Flux config + orchestration
   main.tf                               #   applies module "secret_openbao_local" { source = "./openbao" }
   openbao/                              #   the local-OpenBao tofu unit (ADR 0012) — *.tf, templates/, tests/*.tftest.hcl
-  zot/                                  #   T7b0 — interim `kubectl apply` (mise run local:zot:install), Flux-managed in T7c/T7d
-  tekton/                               #   T7c — Flux OCIRepository/Kustomization for the pinned Tekton install
-  scripts/openbao-{bootstrap,reset,snapshot}.sh + lib/openbao.sh + tests/
+  flux/                                 #   T7c — the FluxInstance + operator HelmRelease + the Kustomization CRs (zot-sync, ci-runtime, ci-defs); flux-operator.lock; tests/crd-schemas/ (ADR 0015)
+  zot/                                  #   T7b0 — committed manifests; reconciled by environments/local/flux/zot-sync.yaml (T7c, was `mise run local:zot:install`)
+  tekton/                               #   T7c Inc.0 — release.lock (SHA-256) for tekton-install.sh; the *controller* install stays a checksum-gated `kubectl apply`, a named Flux prerequisite (ADR 0015)
+  tests/flux/{flux-reconcile,ci-reconcile}/chainsaw-test.yaml   #   T7c — [k8s]-gated running-state asserts (flux-chainsaw.sh)
+  scripts/openbao-{bootstrap,reset,snapshot}.sh + flux-{bootstrap,chainsaw,kubeconform}.sh + lib/ + tests/
 
 modules/                             # reusable, versioned, URL-consumed OpenTofu modules only — README today
                                      # (the deferred production secret-openbao is the first candidate; Tekton
@@ -245,8 +252,10 @@ independently (Gall's Law). The full sequencing lives in `TODOS.md`.
   2026-09-08).**
   Move the build/scan/attach/gate path into reusable Tekton Tasks + a Pipeline
   on `orb start k8s` ([ADR 0003](../adr/0003-tekton-pipelines-on-orbstack-k8s.md)),
-  in the `ci/` concern ([ADR 0014](../adr/0014-tekton-defs-are-oci-bundles-in-ci.md)
-  — the defs' *distribution mechanism* is decided in the T7c pre-plan). Builder
+  in the `ci/` concern ([ADR 0014](../adr/0014-tekton-defs-are-oci-bundles-in-ci.md);
+  the defs' interim *distribution* is a plain Flux `Kustomization`,
+  [ADR 0015](../adr/0015-flux-precedes-in-cluster-openbao-gitrepository-plain-yaml.md)).
+  Builder
   is **daemonless rootless BuildKit**. **T7a** ✓ — feasibility spike + the `ci/`
   skeleton (`tasks/buildkit-build.yaml`, `runtime/namespace.yaml`, the
   kubeconform / chainsaw scripts, the interim `mise run local:tekton:install`,
@@ -263,11 +272,13 @@ independently (Gall's Law). The full sequencing lives in `TODOS.md`.
   module — a PipelineRun is fire-and-forget) rendered by `frontend-build.sh`
   (`mise run frontend:build`) + an end-to-end demo. The first real Timoni
   module is the `cv_frontend` **app deployment**, authored during/after T7c.
-  **T7c** — a pre-plan (Flux reconciliation model + the defs
-  distribution mechanism), then local Flux reconciles `ci/**` +
-  `environments/local/`. **Distribution phase** — pin + cosign-sign the defs,
-  retire `build-cv-frontend.yml`. **T7d** — Flux-manage zot + a production
-  repoint. Full detail in `TODOS.md`.
+  **T7c** — pre-plan done ([ADR 0015](../adr/0015-flux-precedes-in-cluster-openbao-gitrepository-plain-yaml.md)):
+  Increment 0 (checksum-gated Tekton install) → 1a/1b (Flux bootstrap +
+  chainsaw) → 2 (Flux reconciles `zot` + `ci/{runtime,tasks,pipelines}` from a
+  `GitRepository`) all shipped; Increment 4+ (in-cluster OpenBao) is a
+  separate plan. **Distribution phase** — pin + cosign-sign the defs as OCI
+  bundles, retire `build-cv-frontend.yml`. **T7d** — production repoint. Full
+  detail in `TODOS.md`.
 
   **T7a Step 1 spike result (2026-09-08, orb k8s v1.35.6, Tekton Pipelines
   v1.6.0):** daemonless rootless BuildKit built `cv_frontend` in-cluster and

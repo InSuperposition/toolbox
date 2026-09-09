@@ -36,8 +36,12 @@ per-consumer instantiation (the `PipelineRun` binding one consumer's params
 + the pinned bundle digests) lives in `deploy/<consumer>/`, mirroring the
 repo's reusable-defs / per-consumer-instantiation split. The Tekton
 *controller* install and `zot` are vendored upstreams, not our reusable
-code — they are `environments/*` concerns (a Flux `OCIRepository` /
-`Kustomization`), not `ci/` and not `modules/`.
+code — they are `environments/*` concerns, not `ci/` and not `modules/`.
+Since T7c ([ADR 0015](0015-flux-precedes-in-cluster-openbao-gitrepository-plain-yaml.md)):
+`zot` and the `ci/` def reconciliation run through Flux `Kustomization` CRs
+under `environments/local/flux/`; the Tekton *controller* install stays on
+the pinned checksum installer (`tekton-install.sh`) as a named Flux
+prerequisite.
 
 Status: accepted. Supersedes the CLAUDE.md "Module Structure & Naming"
 resolved exception. Implemented across T7 (`TODOS.md`).

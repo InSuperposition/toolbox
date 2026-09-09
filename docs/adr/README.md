@@ -22,5 +22,6 @@ superseded.
 | [0012](0012-local-openbao-is-environment-nested.md) | The local-OpenBao tofu unit lives under `environments/local/`, not `modules/` (breaks the sibling symmetry deliberately) |
 | [0013](0013-attestation-seam-is-consumer-agnostic.md) | The attestation sign/verify seam is its own `attestation/` concern, not part of `deploy/frontend/` |
 | [0014](0014-tekton-defs-are-oci-bundles-in-ci.md) | Tekton Task/Pipeline defs are digest-pinned OCI bundles in a `ci/` concern, not versioned dirs in `modules/` (supersedes the CLAUDE.md carve-out) |
+| [0015](0015-flux-precedes-in-cluster-openbao-gitrepository-plain-yaml.md) | T7c order: Flux precedes the in-cluster OpenBao move; Flux reconciles plain YAML from a `GitRepository` (Crossplane not sequenced; does not supersede 0003/0014) |
 
 Architecture: `docs/designs/`. Open work: `TODOS.md`.
