@@ -4,7 +4,11 @@
 # `helm upgrade --install`ing the cosign-verified flux-operator chart. The
 # operator then installs the pinned Flux controllers and generates a
 # `flux-system` GitRepository + Kustomization that reconcile THIS directory
-# from git — so this file is also self-healed (it is in its own sync path).
+# from git.
+#
+# This file is EXCLUDED from that reconcile (see kustomization.yaml) — the
+# FluxInstance is the bridge's anchor, the acyclic root. The bridge owns it;
+# git owns flux-operator-helmrelease.yaml + zot-sync.yaml below it.
 #
 # Pins: `spec.distribution.version` = the Flux release; `spec.distribution.artifact`
 # = the immutable manifests digest (a moving `:latest` would silently change

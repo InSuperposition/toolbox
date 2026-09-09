@@ -6,21 +6,20 @@ it *points at* stay owned by their own concerns.
 
 `environments/local/scripts/flux-bootstrap.sh` applies `flux-instance.yaml`
 once. The FluxInstance then generates a `flux-system` GitRepository +
-Kustomization that reconcile **this directory** from git — so every file here
-is self-healed.
+Kustomization that reconcile **this directory** from git.
 
-| file | |
+| file | reconciled by |
 |---|---|
-| `flux-operator.lock` | pinned + cosign-verified digests (chart, operator image, distribution manifests). Bump procedure in its header. |
-| `flux-instance.yaml` | the one `FluxInstance` |
-| `flux-operator-helmrelease.yaml` | `OCIRepository` + `HelmRelease` — the operator self-manages after the bridge |
-| `zot-sync.yaml` | Flux `Kustomization` → `environments/local/zot/` |
-| `tests/crd-schemas/` | vendored CRD schemas for the `kubeconform-flux` hk step |
+| `flux-operator.lock` | — (data; the bridge + kubeconform read it) |
+| `flux-instance.yaml` | **the bridge only** — excluded from `kustomization.yaml` (it is the acyclic anchor; self-healing it would revert a `spec.sync.ref` override and make the reconciler's own config a product of the reconciler) |
+| `flux-operator-helmrelease.yaml` | Flux (helm-controller adopts the bridge's release, then owns upgrades) |
+| `zot-sync.yaml` | Flux (kustomize-controller) |
+| `kustomization.yaml` | — (the explicit inventory for the generated `flux-system` Kustomization) |
+| `tests/crd-schemas/` | — (vendored schemas for the `kubeconform-flux` hk step) |
 
-No `kustomization.yaml`: every `.yaml` here is a real manifest and there are
-no test CRs to exclude, so Flux's recursive manifest discovery is safe. When
-a directory Flux reconciles *does* mix manifests with tests/fixtures (the
-`ci/` paths, T7c Increment 2), that directory gets an explicit
-`kustomization.yaml` inventory.
+The `kustomization.yaml` here is explicit precisely to exclude
+`flux-instance.yaml`. Directories Flux reconciles that mix manifests with
+tests/fixtures (the `ci/` paths, T7c Increment 2) get an explicit inventory
+for the recursive-walk reason instead.
 
 Full walkthrough + lifecycle trace: `../README.md` § Flux.

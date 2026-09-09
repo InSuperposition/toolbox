@@ -20,8 +20,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FLUX_DIR="$(cd "$SCRIPT_DIR/../flux" && pwd)"
 SCHEMAS="$FLUX_DIR/tests/crd-schemas/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json"
 
+# Skip the vendored schemas (tests/) and the kustomize config file
+# (kustomization.yaml — kustomize.config.k8s.io, not a cluster kind).
 exec kubeconform -strict -summary \
 	-ignore-filename-pattern 'tests/' \
+	-ignore-filename-pattern 'kustomization.yaml' \
 	-schema-location default \
 	-schema-location "$SCHEMAS" \
 	"$FLUX_DIR"

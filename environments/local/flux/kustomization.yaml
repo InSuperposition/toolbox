@@ -1,0 +1,15 @@
+# Explicit inventory for the flux-system Kustomization the operator generates
+# from FluxInstance.spec.sync.
+#
+# `flux-instance.yaml` is DELIBERATELY EXCLUDED: the FluxInstance is the
+# bridge's anchor (environments/local/scripts/flux-bootstrap.sh applies it),
+# the acyclic root — the same relationship the OpenBao bootstrap secrets have
+# to their script. Self-healing it here would (a) revert a `spec.sync.ref`
+# override within one reconcile — so iterating Flux config on a branch fights
+# the self-heal — and (b) make the object that configures the reconciler a
+# product of that reconciler. The bridge owns it; git owns everything below.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - flux-operator-helmrelease.yaml
+  - zot-sync.yaml
