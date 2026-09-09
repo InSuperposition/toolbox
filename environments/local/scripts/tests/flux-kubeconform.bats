@@ -24,13 +24,13 @@ teardown() {
 	[[ "$output" == *"Invalid: 0"* ]]
 	# flux-instance (1) + operator OCIRepository+HelmRelease (2) + zot-sync (1)
 	# + ci-runtime (1) + ci-defs ci-tasks/ci-pipelines (2) + cert-manager
-	# OCIRepository+HelmRelease (2) + cert-manager-pki selfSigned ClusterIssuer
-	# + CA Certificate + CA ClusterIssuer (3) = 12 (T7c Increment 4a — the
-	# openbao-tls leaf Certificate lands in 4b with namespace `openbao`).
-	[[ "$output" == *"Valid: 12"* ]]
+	# OCIRepository+HelmRelease (2) + cert-manager-pki Flux Kustomization (1)
+	# = 10 (T7c Increment 4b — the dev-PKI CRs moved to
+	# environments/local/cert-manager/, kubeconform-cert-manager).
+	[[ "$output" == *"Valid: 10"* ]]
 }
 
-@test "the vendored CRD schemas are actually used (nothing skipped)" {
+@test "nothing skipped (the vendored Flux CRD schemas are all used)" {
 	run "$SW"
 	[[ "$output" == *"Skipped: 0"* ]]
 }

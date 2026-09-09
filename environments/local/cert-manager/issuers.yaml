@@ -1,0 +1,90 @@
+# Dev PKI for the in-cluster OpenBao TLS listener (T7c Increment 4).
+#
+# Chain: a selfSigned root ClusterIssuer -> a CA Certificate (its key
+# generated IN-CLUSTER, never in repo or tofu state) -> a CA ClusterIssuer
+# -> the `openbao-tls` leaf Certificate. The selfSigned root is the
+# acknowledged DEV limitation; PRODUCTION swaps it for a real backend (ACME
+# / an org intermediate CA / an OpenBao PKI engine) and the CA ClusterIssuer
+# + every leaf stay unchanged, only the root moves (cert-manager.lock § DEV
+# vs PROD).
+#
+# Reconciled by its OWN Flux Kustomization (environments/local/flux/
+# cert-manager-pki.yaml -> path ./environments/local/cert-manager), NOT the
+# flux-system Kustomization. These are cert-manager.io/v1 custom kinds, and
+# kustomize-controller fails a whole Kustomization's server-side dry-run if
+# ONE object's CRD is missing — so keeping them in flux-system deadlocked it
+# against the cert-manager HelmRelease that installs those very CRDs. A
+# dedicated Kustomization with retryInterval isolates the transient
+# "no matches for kind ClusterIssuer" until the HelmRelease lands the CRDs.
+#
+# Convergence order on a fresh cluster:
+#   1. cert-manager HelmRelease (flux-system Kustomization) lands the CRDs
+#   2. this Kustomization's retry applies the Issuer + CA CRs
+#   3. openbao-cluster-bootstrap.sh (Increment 4b) creates namespace
+#      `openbao` -> the `openbao-tls` leaf Certificate applies and
+#      cert-manager issues the `openbao-tls` Secret
+# Until step 3 has run once, the leaf shows not-applied (namespace missing)
+# and Flux retries — the same one-time-bridge-then-declarative shape as
+# flux-instance.yaml. The bridge waits for the leaf to go Ready; it does not
+# create it (the bridge owns only the namespace — the acyclic anchor, § B1).
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: toolbox-selfsigned
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: toolbox-dev-ca
+  namespace: cert-manager
+spec:
+  isCA: true
+  commonName: toolbox-dev-ca
+  secretName: toolbox-dev-ca
+  duration: 87600h # 10y — a dev root; rotation is a cluster rebuild
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: toolbox-selfsigned
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: toolbox-dev-ca
+spec:
+  ca:
+    secretName: toolbox-dev-ca # lives in the cluster-resource namespace (cert-manager)
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: openbao-tls
+  namespace: openbao
+spec:
+  secretName: openbao-tls
+  duration: 8760h # 1y — cert-manager auto-renews at 2/3 life
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  # OrbStack routes the Mac host into the cluster network, so the host
+  # reaches the ClusterIP DNS name directly (plan confirm #8); 127.0.0.1
+  # covers the `kubectl port-forward` fallback the bridge uses when it does
+  # not.
+  dnsNames:
+    - openbao.openbao.svc.cluster.local
+    - openbao.openbao.svc
+    - openbao
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  issuerRef:
+    name: toolbox-dev-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

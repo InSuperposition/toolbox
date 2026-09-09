@@ -1,0 +1,84 @@
+# [k8s]-gated (environments/local/scripts/openbao-cluster-chainsaw.sh skips
+# without an orbstack cluster, and skips until openbao-cluster-bootstrap.sh
+# has run once — probe: the `openbao` StatefulSet).
+#
+# Asserts the RUNNING post-migration state (T7c Increment 4b) — it does NOT
+# run the bridge or tear anything down. The full migration + the
+# approval-key-preserved proof are the bridge's own hard assertion and the
+# documented `mise run local:openbao-cluster:bootstrap` acceptance run.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: openbao-cluster-reconcile
+spec:
+  steps:
+    - name: cert-manager-issued-the-tls-secret
+      try:
+        - assert:
+            resource:
+              apiVersion: cert-manager.io/v1
+              kind: Certificate
+              metadata:
+                name: openbao-tls
+                namespace: openbao
+              status:
+                (conditions[?type == 'Ready'] | [0].status): "True"
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: openbao-tls
+                namespace: openbao
+              type: kubernetes.io/tls
+
+    - name: seal-secret-is-present
+      try:
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: openbao-seal
+                namespace: openbao
+
+    - name: statefulset-is-a-single-ready-raft-voter
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: StatefulSet
+              metadata:
+                name: openbao
+                namespace: openbao
+              spec:
+                replicas: 1
+              status:
+                readyReplicas: 1
+
+    - name: pod-is-running-and-unsealed
+      try:
+        # readinessProbe is `bao status` (exit 0 only when unsealed), so a
+        # Ready pod == an unsealed OpenBao.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: openbao-0
+                namespace: openbao
+              status:
+                phase: Running
+                (conditions[?type == 'Ready'] | [0].status): "True"
+
+    - name: the-https-service-exists
+      try:
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: openbao
+                namespace: openbao
+              spec:
+                (ports[?name == 'https'] | [0].port): 8200

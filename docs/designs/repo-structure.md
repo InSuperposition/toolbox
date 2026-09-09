@@ -173,7 +173,8 @@ consume                   frontend:deploy                → deploy/frontend/scr
 (T7a; deleted T7b1)       ci:taskrun                     — replaced by `mise run frontend:build` / `tkn pipeline start build-scan-approve`
 (T7a; T7c Inc.0)          local:tekton:install           → environments/local/scripts/tekton-install.sh (verify release.lock SHA-256 → apply local file); local:tekton:wait added
 (T7c Inc.1a)              local:flux:bootstrap           → environments/local/scripts/flux-bootstrap.sh (cosign-verify chart digest → helm upgrade --install → apply FluxInstance); local:flux:status
-(T7c Inc.4a)              local:openbao-cluster:helm-verify → environments/local/scripts/openbao-cluster-verify.sh (crane digest == openbao-cluster.lock → helm template by digest → assert the 4a shape); local:openbao-cluster:bootstrap lands at 4b
+(T7c Inc.4a)              local:openbao-cluster:helm-verify → environments/local/scripts/openbao-cluster-verify.sh (crane digest == openbao-cluster.lock → helm template by digest → assert the 4a shape)
+(T7c Inc.4b)              local:openbao-cluster:bootstrap   → environments/local/scripts/openbao-cluster-bootstrap.sh (one-time bridge: snapshot host → ns + seal Secret → tofu apply helm_release → bao operator init → key-preserving -force restore → assert approval-key unchanged; idempotent)
 (new, T7b0)               local:zot:wait                 inline: kubectl --context orbstack -n zot wait --for=condition=Available deploy/zot
 (T7b0; retired T7c Inc.1a) local:zot:install/uninstall   — deleted; environments/local/flux/zot-sync.yaml (a Flux Kustomization) reconciles zot now
 check / fix               check / fix                    unchanged
@@ -238,20 +239,28 @@ toolbox/
 │       │   ├── tekton-install.sh                     T7c Inc.0 — verify release.lock SHA-256 → apply the local file (never the URL)
 │       │   ├── flux-bootstrap.sh                     T7c Inc.1a — the one-time acyclic bridge: cosign-verify chart digest → helm upgrade --install → apply FluxInstance
 │       │   ├── flux-chainsaw.sh  flux-kubeconform.sh T7c — the [k8s] chainsaw wrapper + the kubeconform-flux gate wrapper
+│       │   ├── cert-manager-kubeconform.sh           T7c Inc.4 — kubeconform-cert-manager wrapper (vendored cert-manager.io/v1 schemas)
 │       │   ├── openbao-cluster-verify.sh             T7c Inc.4a — the chart-pin gate (crane digest == lock, then helm template by digest)
+│       │   ├── openbao-cluster-bootstrap.sh          T7c Inc.4b — the one-time bridge: snapshot host → ns + seal Secret → tofu apply → init → key-preserving -force restore → assert approval-key unchanged
+│       │   ├── openbao-cluster-chainsaw.sh           T7c Inc.4b — [k8s] running-state wrapper (skips without a cluster / until the bridge has run)
 │       │   ├── lib/openbao.sh                        state-dir resolution, daemon wait-loop, atomic 0600 write
-│       │   └── tests/                                *.bats beside each script (openbao-*, openbao-cluster-verify, tekton-install, flux-*, mise-env, zot-manifests)
+│       │   └── tests/                                *.bats beside each script (openbao-*, openbao-cluster-{verify,bootstrap,chainsaw}, tekton-install, flux-*, mise-env, zot-manifests)
 │       ├── flux/                                     T7c — the FluxInstance + operator HelmRelease + Kustomization CRs (ADR 0015)
 │       │   ├── flux-instance.yaml                    bridge-owned (excluded from its own sync path — the acyclic anchor)
 │       │   ├── flux-operator-helmrelease.yaml        OCIRepository (cosign spec.verify) + HelmRelease — operator self-management
 │       │   ├── zot-sync.yaml  ci-runtime.yaml  ci-defs.yaml   Flux Kustomization CRs → environments/local/zot + ci/{runtime,tasks,pipelines}
 │       │   ├── cert-manager-helmrelease.yaml         T7c Inc.4a — OCIRepository (digest pin, no verify — static-key sig) + HelmRelease; cert-manager.lock
-│       │   ├── cert-manager-pki.yaml                 T7c Inc.4a — selfSigned root → CA Certificate → CA ClusterIssuer (dev PKI; openbao-tls leaf lands in 4b with ns openbao)
+│       │   ├── cert-manager-pki.yaml                 T7c Inc.4 — a Flux Kustomization CR → ../cert-manager/ (separate from flux-system: unknown-CRD dry-run would deadlock it against the HelmRelease)
 │       │   ├── kustomization.yaml  flux-operator.lock  cert-manager.lock
-│       │   └── tests/crd-schemas/*.json              vendored Flux/flux-operator + cert-manager Certificate/ClusterIssuer v1 schemas for kubeconform-flux
+│       │   └── tests/crd-schemas/*.json              vendored Flux/flux-operator v1/v2 schemas for kubeconform-flux
+│       ├── cert-manager/                             T7c Inc.4 — the dev PKI (own Flux Kustomization, not flux-system)
+│       │   ├── issuers.yaml                          selfSigned root → CA → CA ClusterIssuer → openbao-tls leaf
+│       │   ├── kustomization.yaml                    explicit inventory (tests/ sits beside)
+│       │   └── tests/crd-schemas/*.json              vendored cert-manager Certificate/ClusterIssuer v1 for kubeconform-cert-manager
 │       ├── tekton/
 │       │   └── release.lock                          T7c Inc.0 — pinned version + SHA-256 for tekton-install.sh (the controller stays a checksum-gated apply)
 │       ├── tests/flux/{flux-reconcile,ci-reconcile}/chainsaw-test.yaml   T7c — [k8s] running-state asserts (flux-chainsaw.sh; one subdir per Test)
+│       ├── tests/openbao-cluster/chainsaw-test.yaml   T7c Inc.4b — [k8s] post-migration running-state asserts (openbao-cluster-chainsaw.sh)
 │       ├── openbao/                                  the host-daemon tofu unit only (leaf; retires at T7c Inc.4d)
 │       │   ├── main.tf  variables.tf  outputs.tf  versions.tf  README.md
 │       │   ├── templates/openbao.hcl.tftpl
@@ -260,7 +269,7 @@ toolbox/
 │       │       ├── keys.tftest.hcl
 │       │       └── policies.tftest.hcl
 │       ├── openbao-cluster/                          T7c Inc.4 — the in-cluster tofu unit (leaf; → renamed `openbao` at 4d)
-│       │   ├── main.tf (Phase A helm_release)  variables.tf  versions.tf  README.md
+│       │   ├── main.tf (Phase A helm_release)  variables.tf  versions.tf  provider.tf  README.md
 │       │   ├── openbao-cluster.lock                  pinned chart + image digests (helm provider can't pin a digest — verify.sh + the bridge enforce it)
 │       │   ├── templates/openbao.hcl.tftpl           HTTPS listener + raft + seal "static"
 │       │   └── tests/helm_values.tftest.hcl

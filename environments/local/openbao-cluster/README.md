@@ -9,10 +9,12 @@ over TLS with Kubernetes ServiceAccount auth — the loopback listener of
 `environments/local/openbao/` cannot serve pods.
 
 T7c Increment 4 (`~/.claude/plans/t7c-increment4-in-cluster-openbao.md`,
-`docs/adr/0015`, `docs/adr/0016`). **This directory is Increment 4a: Phase A
-only — the `helm_release`.** Increment 4d retires `environments/local/openbao/`,
-renames this unit back to the bare `openbao`, and repoints
-`environments/local/provider.tf`.
+`docs/adr/0015`, `docs/adr/0016`). **Phase A (the `helm_release`) shipped in
+4a; the bootstrap bridge + first init + key-preserving restore shipped in 4b
+(`../scripts/openbao-cluster-bootstrap.sh`).** Increment 4c adds the Phase-C
+`provider "vault"` + `vault_*`/`kubernetes_*` resources; 4d retires
+`environments/local/openbao/`, renames this unit back to the bare `openbao`,
+and repoints `environments/local/provider.tf`.
 
 ## Goals
 
@@ -44,7 +46,7 @@ renames this unit back to the bare `openbao`, and repoints
 
 | Phase | What | Increment |
 |---|---|---|
-| **A** | `helm_release` — the pinned chart, single-replica values, TLS listener, `seal "static"` stanza. cert-manager + the dev CA (`environments/local/flux/cert-manager-*`) ship here too. | **4a (here)** |
+| **A** | `helm_release` — the pinned chart, single-replica values, TLS listener, `seal "static"` stanza. cert-manager (`environments/local/flux/cert-manager-*`) + the dev CA (`environments/local/cert-manager/`) ship here too. | **4a (here)** |
 | **B** | namespace `openbao` + the `openbao-tls` leaf `Certificate` + the seal `Secret`; first `bao operator init` once; a key-preserving `raft snapshot restore -force` | 4b (the bridge script, not `.tf`) |
 | **C** | `provider "vault"` + `vault_mount`/`vault_transit_secret_backend_key` (`approval-key` imported, `sops` new) + `vault_policy` + `vault_auth_backend "kubernetes"` + role | 4c |
 
@@ -75,9 +77,14 @@ declared now (stable contract across the sub-increments) and wired in 4c.
   anti-affinity / PDB.
 - `tofu test` (`tests/helm_values.tftest.hcl`, `mock_provider`) — the
   `helm_release` values plan as expected; `create_namespace` stays false.
-- An ephemeral `[k8s]` chainsaw run (release + throwaway seal + throwaway
-  cert in a scratch namespace → `openbao-0` Running, `Seal Type: static`,
-  `Storage Type: raft`, TLS endpoint live, torn down) lands with the
-  bootstrap bridge in **4b**, where the real seal Secret + cert-manager leaf
-  exist — 4a stands up nothing permanent, and the bridge's live acceptance
-  run is the genuine end-to-end proof.
+- `environments/local/tests/openbao-cluster/chainsaw-test.yaml` (4b) —
+  `[k8s]` gated (`openbao-cluster-chainsaw.sh` skips without a cluster and
+  until `mise run local:openbao-cluster:bootstrap` has run). Asserts the
+  RUNNING post-migration state: the `openbao-tls` Certificate + Secret, the
+  `openbao-seal` Secret, a single ready raft voter, `openbao-0` Running +
+  Ready (Ready ⇒ unsealed — the readiness probe is `bao status`), the HTTPS
+  Service. It does not run the bridge or tear down.
+- The bridge's own hard assertion (`approval-key` byte-identical to
+  `attestation/cosign-approval.pub`) + a manual
+  `mise run local:openbao-cluster:bootstrap` acceptance run are the genuine
+  end-to-end proof.

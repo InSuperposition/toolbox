@@ -88,6 +88,10 @@ run = "bao operator raft snapshot restore"
 description = "Assert environments/local/openbao-cluster/openbao-cluster.lock's chart_digest matches the pinned tag (the OpenTofu helm provider cannot pin a digest), then render the chart by digest and check the Increment 4a shape. Self-skips offline."
 run = "./environments/local/scripts/openbao-cluster-verify.sh"
 
+[tasks."local:openbao-cluster:bootstrap"]
+description = "One-time per cluster (disaster-recovery re-run safe): move the local OpenBao into the OrbStack cluster — snapshot the host, create ns + seal Secret, tofu apply the helm_release, first `bao operator init`, key-preserving `raft snapshot restore -force`, hard-assert approval-key unchanged. Needs the host daemon up + Flux bootstrapped. Phase C (transit/keys/sops, k8s-auth) is Increment 4c."
+run = "./environments/local/scripts/openbao-cluster-bootstrap.sh"
+
 # The attestation sign/verify seam is its own concern (docs/designs/repo-
 # structure.md, ADR 0013) — tasks namespaced attestation:<verb>.
 [tasks."attestation:export-pubkey"]

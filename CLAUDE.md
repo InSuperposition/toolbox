@@ -74,7 +74,7 @@ each row links to.
 | **Crossplane** | *Negative space* — pinned, not active. | Would sit at the self-service in-cluster provisioning layer (rival to OpenTofu, not to Timoni) if a concrete need appears. None does yet. |
 | **Kyverno** | Admission policy. | Enforcement mechanics (scope, exceptions, webhook-failure mode) not yet defined — design at Kyverno module build time, not asserted here as a slogan. |
 | **Cilium** | Network policy, default-deny between workloads, explicit allow only. | Bootstrap allow-list (DNS, API server, git/OCI pulls, OpenBao) needed before default-deny can reconcile anything — defined at Cilium module build time. |
-| **cert-manager** | In-cluster PKI for the **local dev cluster** — issues the TLS server cert the in-cluster OpenBao listener needs (T7c Increment 4, ADR 0016). | A Flux-reconciled **helper** component (chart + images digest-pinned in `environments/local/flux/cert-manager.lock`; no runtime `spec.verify` — cert-manager signs with a static key, the digest is the pin, ADR 0001). Dev uses a selfSigned root → CA → leaf chain (4a ships the root + CA; the OpenBao leaf `Certificate` lands in 4b with ns `openbao`); **production** points the leaf's `issuerRef` at a real backend (ACME / org intermediate / OpenBao PKI) — the CA and every leaf unchanged. Unlike OpenBao (OpenTofu-owned substrate, ADR 0015), a helper behind the GitOps loop is fine — nothing secret-bearing depends on its reconcile being tofu-driven. |
+| **cert-manager** | In-cluster PKI for the **local dev cluster** — issues the TLS server cert the in-cluster OpenBao listener needs (T7c Increment 4, ADR 0016). | A Flux-reconciled **helper** component (chart + images digest-pinned in `environments/local/flux/cert-manager.lock`; no runtime `spec.verify` — cert-manager signs with a static key, the digest is the pin, ADR 0001). Dev uses a selfSigned root → CA → `openbao-tls` leaf chain (the leaf applies once the 4b bridge creates ns `openbao`); **production** points the leaf's `issuerRef` at a real backend (ACME / org intermediate / OpenBao PKI) — the CA and every leaf unchanged. Unlike OpenBao (OpenTofu-owned substrate, ADR 0015), a helper behind the GitOps loop is fine — nothing secret-bearing depends on its reconcile being tofu-driven. |
 | **OpenBao** | Secret store of record — for anything created *after* OpenBao exists and is unsealed. | Local dev daemon (ADR 0010/0011): one machine-global pitchfork daemon that auto-unseals from a static seal key. Its bootstrap secrets — seal key, root token, recovery key — are `0600` files in `~/.local/state/toolbox/openbao/`, beside the raft store. `mise [env]` injects `VAULT_TOKEN` by reading `root.token`. The out-of-band requirement is real for the *deferred production* `secret-openbao` module, not the local one. |
 | ~~**fnox**~~ | **Removed 2026-09-07 (ADR 0011).** Was the local dev secret access layer (backend = OpenBao). `fnox set`/`fnox remove` silently rewrite `fnox.toml`, and its keychain items trigger a GUI password prompt when read by another binary. The one bootstrap secret it held (the root token) is now a `0600` file. | — |
 | **pitchfork** | Local dev daemon supervision only (directory-scoped autostart/autostop). | Repo-policy choice — pitchfork itself can run production daemons; we simply don't use it that way here. |
@@ -378,12 +378,16 @@ Stated explicitly rather than guessed:
 - **Local OpenBao runs in-cluster** — IN PROGRESS (T7c Increment 4, ADR
   0016, `~/.claude/plans/t7c-increment4-in-cluster-openbao.md`). The
   loopback listener of `environments/local/openbao/` cannot serve pods (the
-  blocker in front of T8). Increment 4a (shipped): the pinned
-  `helm_release` in `environments/local/openbao-cluster/` + cert-manager
-  for its TLS. 4b: the bootstrap bridge + key-preserving snapshot restore
-  (`approval-key` is **not** rotated). 4c: `transit/keys/sops` +
-  k8s-ServiceAccount auth. 4d: retire the host daemon + pitchfork, repoint
-  `provider.tf`, rename `openbao-cluster` → `openbao`.
+  blocker in front of T8). **4a (shipped):** the pinned `helm_release` in
+  `environments/local/openbao-cluster/` + cert-manager. **4b (shipped):**
+  `openbao-cluster-bootstrap.sh` — the one-time bridge: snapshot the host →
+  ns + seal Secret → `tofu apply` → `bao operator init` → key-preserving
+  `raft snapshot restore -force` → hard-assert `approval-key` byte-identical
+  to `attestation/cosign-approval.pub` (**never rotated** — a fresh init
+  strands every past approval attestation). Idempotent. **4c:**
+  `transit/keys/sops` + k8s-ServiceAccount auth + policies (tofu Phase C).
+  **4d:** retire the host daemon + pitchfork, repoint `provider.tf`, rename
+  `openbao-cluster` → `openbao`.
 - **Kyverno/Cilium enforcement mechanics** — scope, exceptions,
   webhook-failure mode, and default-deny bootstrap allow-list are undefined
   until those modules are built.

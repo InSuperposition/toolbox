@@ -88,6 +88,16 @@ local fast = new Mapping<String, Step> {
     glob = List("environments/local/flux/**/*.yaml", "environments/local/flux/tests/crd-schemas/**/*.json", "environments/local/scripts/flux-kubeconform.sh")
     check = "./environments/local/scripts/flux-kubeconform.sh"
   }
+  // The dev-PKI CRs (cert-manager.io/v1 ClusterIssuer + Certificate)
+  // reconciled by the `cert-manager-pki` Flux Kustomization — kept out of
+  // environments/local/flux/ (and so out of kubeconform-flux) because a
+  // whole-Kustomization dry-run fails on an unknown CRD; see
+  // environments/local/flux/cert-manager-pki.yaml. Wrapper script for the
+  // same -schema-location templating reason as kubeconform-flux.
+  ["kubeconform-cert-manager"] {
+    glob = List("environments/local/cert-manager/**/*.yaml", "environments/local/cert-manager/tests/crd-schemas/**/*.json", "environments/local/scripts/cert-manager-kubeconform.sh")
+    check = "./environments/local/scripts/cert-manager-kubeconform.sh"
+  }
 }
 
 /// Offline correctness. pre-push and check.
@@ -161,6 +171,20 @@ local heavy = new Mapping<String, Step> {
   ["chainsaw-flux"] {
     glob = List("environments/local/tests/flux/**/*.yaml", "environments/local/flux/**/*.yaml", "environments/local/scripts/flux-chainsaw.sh")
     check = "./environments/local/scripts/flux-chainsaw.sh"
+  }
+  // The in-cluster OpenBao running state (T7c Increment 4b). Same [k8s] gate
+  // as chainsaw-flux — skips in CI (no OrbStack) and skips locally until
+  // `mise run local:openbao-cluster:bootstrap` has deployed it (probe: the
+  // `openbao` StatefulSet). Asserts the post-migration state; does not run
+  // the bridge or tear down.
+  ["chainsaw-openbao-cluster"] {
+    glob = List(
+      "environments/local/tests/openbao-cluster/**/*.yaml",
+      "environments/local/openbao-cluster/**",
+      "environments/local/cert-manager/**/*.yaml",
+      "environments/local/scripts/openbao-cluster-chainsaw.sh"
+    )
+    check = "./environments/local/scripts/openbao-cluster-chainsaw.sh"
   }
   // Silent-coverage-drop guard (F5). Diffs the suites on disk, the
   // committed tests/manifest.txt, and what hk schedules — a mismatch fails
