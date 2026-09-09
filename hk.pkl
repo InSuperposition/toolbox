@@ -80,6 +80,14 @@ local fast = new Mapping<String, Step> {
     glob = List("environments/local/zot/**/*.yaml")
     check = "kubeconform -strict -summary -schema-location default ./environments/local/zot/"
   }
+  // The Flux CRs reconciled onto the local cluster (FluxInstance, OCIRepository,
+  // HelmRelease, Kustomization). A wrapper script for the same reason as the
+  // ci/ Tekton gate — the -schema-location template collides with hk's. CRD
+  // schemas vendored at environments/local/flux/tests/crd-schemas/.
+  ["kubeconform-flux"] {
+    glob = List("environments/local/flux/**/*.yaml", "environments/local/flux/tests/crd-schemas/**/*.json", "environments/local/scripts/flux-kubeconform.sh")
+    check = "./environments/local/scripts/flux-kubeconform.sh"
+  }
 }
 
 /// Offline correctness. pre-push and check.

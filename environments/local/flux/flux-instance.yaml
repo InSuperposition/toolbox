@@ -1,0 +1,40 @@
+# The one FluxInstance for the local OrbStack cluster.
+#
+# environments/local/scripts/flux-bootstrap.sh applies this once, after
+# `helm upgrade --install`ing the cosign-verified flux-operator chart. The
+# operator then installs the pinned Flux controllers and generates a
+# `flux-system` GitRepository + Kustomization that reconcile THIS directory
+# from git — so this file is also self-healed (it is in its own sync path).
+#
+# Pins: `spec.distribution.version` = the Flux release; `spec.distribution.artifact`
+# = the immutable manifests digest (a moving `:latest` would silently change
+# the controller manifests — ADR 0001). Bump via environments/local/flux/flux-operator.lock.
+#
+# Components: source + kustomize + helm only. helm-controller is here for the
+# operator's own HelmRelease (flux-operator-helmrelease.yaml) — the operator
+# self-manages after this bootstrap. No notification-controller yet (no
+# alerting; a reconcile/verify trip is visible only via `kubectl get`).
+apiVersion: fluxcd.controlplane.io/v1
+kind: FluxInstance
+metadata:
+  name: flux
+  namespace: flux-system
+spec:
+  distribution:
+    version: "2.9.5"
+    registry: "ghcr.io/fluxcd"
+    artifact: "oci://ghcr.io/controlplaneio-fluxcd/flux-operator-manifests@sha256:79681844844b24ff9e7fafc3edf7ddab886268b0ea51ce3ca8a5bd8bb7b40fe2"
+  components:
+    - source-controller
+    - kustomize-controller
+    - helm-controller
+  cluster:
+    type: kubernetes
+    multitenant: false
+    networkPolicy: true
+  sync:
+    kind: GitRepository
+    url: "https://github.com/InSuperposition/toolbox.git"
+    ref: "refs/heads/main"
+    path: "environments/local/flux"
+    interval: "1m"

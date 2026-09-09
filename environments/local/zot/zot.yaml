@@ -1,11 +1,15 @@
 # Interim local zot registry — TODOS.md T7b0,
 # `~/.claude/plans/t7b-pipeline-recut.md`.
 #
-# Vendored upstream (project-zot v2.1.20), applied by
-# `mise run local:zot:install` (`kubectl apply` — the same interim pattern as
-# `local:tekton:install`, owned by `environments/local/`, never `ci/`;
-# docs/designs/repo-structure.md § environments/local). T7c/T7d move this to a
-# Flux `OCIRepository`/`Kustomization` and retire the interim task.
+# Vendored upstream (project-zot v2.1.20), owned by `environments/local/`,
+# never `ci/` (docs/designs/repo-structure.md § environments/local). The
+# install is a Flux `Kustomization` — `environments/local/flux/zot-sync.yaml`
+# reconciles this directory from git (`local:zot:install` retired T7c).
+#
+# The Namespace + `zot-data` PVC carry
+# `kustomize.toolkit.fluxcd.io/prune: disabled` so Flux never garbage-collects
+# the stored images; the Kustomization's `deletionPolicy: Orphan` keeps zot
+# running if that CR is deleted. A real teardown is a manual `kubectl delete`.
 #
 # Credential-free on the single-user OrbStack VM: no `auth` block, HTTP only,
 # loopback / cluster-internal. Stated threat model + the P2 "zot registry auth"
@@ -29,6 +33,8 @@ metadata:
   name: zot
   labels:
     app.kubernetes.io/part-of: toolbox-ci
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -37,6 +43,8 @@ metadata:
   namespace: zot
   labels:
     app.kubernetes.io/part-of: toolbox-ci
+  annotations:
+    kustomize.toolkit.fluxcd.io/prune: disabled
 spec:
   accessModes: ["ReadWriteOnce"]
   resources:

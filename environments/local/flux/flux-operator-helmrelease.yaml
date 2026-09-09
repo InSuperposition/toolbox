@@ -1,0 +1,57 @@
+# flux-operator self-management (declarative — user steer: minimize shell).
+#
+# flux-bootstrap.sh runs `helm upgrade --install` ONCE at bootstrap. From
+# then on helm-controller owns the operator's lifecycle: it adopts the
+# existing helm-CLI release on name + namespace match (same `releaseName`,
+# same `storageNamespace`), and an operator upgrade is a digest bump in
+# environments/local/flux/flux-operator.lock + this file — no `helm upgrade`
+# shell step. The first helm-controller reconcile is a real Helm upgrade
+# (new revision, same release history — not a reinstall).
+#
+# All three digests are pinned + cosign-verified (see flux-operator.lock):
+#   - the chart, via the OCIRepository `ref.digest` + `verify` (cosign keyless)
+#   - the operator image, via `values.image.tag` in the `name:tag@digest` form
+#     the chart's Deployment template accepts
+#   - the distribution manifests, in flux-instance.yaml `spec.distribution.artifact`
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: flux-operator
+  namespace: flux-system
+spec:
+  interval: "30m"
+  url: "oci://ghcr.io/controlplaneio-fluxcd/charts/flux-operator"
+  ref:
+    digest: "sha256:ae962f87e04301c61aeb41698146027ba4c2e4b4157d4c08fb4a4e335be9aa42"
+  layerSelector:
+    mediaType: "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
+    operation: "copy"
+  verify:
+    provider: "cosign"
+    matchOIDCIdentity:
+      - issuer: '^https://token\.actions\.githubusercontent\.com$'
+        subject: '^https://github\.com/controlplaneio-fluxcd/charts/.*$'
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: flux-operator
+  namespace: flux-system
+spec:
+  interval: "30m"
+  releaseName: "flux-operator"
+  storageNamespace: "flux-system"
+  targetNamespace: "flux-system"
+  serviceAccountName: "flux-operator"
+  chartRef:
+    kind: OCIRepository
+    name: flux-operator
+  install:
+    crds: "CreateReplace"
+  upgrade:
+    crds: "CreateReplace"
+  values:
+    image:
+      # name:tag@digest — the digest wins; keeps the tag readable in `kubectl describe`.
+      tag: "v0.59.0@sha256:29421fe9a49a533ac99a5b7779e1a5fffa3227b16ddfcefe1e3b14e5c20a1767"

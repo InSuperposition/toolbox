@@ -1,0 +1,30 @@
+# flux-operator — pinned, cosign-verified.
+#
+# Hand-maintained (NOT generated). `environments/local/scripts/flux-bootstrap.sh`
+# verifies `chart_digest` with `cosign verify` (keyless, the identity below),
+# then `helm upgrade --install`s THAT digest. The committed
+# `flux-operator-helmrelease.yaml` pins the same three digests so Flux's
+# helm-controller keeps the operator on them after it adopts the release.
+#
+# The digest/checksum IS the trust boundary (ADR 0001) — a tag is never the pin.
+#
+# To bump the operator:
+#   1. pick the new version V
+#   2. crane digest ghcr.io/controlplaneio-fluxcd/charts/flux-operator:$V        -> chart_digest
+#   3. crane digest ghcr.io/controlplaneio-fluxcd/flux-operator:v$V             -> operator_image_digest
+#   4. crane digest ghcr.io/controlplaneio-fluxcd/flux-operator-manifests:latest -> manifests_digest
+#   5. cosign verify --certificate-oidc-issuer=$cosign_issuer \
+#        --certificate-identity-regexp="$cosign_identity_regexp" \
+#        ghcr.io/controlplaneio-fluxcd/charts/flux-operator:$V
+#   6. update every line below + flux-operator-helmrelease.yaml + flux-instance.yaml
+#
+# (The `charts` repo versions independently from the flux-operator app — the
+#  signing-workflow identity carries the charts-repo tag, not vX.Y.Z, which is
+#  why the identity is a regexp, not an exact subject.)
+
+version=0.59.0
+chart_digest=sha256:ae962f87e04301c61aeb41698146027ba4c2e4b4157d4c08fb4a4e335be9aa42
+operator_image_digest=sha256:29421fe9a49a533ac99a5b7779e1a5fffa3227b16ddfcefe1e3b14e5c20a1767
+manifests_digest=sha256:79681844844b24ff9e7fafc3edf7ddab886268b0ea51ce3ca8a5bd8bb7b40fe2
+cosign_issuer=https://token.actions.githubusercontent.com
+cosign_identity_regexp=^https://github\.com/controlplaneio-fluxcd/charts/.*$

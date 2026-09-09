@@ -95,7 +95,7 @@ frontend_kube get configmap buildkitd-mirror >/dev/null 2>&1 ||
   kubectl --context $(frontend_kube_context) -n ci apply -f ci/runtime/buildkitd-mirror.yaml"
 
 curl -sf -o /dev/null http://localhost:30500/v2/ ||
-	miss "zot is not answering on localhost:30500 — \`mise run local:zot:install && mise run local:zot:wait\`"
+	miss "zot is not answering on localhost:30500 — Flux reconciles it: \`mise run local:flux:bootstrap\` (once) then \`mise run local:zot:wait\`"
 
 # Base images: reseed is idempotent (crane copy skips manifests already
 # present), so just run it. Uses the WORKING-TREE Dockerfile — the dirty
