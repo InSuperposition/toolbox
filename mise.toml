@@ -81,6 +81,13 @@ run = "./environments/local/scripts/openbao-snapshot.sh"
 description = "Restore the local OpenBao from a snapshot bundle — args: [-force] <snapshot-file>. The bundle's seal.key + root.token must be in $OPENBAO_STATE_DIR first (see environments/local/README.md § disaster). Use -force into a freshly bootstrapped instance."
 run = "bao operator raft snapshot restore"
 
+# T7c Increment 4 — the in-cluster OpenBao move (environments/local/openbao-
+# cluster/, docs/adr/0016). 4a is the pinned helm_release + its chart-pin
+# gate; the bootstrap bridge (local:openbao-cluster:bootstrap) lands in 4b.
+[tasks."local:openbao-cluster:helm-verify"]
+description = "Assert environments/local/openbao-cluster/openbao-cluster.lock's chart_digest matches the pinned tag (the OpenTofu helm provider cannot pin a digest), then render the chart by digest and check the Increment 4a shape. Self-skips offline."
+run = "./environments/local/scripts/openbao-cluster-verify.sh"
+
 # The attestation sign/verify seam is its own concern (docs/designs/repo-
 # structure.md, ADR 0013) — tasks namespaced attestation:<verb>.
 [tasks."attestation:export-pubkey"]

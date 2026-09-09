@@ -27,6 +27,7 @@ bats    environments/local/scripts/tests/tekton-install.bats     5
 bats    environments/local/scripts/tests/flux-bootstrap.bats     6
 bats    environments/local/scripts/tests/flux-kubeconform.bats   4
 bats    environments/local/scripts/tests/flux-chainsaw.bats      4
+bats    environments/local/scripts/tests/openbao-cluster-verify.bats  6
 bats    ci/scripts/tests/chainsaw-test.bats                   3
 bats    ci/scripts/tests/kubeconform-scan.bats               3
 bats    ci/scripts/tests/registry-seed.bats                  6
@@ -35,3 +36,4 @@ bats    tests/check-coverage.bats                           3
 tftest  environments/local/openbao/tests/config_render.tftest.hcl  4
 tftest  environments/local/openbao/tests/keys.tftest.hcl           3
 tftest  environments/local/openbao/tests/policies.tftest.hcl       2
+tftest  environments/local/openbao-cluster/tests/helm_values.tftest.hcl  5

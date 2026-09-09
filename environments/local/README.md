@@ -140,6 +140,30 @@ bao operator generate-root -init
 printf '%s' "<new root token>" > "$OPENBAO_STATE_DIR/root.token" && chmod 600 "$_"
 ```
 
+## OpenBao in-cluster (T7c Increment 4 — in progress)
+
+The host daemon above cannot serve cluster pods (loopback listener) — the
+blocker in front of T8. Increment 4 moves OpenBao into the OrbStack cluster
+as a single-replica tofu-owned raft StatefulSet, **without rotating
+`approval-key`** (a fresh init breaks every past approval attestation).
+Design + sequencing: `~/.claude/plans/t7c-increment4-in-cluster-openbao.md`,
+ADR 0016.
+
+- **4a (shipped):** `environments/local/openbao-cluster/` — the pinned
+  `helm_release` (Phase A), HTTPS listener, `seal "static"` stanza,
+  single-replica values. cert-manager (`environments/local/flux/cert-manager-*`)
+  issues its TLS cert. `mise run local:openbao-cluster:helm-verify` is the
+  chart-pin gate (the OpenTofu helm provider cannot pin an OCI digest, so
+  the digest is enforced by the verify script + the bridge, not the
+  resource).
+- **4b:** `openbao-cluster-bootstrap.sh` — the acyclic bridge: create ns +
+  seal Secret (from the on-machine `0600` `seal.key`), `tofu apply` Phase A,
+  first `bao operator init`, key-preserving `raft snapshot restore -force`,
+  assert `approval-key` unchanged, `tofu apply` Phase C.
+- **4c:** `transit/keys/sops` + k8s-ServiceAccount auth + policies.
+- **4d:** retire the host daemon + its pitchfork registration, repoint
+  `provider.tf`, rename `openbao-cluster` → `openbao`.
+
 ## Tekton (controller install — a Flux prerequisite)
 
 The `ci/` concern's `buildkit-build` Task runs on `orb start k8s` and needs
@@ -245,7 +269,10 @@ checks), `ci-defs` stays blocked on `dependsOn` and retries — no notification
 | `flux/zot-sync.yaml` | the Flux `Kustomization` that reconciles `environments/local/zot/` |
 | `flux/ci-runtime.yaml` | Flux `Kustomization` `ci-runtime` → `ci/runtime/` (T7c Increment 2, ADR 0015) |
 | `flux/ci-defs.yaml` | Flux `Kustomization`s `ci-tasks` + `ci-pipelines` → `ci/tasks/` + `ci/pipelines/` (T7c Increment 2) |
-| `flux/tests/crd-schemas/*.json` | v1/v2 CRD schemas vendored from Flux 2.9.5 + flux-operator v0.59.0 for the `kubeconform-flux` gate — **regenerate on a bump** (`crane digest` + `cosign verify` per the lock-file header; CRDs from `github.com/fluxcd/flux2/releases/download/v2.9.5/manifests.tar.gz` and `controlplaneio-fluxcd/flux-operator` tag `v0.59.0`) |
+| `flux/cert-manager.lock` | pinned cert-manager chart + 4 image digests + the authoring-time `cosign verify --key` record (static-key signature, not keyless) — T7c Increment 4a |
+| `flux/cert-manager-helmrelease.yaml` | `OCIRepository` (digest pin, **no** `spec.verify` — the digest is the trust boundary, ADR 0001) + `HelmRelease` into ns `cert-manager` — in-cluster PKI for the OpenBao TLS listener |
+| `flux/cert-manager-pki.yaml` | selfSigned root `ClusterIssuer` → CA `Certificate` (key generated in-cluster) → CA `ClusterIssuer`. The `openbao-tls` leaf `Certificate` lands in 4b with ns `openbao`. Dev limitation: selfSigned root; production swaps it for a real backend, CA + leaves unchanged. |
+| `flux/tests/crd-schemas/*.json` | v1/v2 CRD schemas vendored from Flux 2.9.5 + flux-operator v0.59.0 + cert-manager `Certificate`/`ClusterIssuer` v1 (from the `v1.21.1` release CRDs) for the `kubeconform-flux` gate — **regenerate on a bump** (`crane digest` + `cosign verify` per the lock-file header; Flux CRDs from `github.com/fluxcd/flux2/releases/download/v2.9.5/manifests.tar.gz`, cert-manager from `github.com/cert-manager/cert-manager/releases/download/v1.21.1/cert-manager.crds.yaml`) |
 | `tests/flux/flux-reconcile/chainsaw-test.yaml` | `[k8s]`-gated server-side check (`flux-chainsaw.sh` — skips in CI and until `local:flux:bootstrap` has run): the operator accepted the FluxInstance, source-controller fetched an artifact from git, the OCIRepository is cosign-verified, the HelmRelease self-manages, the zot Kustomization applied. Asserts running state; does not bootstrap or tear down. |
 | `tests/flux/ci-reconcile/chainsaw-test.yaml` | `[k8s]`-gated (T7c Increment 2): the `ci-runtime` / `ci-tasks` / `ci-pipelines` Kustomizations are Ready, ns `ci` + the Tekton defs reconciled and Flux-owned, `ci/tests/**` not slurped. `flux-chainsaw.sh` runs it only once the CRs are on the synced ref (probe: `kustomization ci-runtime`). |
 

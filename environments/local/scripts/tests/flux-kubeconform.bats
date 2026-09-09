@@ -23,13 +23,16 @@ teardown() {
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"Invalid: 0"* ]]
 	# flux-instance (1) + operator OCIRepository+HelmRelease (2) + zot-sync (1)
-	# + ci-runtime (1) + ci-defs ci-tasks/ci-pipelines (2) = 7 (T7c Increment 2).
-	[[ "$output" == *"Valid: 7"* ]]
+	# + ci-runtime (1) + ci-defs ci-tasks/ci-pipelines (2) + cert-manager
+	# OCIRepository+HelmRelease (2) + cert-manager-pki selfSigned ClusterIssuer
+	# + CA Certificate + CA ClusterIssuer (3) = 12 (T7c Increment 4a — the
+	# openbao-tls leaf Certificate lands in 4b with namespace `openbao`).
+	[[ "$output" == *"Valid: 12"* ]]
 }
 
-@test "the vendored CRD schemas are actually used (not skipped)" {
+@test "the vendored CRD schemas are actually used (nothing skipped)" {
 	run "$SW"
-	[[ "$output" != *"Skipped: 4"* ]]
+	[[ "$output" == *"Skipped: 0"* ]]
 }
 
 @test "fails when a FluxInstance field is the wrong type" {

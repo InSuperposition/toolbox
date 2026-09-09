@@ -124,6 +124,20 @@ local heavy = new Mapping<String, Step> {
     workspace_indicator = "versions.tf"
     depends = "tofu-init"
   }
+  // T7c Increment 4a chart-pin gate for environments/local/openbao-cluster/.
+  // `crane digest <tag>` == openbao-cluster.lock's chart_digest (the
+  // OpenTofu helm provider cannot pin an OCI chart by digest —
+  // hashicorp/terraform-provider-helm#1596), then `helm template` BY DIGEST
+  // and assert the 4a shape. Needs network (crane + helm pull) — like the
+  // bats OpenBao suites — and self-skips (exit 0) offline / registry-down,
+  // same as the [k8s] gates, so a flapping registry does not red the check.
+  ["openbao-cluster-verify"] {
+    glob = List(
+      "environments/local/openbao-cluster/**",
+      "environments/local/scripts/openbao-cluster-verify.sh"
+    )
+    check = "./environments/local/scripts/openbao-cluster-verify.sh"
+  }
   ["bats"] {
     // *.bash (helper.bash) is a fixture, not a suite - excluded
     glob = List("**/tests/*.bats")
