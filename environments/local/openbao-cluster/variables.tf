@@ -8,6 +8,18 @@
 
 # ─── Phase A (consumed in 4a) ────────────────────────────────────────────
 
+variable "kube_context" {
+  description = "kubeconfig context for the helm + kubernetes providers. The bootstrap bridge sets TF_VAR_kube_context; `mise run check`'s offline tofu-validate/test never reaches a cluster (mock_provider)."
+  type        = string
+  default     = "orbstack"
+}
+
+variable "kubeconfig" {
+  description = "Path to the kubeconfig for the helm + kubernetes providers. Explicit — the providers do not default to ~/.kube/config. The `~` is expanded by the providers."
+  type        = string
+  default     = "~/.kube/config"
+}
+
 variable "namespace" {
   description = "Namespace the OpenBao StatefulSet runs in. The bootstrap bridge (Increment 4b) creates it (kubectl, idempotent) BEFORE this unit applies — helm_release.create_namespace stays false so tofu never owns a namespace another actor manages."
   type        = string
@@ -51,7 +63,7 @@ variable "seal_secret_name" {
 }
 
 variable "tls_secret_name" {
-  description = "Name of the kubernetes.io/tls Secret holding the server cert + key for the HTTPS listener. Issued by cert-manager from the toolbox-dev-ca ClusterIssuer (environments/local/flux/cert-manager-pki.yaml); the leaf Certificate itself lands in Increment 4b with namespace `openbao`. Mounted read-only at /openbao/tls."
+  description = "Name of the kubernetes.io/tls Secret holding the server cert + key for the HTTPS listener. Issued by cert-manager from the toolbox-dev-ca ClusterIssuer (environments/local/cert-manager/issuers.yaml). Mounted read-only at /openbao/tls."
   type        = string
   default     = "openbao-tls"
 }

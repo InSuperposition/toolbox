@@ -1,0 +1,12 @@
+# Explicit inventory for the `cert-manager-pki` Flux Kustomization
+# (environments/local/flux/cert-manager-pki.yaml). Explicit because this
+# directory carries tests/crd-schemas/ beside the manifest — a recursive
+# kustomize walk would try to treat the vendored JSON schemas as resources.
+#
+# Ownership (docs/designs/repo-structure.md): environments/local/ owns the
+# dev PKI end to end — the manifests here and the Flux Kustomization CR that
+# points at them.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - issuers.yaml

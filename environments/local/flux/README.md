@@ -18,9 +18,9 @@ Kustomization that reconcile **this directory** from git.
 | `ci-runtime.yaml` | Flux (kustomize-controller) — Kustomization `ci-runtime` → `./ci/runtime` (the `ci` namespace + `buildkitd-mirror` CM); CRD + Tekton-Deployment health checks, `deletionPolicy: Orphan` |
 | `ci-defs.yaml` | Flux (kustomize-controller) — Kustomizations `ci-tasks` + `ci-pipelines` → `./ci/tasks` + `./ci/pipelines` into ns `ci`, `dependsOn: [ci-runtime]` (`ci-pipelines` also `[ci-tasks]`) |
 | `cert-manager-helmrelease.yaml` | Flux (helm-controller) — OCIRepository (digest pin, no `verify` — cert-manager signs with a static key, cert-manager.lock) + HelmRelease into ns `cert-manager` (`crds.enabled/keep`, all 4 images digest-pinned). T7c Increment 4a. |
-| `cert-manager-pki.yaml` | Flux (kustomize-controller) — selfSigned root ClusterIssuer → CA `Certificate` (key generated in-cluster) → CA ClusterIssuer. Converges once the HelmRelease lands the CRDs. The `openbao-tls` leaf `Certificate` is **not** here — it lands in 4b with ns `openbao` (the bridge owns that ns; a Flux resource in a missing ns would hold flux-system NotReady). |
+| `cert-manager-pki.yaml` | Flux (kustomize-controller) — a `Kustomization` CR (`cert-manager-pki`) pointing at `../cert-manager/`. Separate from flux-system: the Issuer CRs are custom kinds and a whole-Kustomization dry-run fails on a missing CRD, which would deadlock flux-system against the cert-manager HelmRelease that installs those CRDs. `retryInterval: 30s` rides out the transient "no matches for kind" until the CRDs land; `healthChecks` on the cert-manager Deployments. |
 | `kustomization.yaml` | — (the explicit inventory for the generated `flux-system` Kustomization) |
-| `tests/crd-schemas/` | — (vendored schemas for the `kubeconform-flux` hk step — Flux + flux-operator, plus cert-manager `Certificate`/`ClusterIssuer` v1 from the `v1.21.1` release CRDs) |
+| `tests/crd-schemas/` | — (vendored Flux + flux-operator v1/v2 schemas for the `kubeconform-flux` hk step; cert-manager's live under `../cert-manager/tests/crd-schemas/`) |
 
 The `kustomization.yaml` here is explicit precisely to exclude
 `flux-instance.yaml`. Directories Flux reconciles that mix manifests with

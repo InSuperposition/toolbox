@@ -1,55 +1,48 @@
-# Dev PKI foundation for the in-cluster OpenBao TLS listener (T7c Increment
-# 4a).
+# Flux Kustomization — reconciles the dev PKI (environments/local/cert-manager/:
+# the selfSigned root, the CA, the CA ClusterIssuer, the openbao-tls leaf)
+# from the flux-system GitRepository.
 #
-# Chain: a selfSigned root ClusterIssuer -> a CA Certificate (its key
-# generated IN-CLUSTER, never in repo or tofu state) -> a CA ClusterIssuer.
-# The selfSigned root is the acknowledged DEV limitation; PRODUCTION swaps
-# it for a real backend (ACME / an org intermediate CA / an OpenBao PKI
-# engine) and the CA ClusterIssuer + every leaf stay unchanged, only the
-# root moves (cert-manager.lock § DEV vs PROD).
+# A SEPARATE Kustomization, not part of flux-system's inventory, for the
+# same reason zot-sync.yaml / ci-runtime.yaml are separate: these are
+# cert-manager.io/v1 custom kinds. kustomize-controller server-side-dry-runs
+# a Kustomization's entire resource set and rejects the whole apply if ONE
+# object's CRD is unknown — so with the Issuer CRs in flux-system, a fresh
+# cluster deadlocks: the cert-manager HelmRelease (which installs those
+# CRDs) is in the same Kustomization and never applies. Here the "no matches
+# for kind ClusterIssuer" failure is isolated and retried until the
+# HelmRelease (still in flux-system — HelmRelease + OCIRepository are
+# always-known kinds) lands the CRDs.
 #
-# The `openbao-tls` leaf Certificate is NOT here — it lands in Increment 4b
-# alongside namespace `openbao` and the seal Secret (the bridge owns the
-# namespace — the acyclic anchor, plan § B1 — so a Flux-reconciled resource
-# in a namespace that does not exist yet would leave the flux-system
-# Kustomization perpetually NotReady). 4a ships only the CA that will issue
-# it.
-#
-# Reconciled by kustomize-controller as part of the flux-system
-# Kustomization. These CRs fail their first reconcile until cert-manager's
-# HelmRelease has installed the CRDs, then Flux retries to convergence — the
-# same eventual-consistency shape flux-operator's own CRDs + HelmRelease
-# use.
----
-apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
+# healthChecks assert cert-manager is actually usable before this
+# Kustomization reports Ready. deletionPolicy Orphan: deleting this CR must
+# not garbage-collect the CA (every issued cert would break) — a deliberate
+# teardown is a manual `kubectl delete -k environments/local/cert-manager`.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
 metadata:
-  name: toolbox-selfsigned
+  name: cert-manager-pki
+  namespace: flux-system
 spec:
-  selfSigned: {}
----
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: toolbox-dev-ca
-  namespace: cert-manager
-spec:
-  isCA: true
-  commonName: toolbox-dev-ca
-  secretName: toolbox-dev-ca
-  duration: 87600h # 10y — a dev root; rotation is a cluster rebuild
-  privateKey:
-    algorithm: ECDSA
-    size: 256
-  issuerRef:
-    name: toolbox-selfsigned
-    kind: ClusterIssuer
-    group: cert-manager.io
----
-apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
-metadata:
-  name: toolbox-dev-ca
-spec:
-  ca:
-    secretName: toolbox-dev-ca # lives in the cluster-resource namespace (cert-manager)
+  interval: "10m"
+  retryInterval: "30s"
+  timeout: "5m"
+  prune: true
+  deletionPolicy: "Orphan"
+  wait: false
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: "./environments/local/cert-manager"
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: cert-manager
+      namespace: cert-manager
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: cert-manager-webhook
+      namespace: cert-manager
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: cert-manager-cainjector
+      namespace: cert-manager
