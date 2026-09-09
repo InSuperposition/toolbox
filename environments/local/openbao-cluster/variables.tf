@@ -94,11 +94,48 @@ variable "openbao_cluster_ca" {
   default     = ""
 }
 
+# ─── Phase C (Increment 4c) ──────────────────────────────────────────────
+#
+# This unit NEVER manages the `transit` mount or `approval-key` — the
+# key-preserving snapshot restore (Increment 4b) creates them and tofu must
+# not touch them (managing = a possible recreate = a key rotation that
+# breaks every past approval attestation, plan § B3). `sops` and every
+# `transit_keys` entry are NEW keys under that pre-existing mount, referenced
+# by the literal path string "transit". openbao-cluster-verify.sh greps this
+# unit's *.tf for `approval-key` / `vault_mount` and fails closed.
+
 variable "transit_keys" {
-  description = "Transit signing/encryption keys to assert under the shared transit/ mount in Phase C (4c). `approval-key` (ecdsa-p256) is imported, never recreated — a recreate is a key rotation, which breaks every past approval attestation (plan § B3). `sops` (aes256-gcm96) is new, for Flux SOPS. Empty in 4a."
+  description = "ADDITIONAL Transit keys to create under the pre-existing transit/ mount — the extension point for future consumers (e.g. a `chains-provenance-key` for T8). Each is `{name, type}`. Empty by default. `approval-key` is NOT here (restore-managed) and `sops` has its own resource."
   type = list(object({
     name = string
     type = string
   }))
   default = []
+
+  validation {
+    condition     = !contains([for k in var.transit_keys : k.name], "approval-key")
+    error_message = "approval-key must never be tofu-managed — it is created by the Increment 4b snapshot restore; a tofu recreate is a key rotation."
+  }
+}
+
+variable "sops_key_name" {
+  description = "Transit key name for the Flux SOPS AES key (aes256-gcm96). Decrypt-only via the flux_sops_decrypt policy."
+  type        = string
+  default     = "sops"
+}
+
+variable "kubernetes_host" {
+  description = "In-cluster Kubernetes API URL for the OpenBao k8s auth method's config. The same-cluster shortcut: kubernetes_host only — OpenBao reads its own pod SA token + CA, so token_reviewer_jwt / kubernetes_ca_cert are omitted."
+  type        = string
+  default     = "https://kubernetes.default.svc.cluster.local:443"
+}
+
+variable "sops_auth" {
+  description = "Binds the OpenBao k8s-auth role `flux_sops` to Flux's kustomize-controller. audience defaults to the endpoint. token_ttl in SECONDS (the vault provider wants a number) — short, a decrypt token is used immediately."
+  type = object({
+    service_account_name      = optional(string, "kustomize-controller")
+    service_account_namespace = optional(string, "flux-system")
+    token_ttl_seconds         = optional(number, 1200) # 20m
+  })
+  default = {}
 }

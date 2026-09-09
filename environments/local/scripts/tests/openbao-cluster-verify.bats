@@ -76,3 +76,21 @@ online() {
 	[ "$status" -ne 0 ]
 	[[ "$output" == *"lock file not found"* ]]
 }
+
+@test "anti-rotation guard: fails if the unit tofu-manages the transit mount" {
+	online || skip "the render step runs before the guard; needs the registry"
+	printf '\nresource "vault_mount" "x" { path = "transit" }\n' \
+		>>"$SCRATCH/environments/local/openbao-cluster/main.tf"
+	run "$SW"
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"restore-managed"* ]]
+}
+
+@test "anti-rotation guard: fails if the unit tofu-manages approval-key" {
+	online || skip "the render step runs before the guard; needs the registry"
+	printf '\nresource "vault_transit_secret_backend_key" "x" {\n  backend = "transit"\n  name    = "approval-key"\n  type    = "ecdsa-p256"\n}\n' \
+		>>"$SCRATCH/environments/local/openbao-cluster/main.tf"
+	run "$SW"
+	[ "$status" -ne 0 ]
+	[[ "$output" == *"restore-managed"* ]]
+}

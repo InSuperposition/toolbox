@@ -3,7 +3,7 @@ set -euo pipefail
 
 # environments/local/scripts/openbao-cluster-bootstrap.sh — the ONE-TIME
 # imperative bridge that moves the local dev OpenBao into the OrbStack
-# cluster (T7c Increment 4b, docs/adr/0016,
+# cluster (T7c Increments 4b + 4c, docs/adr/0016,
 # ~/.claude/plans/t7c-increment4-in-cluster-openbao.md).
 #
 # Model: environments/local/scripts/flux-bootstrap.sh — verify -> install ->
@@ -19,9 +19,11 @@ set -euo pipefail
 # then hard-fails if the in-cluster `approval-key` public half is not
 # byte-identical to the committed pub file.
 #
-# Phase C (transit/keys/sops, the k8s-ServiceAccount auth engine, policies —
-# tofu `vault_*`/`kubernetes_*` resources) lands in Increment 4c. This
-# script stops after the key-preserved assertion.
+# After the key-preserved assertion it runs Phase C (Increment 4c): the
+# unit's full `tofu apply` against the RESTORED instance — the `sops`
+# Transit key, the decrypt-only policy, the k8s-ServiceAccount auth method +
+# role. Wiring `--sops-vault-configmap` onto the FluxInstance is Increment
+# 4e, gated on a named secret needing SOPS.
 #
 # Test seams (openbao-cluster-bootstrap.bats):
 #   TOOLBOX_OPENBAO_STATE_DIR            host state dir (seal.key, root.token, snapshots/)
@@ -114,13 +116,27 @@ assert_key_preserved() {
 	echo "==> approval-key preserved bit-for-bit (attestation/cosign-approval.pub unchanged)"
 }
 
+# phase_c_apply — the unit's full graph against the RESTORED instance
+# (Increment 4c): the `sops` Transit key, the decrypt-only policy, the
+# k8s-ServiceAccount auth method + role. Phase A (helm_release) is already
+# in state so this is a no-op for it. VAULT_ADDR/VAULT_TOKEN (bundle root
+# token)/VAULT_CACERT are exported by the caller; the vault provider reads
+# them. It NEVER touches the `transit` mount or `approval-key`
+# (openbao-cluster-verify.sh enforces that, and this apply proves it — a
+# `vault_mount` in the graph would try to recreate the restored mount).
+phase_c_apply() {
+	echo "==> Phase C — tofu apply (sops key, decrypt policy, k8s auth)"
+	tofu -chdir="$UNIT_DIR" apply -auto-approve -input=false -state="$TFSTATE"
+}
+
 summary() {
 	echo
-	echo "==> In-cluster OpenBao is up and holds the original approval-key."
+	echo "==> In-cluster OpenBao is up, holds the original approval-key, and is API-configured."
 	echo "    endpoint : $ENDPOINT"
 	echo "    CA cert  : $CA_FILE"
 	echo "    tfstate  : $TFSTATE"
-	echo "    Phase C (transit/keys/sops, k8s-ServiceAccount auth, policies) lands in Increment 4c."
+	tofu -chdir="$UNIT_DIR" output -state="$TFSTATE" 2>/dev/null | sed 's/^/    /' || true
+	echo "    Flux SOPS wiring (--sops-vault-configmap) is Increment 4e, gated on a named secret."
 	echo "    The host daemon + provider.tf repoint retire in Increment 4d."
 }
 
@@ -201,6 +217,7 @@ if bao status -format=json 2>/dev/null | jq -e '.initialized == true' >/dev/null
 		export VAULT_TOKEN="$bundle_token"
 		rm -rf "$CLUSTER_DIR"
 		assert_key_preserved
+		phase_c_apply
 		summary
 		exit 0
 	fi
@@ -248,4 +265,7 @@ rm -rf "$CLUSTER_DIR"
 
 # ── 12. hard assert: approval-key was preserved bit-for-bit ────────────
 assert_key_preserved
+
+# ── 13. Phase C — API config against the restored instance (Increment 4c) ─
+phase_c_apply
 summary

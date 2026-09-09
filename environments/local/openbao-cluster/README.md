@@ -10,11 +10,11 @@ over TLS with Kubernetes ServiceAccount auth — the loopback listener of
 
 T7c Increment 4 (`~/.claude/plans/t7c-increment4-in-cluster-openbao.md`,
 `docs/adr/0015`, `docs/adr/0016`). **Phase A (the `helm_release`) shipped in
-4a; the bootstrap bridge + first init + key-preserving restore shipped in 4b
-(`../scripts/openbao-cluster-bootstrap.sh`).** Increment 4c adds the Phase-C
-`provider "vault"` + `vault_*`/`kubernetes_*` resources; 4d retires
-`environments/local/openbao/`, renames this unit back to the bare `openbao`,
-and repoints `environments/local/provider.tf`.
+4a; the bootstrap bridge + first init + key-preserving restore shipped in
+4b; Phase C (`provider "vault"` + the `vault_*` API config) shipped in 4c —
+all applied by `../scripts/openbao-cluster-bootstrap.sh`.** Increment 4d
+retires `environments/local/openbao/`, renames this unit back to the bare
+`openbao`, and repoints `environments/local/provider.tf`.
 
 ## Goals
 
@@ -48,7 +48,7 @@ and repoints `environments/local/provider.tf`.
 |---|---|---|
 | **A** | `helm_release` — the pinned chart, single-replica values, TLS listener, `seal "static"` stanza. cert-manager (`environments/local/flux/cert-manager-*`) + the dev CA (`environments/local/cert-manager/`) ship here too. | **4a (here)** |
 | **B** | namespace `openbao` + the `openbao-tls` leaf `Certificate` + the seal `Secret`; first `bao operator init` once; a key-preserving `raft snapshot restore -force` | 4b (the bridge script, not `.tf`) |
-| **C** | `provider "vault"` + `vault_mount`/`vault_transit_secret_backend_key` (`approval-key` imported, `sops` new) + `vault_policy` + `vault_auth_backend "kubernetes"` + role | 4c |
+| **C** | `provider "vault"` + the `vault_*` API config against the RESTORED instance: the **new** `sops` `vault_transit_secret_backend_key` (`aes256-gcm96`), a decrypt-only `vault_policy`, `vault_auth_backend "kubernetes"` + config (same-cluster shortcut — `kubernetes_host` only) + a `flux_sops` role bound to `kustomize-controller`/`flux-system`. **NEVER** the `transit` mount or `approval-key` (restore-managed — a tofu recreate is a key rotation; `openbao-cluster-verify.sh` greps the `.tf` and fails closed). No `kubernetes_cluster_role_binding` — the chart ships `system:auth-delegator` for the `openbao` SA. | 4c |
 
 ## Topology — "persistent single-node"
 
@@ -75,8 +75,10 @@ declared now (stable contract across the sub-increments) and wired in 4c.
   and asserts exactly 1 replica, a StatefulSet, an HTTPS listener, a
   `seal "static"` stanza, the seal + TLS mounts, and **no** pod
   anti-affinity / PDB.
-- `tofu test` (`tests/helm_values.tftest.hcl`, `mock_provider`) — the
-  `helm_release` values plan as expected; `create_namespace` stays false.
+- `tofu test` (`mock_provider`) — `helm_values.tftest.hcl` (Phase A values)
+  + `phase_c.tftest.hcl` (the SOPS key is AES + locked down, the policy is
+  decrypt-only, the role is scoped to Flux, `approval-key` in `transit_keys`
+  is a validation failure).
 - `environments/local/tests/openbao-cluster/chainsaw-test.yaml` (4b) —
   `[k8s]` gated (`openbao-cluster-chainsaw.sh` skips without a cluster and
   until `mise run local:openbao-cluster:bootstrap` has run). Asserts the
