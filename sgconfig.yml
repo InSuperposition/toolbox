@@ -6,8 +6,10 @@
 # and relative climbs in *shell* (boundary-shell-*, boundary-*-ref), plus
 # one `language: yaml` rule forbidding a `script:` block in a Tekton
 # manifest under ci/ (boundary-no-embedded-shell.yml). ast-grep has no HCL
-# grammar built in, so the tofu layer's edges are not covered here (a
-# resolved-graph check is a deferred TODO). Paths assembled from variables
-# are not caught.
+# grammar built in, so the tofu layer's edges are not covered here. The one
+# tofu edge that IS enforced — no `kubernetes_*` / `kubernetes_manifest`
+# resource (ADR 0018) — lives in the `no-kubernetes-tf` hk step
+# (tests/check-tf-boundary.sh, a git grep). A full resolved-graph check is a
+# deferred TODO. Paths assembled from variables are not caught.
 ruleDirs:
   - rules

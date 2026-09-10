@@ -33,6 +33,7 @@ bats    ci/scripts/tests/chainsaw-test.bats                   3
 bats    ci/scripts/tests/kubeconform-scan.bats               3
 bats    ci/scripts/tests/registry-seed.bats                  6
 bats    tests/check-coverage.bats                           3
+bats    tests/check-tf-boundary.bats                        4
 
 tftest  environments/local/openbao/tests/helm_values.tftest.hcl   5
 tftest  environments/local/openbao/tests/phase_c.tftest.hcl       6

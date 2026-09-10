@@ -71,7 +71,7 @@ each row links to.
 | **Flux** | GitOps sync — reconciles manifests (plain YAML, or a Timoni-built OCI artifact) from git/OCI continuously. | Nothing is applied by hand once Flux owns a path. |
 | **Flux Operator** | Manages Flux CD's *ongoing* configuration via a declarative `FluxInstance` CRD, once installed. | **Not** a full replacement for `flux bootstrap` — see GitOps Flow below for what still happens once, imperatively. [fluxoperator.dev](https://fluxoperator.dev/get-started/) |
 | **Timoni** | Renders + type-checks application manifests from CUE, then publishes them as an OCI artifact (Helm-chart alternative). | A build step (likely CI) produces the artifact; Flux reconciles *that artifact*, not a live Timoni controller object. [timoni.sh/gitops-flux](https://timoni.sh/gitops-flux) |
-| **Crossplane** | *Negative space* — pinned, not active. | Would sit at the self-service in-cluster provisioning layer (rival to OpenTofu, not to Timoni) if a concrete need appears. None does yet. |
+| **Crossplane** | *Negative space* — pinned, not active. The **provision** stage of the in-cluster pipeline (render → reconcile → enforce → provision; ADR 0018). | Creates the backing infra a consumer *declares* it needs (bucket/DB/queue/DNS as a CR), if ever activated — trigger `TODOS.md` T-X1, **not** a directory count. Layered above the substrate, delivered by Flux, consumes OpenBao creds; never co-owns a resource, never wraps a substrate module in `provider-terraform`. tofu `kubernetes_*` / `kubernetes_manifest` resources are **banned** (`no-kubernetes-tf` hk step). |
 | **Kyverno** | Admission policy. | Enforcement mechanics (scope, exceptions, webhook-failure mode) not yet defined — design at Kyverno module build time, not asserted here as a slogan. |
 | **Cilium** | Network policy, default-deny between workloads, explicit allow only. | Bootstrap allow-list (DNS, API server, git/OCI pulls, OpenBao) needed before default-deny can reconcile anything — defined at Cilium module build time. |
 | **cert-manager** | In-cluster PKI for the **local dev cluster** — issues the TLS server cert the in-cluster OpenBao listener needs (T7c Increment 4, ADR 0016). | A Flux-reconciled **helper** component (chart + images digest-pinned in `environments/local/flux/cert-manager.lock`; no runtime `spec.verify` — cert-manager signs with a static key, the digest is the pin, ADR 0001). Dev uses a selfSigned root → CA → `openbao-tls` leaf chain (the leaf applies once the 4b bridge creates ns `openbao`); **production** points the leaf's `issuerRef` at a real backend (ACME / org intermediate / OpenBao PKI) — the CA and every leaf unchanged. Unlike OpenBao (OpenTofu-owned substrate, ADR 0015), a helper behind the GitOps loop is fine — nothing secret-bearing depends on its reconcile being tofu-driven. |
@@ -363,8 +363,12 @@ mechanism for if/when this pipeline moves from on-demand to webhook-driven.
 
 Stated explicitly rather than guessed:
 
-- **Crossplane** — pinned, inactive. No boundary assigned until a concrete
-  self-service in-cluster provisioning need appears.
+- **Crossplane** — pinned, inactive. Boundary now defined (ADR 0018): the
+  **provision** stage — creates consumer-*declared* backing infra as a CR,
+  layered above the tofu substrate, delivered by Flux. Activation trigger
+  `TODOS.md` T-X1 (a consumer declares infra it does not own); not sequenced
+  before then. The per-consumer namespace bundle stays Flux plain-YAML
+  meanwhile; tofu `kubernetes_*` resources are banned.
 - **Pipelines-as-Code** — pinned/researched, not yet wired. The CI
   build/scan/approve pipeline runs on-demand/manually triggered through
   Phase 3; webhook-driven triggering via Pipelines-as-Code is a later

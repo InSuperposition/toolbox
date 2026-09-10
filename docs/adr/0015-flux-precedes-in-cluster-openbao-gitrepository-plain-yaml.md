@@ -37,4 +37,8 @@ Status: accepted. T7c Increments 0–3 and the in-cluster OpenBao move
 (ADR 0016) shipped — the in-cluster unit is `environments/local/openbao/`,
 the host `pitchfork` daemon is retired. Remaining OpenBao work (the
 reusable `modules/secret-openbao` extraction, Flux SOPS wiring) is its own
-plan. Does **not** supersede ADR 0003 or ADR 0014.
+plan. Does **not** supersede ADR 0003 or ADR 0014. **Amended by
+[ADR 0018](0018-in-cluster-authoring-pipeline-and-tofu-kubernetes-ban.md)**
+— Crossplane now has a defined boundary (the *provision* stage) and a named
+activation trigger, so "Crossplane not sequenced" is narrowed: it is on the
+roadmap, gated on T-X1.

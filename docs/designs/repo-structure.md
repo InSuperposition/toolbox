@@ -331,9 +331,13 @@ phase named in the rule file, and listed in that phase's PR body.
 `ls-lint` + `ast-grep` are a **strong lint, not dependency-graph
 analysis.** They catch literal path strings and relative climbs in shell.
 They do **not** catch: a path assembled from variables, `source "$x"`
-resolution, cross-language task references, or **anything in the HCL
+resolution, cross-language task references, or most of the **HCL
 layer** — `ast-grep` ships no Terraform/HCL grammar, so the tofu unit's
 edges (`environments/local/openbao ─╳▶ …`) are not machine-checked here.
+The one tofu edge that *is* enforced — no `kubernetes_*` /
+`kubernetes_manifest` resource (ADR 0018, in-cluster objects go through Flux
+plain-YAML or Crossplane, never tofu) — is the `no-kubernetes-tf` hk step
+(`tests/check-tf-boundary.sh`, a `git grep`).
 They also do **not** catch **manifest-ref edges** — a Flux `Kustomization`
 `spec.path` or a kustomize `resources:` entry pointing across a concern
 boundary (e.g. `environments/local/flux/ci-runtime.yaml` → `./ci/runtime`).
