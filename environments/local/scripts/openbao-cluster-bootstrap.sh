@@ -90,30 +90,34 @@ wait_pod_running() {
 	die "openbao-0 did not reach Running"
 }
 
-# assert_key_preserved — the whole point of the migration. The
-# attestation/ concern owns the pubkey file, so this reaches it only through
-# its mise task (repo-structure.md § The concerns, ADR 0013 — never a
-# cross-concern file path): `attestation:export-pubkey` re-exports
-# openbao://approval-key's PUBLIC half (VAULT_ADDR/VAULT_TOKEN/VAULT_CACERT
-# are exported by the caller, pointing at the in-cluster endpoint) over the
-# committed attestation/cosign-approval.pub. If git then sees ANY change,
-# the migration rotated the key — every past approval attestation would stop
-# verifying — so restore the file and hard-fail.
+# assert_key_preserved — the whole point of the migration: prove the
+# approval-key at the endpoint the caller pointed VAULT_ADDR/VAULT_TOKEN/
+# VAULT_CACERT at is byte-identical to the one every past approval
+# attestation was signed against (attestation/cosign-approval.pub).
+#
+# Reads the PUBLIC half straight from that endpoint with `cosign public-key`
+# — NOT via `mise run attestation:export-pubkey`. A nested `mise run`
+# re-applies mise.toml's [env], which pins VAULT_ADDR at the host loopback
+# and VAULT_TOKEN at the host root token, so the check would silently verify
+# the *host* instead of the cluster (T7c Increment 4 eng review, Codex #4).
+# It compares against the committed file in place — no re-export into the
+# attestation/ concern, no git mutation (reading a bare `attestation/` path
+# is not a concern-climb; `../attestation/` would be).
 assert_key_preserved() {
-	local root
+	local root got want
 	root="$(git rev-parse --show-toplevel)" || die "not in a git checkout"
-	(cd "$root" && mise run attestation:export-pubkey) ||
+	got="$(cosign public-key --key openbao://approval-key)" ||
 		die "could not export openbao://approval-key from $VAULT_ADDR"
-	if [ -n "$(git -C "$root" status --porcelain -- attestation/cosign-approval.pub)" ]; then
-		git -C "$root" checkout -- attestation/cosign-approval.pub
+	want="$(cat "$root/attestation/cosign-approval.pub")"
+	if [ "$got" != "$want" ]; then
 		{
-			echo "FATAL: in-cluster approval-key does NOT match the committed pubkey."
+			echo "FATAL: approval-key at $VAULT_ADDR does NOT match the committed pubkey."
 			echo "  the migration rotated the signing key — every past approval attestation is now unverifiable."
 			echo "  the in-cluster store is NOT the host's — do not repoint provider.tf."
 		} >&2
 		exit 1
 	fi
-	echo "==> approval-key preserved bit-for-bit (attestation/cosign-approval.pub unchanged)"
+	echo "==> approval-key preserved bit-for-bit (matches attestation/cosign-approval.pub)"
 }
 
 # phase_c_apply — the unit's full graph against the RESTORED instance
@@ -141,7 +145,7 @@ summary() {
 }
 
 # ── 1. preconditions (local checks first, then the cluster) ─────────────
-for bin in bao helm cosign tofu kubectl crane jq flux mise; do
+for bin in bao helm cosign tofu kubectl crane jq flux; do
 	command -v "$bin" >/dev/null || die "$bin not on PATH"
 done
 [ -s "$STATE_DIR/seal.key" ] || die "$STATE_DIR/seal.key missing — run \`mise run local:openbao:bootstrap\` first (the host daemon holds the key this migrates)"
