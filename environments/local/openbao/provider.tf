@@ -1,5 +1,5 @@
 # Phase A providers. Both talk to the OrbStack cluster through the local
-# kubeconfig; the bootstrap bridge (openbao-cluster-bootstrap.sh) exports
+# kubeconfig; the bootstrap bridge (openbao-bootstrap.sh) exports
 # TF_VAR_kube_context (+ TF_VAR_kubeconfig for a non-default path).
 #
 # `config_path` is explicit — the helm/kubernetes providers do NOT fall back
@@ -18,8 +18,8 @@ provider "kubernetes" {
   config_context = var.kube_context
 }
 
-# Phase C (Increment 4c) — talks to the in-cluster OpenBao HTTP API over
-# TLS, not to the Kubernetes API.
+# Phase C — talks to the in-cluster OpenBao HTTP API over TLS, not to the
+# Kubernetes API.
 #
 # `token` is deliberately unset (Zero Trust — no plaintext secret in repo or
 # state). The vault provider's SDK falls back to VAULT_ADDR / VAULT_TOKEN /
@@ -28,6 +28,6 @@ provider "kubernetes" {
 # `tofu apply`. `mise run check`'s offline `tofu validate`/`test` never
 # reach it (mock_provider).
 provider "vault" {
-  address      = var.openbao_cluster_endpoint
-  ca_cert_file = var.openbao_cluster_ca != "" ? var.openbao_cluster_ca : null
+  address      = var.openbao_endpoint
+  ca_cert_file = var.openbao_ca != "" ? var.openbao_ca : null
 }

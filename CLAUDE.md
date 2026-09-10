@@ -75,7 +75,7 @@ each row links to.
 | **Kyverno** | Admission policy. | Enforcement mechanics (scope, exceptions, webhook-failure mode) not yet defined — design at Kyverno module build time, not asserted here as a slogan. |
 | **Cilium** | Network policy, default-deny between workloads, explicit allow only. | Bootstrap allow-list (DNS, API server, git/OCI pulls, OpenBao) needed before default-deny can reconcile anything — defined at Cilium module build time. |
 | **cert-manager** | In-cluster PKI for the **local dev cluster** — issues the TLS server cert the in-cluster OpenBao listener needs (T7c Increment 4, ADR 0016). | A Flux-reconciled **helper** component (chart + images digest-pinned in `environments/local/flux/cert-manager.lock`; no runtime `spec.verify` — cert-manager signs with a static key, the digest is the pin, ADR 0001). Dev uses a selfSigned root → CA → `openbao-tls` leaf chain (the leaf applies once the 4b bridge creates ns `openbao`); **production** points the leaf's `issuerRef` at a real backend (ACME / org intermediate / OpenBao PKI) — the CA and every leaf unchanged. Unlike OpenBao (OpenTofu-owned substrate, ADR 0015), a helper behind the GitOps loop is fine — nothing secret-bearing depends on its reconcile being tofu-driven. |
-| **OpenBao** | Secret store of record — for anything created *after* OpenBao exists and is unsealed. | Local dev daemon (ADR 0010/0011): one machine-global pitchfork daemon that auto-unseals from a static seal key. Its bootstrap secrets — seal key, root token, recovery key — are `0600` files in `~/.local/state/toolbox/openbao/`, beside the raft store. `mise [env]` injects `VAULT_TOKEN` by reading `root.token`. The out-of-band requirement is real for the *deferred production* `secret-openbao` module, not the local one. |
+| **OpenBao** | Secret store of record — for anything created *after* OpenBao exists and is unsealed. | Local dev: an in-cluster tofu-owned raft StatefulSet (`environments/local/openbao/`, ADR 0016 — supersedes the ADR 0010 machine-global pitchfork daemon). Auto-unseals from a static seal key mounted as a k8s Secret; the on-machine `0600` restore-bundle files (`seal.key`, `root.token`) in `~/.local/state/toolbox/openbao/snapshots/` are the disaster / genesis path (ADR 0011 custody model). `mise [env]` injects `VAULT_ADDR` (ClusterIP HTTPS), `VAULT_CACERT`, `VAULT_TOKEN`. The out-of-band requirement is real for the *deferred production* `secret-openbao` module, not the local one. |
 | ~~**fnox**~~ | **Removed 2026-09-07 (ADR 0011).** Was the local dev secret access layer (backend = OpenBao). `fnox set`/`fnox remove` silently rewrite `fnox.toml`, and its keychain items trigger a GUI password prompt when read by another binary. The one bootstrap secret it held (the root token) is now a `0600` file. | — |
 | **pitchfork** | Local dev daemon supervision only (directory-scoped autostart/autostop). | Repo-policy choice — pitchfork itself can run production daemons; we simply don't use it that way here. |
 | **hk** | Sole git-hook gate — concurrent, file-locked, three-way-merge stash-safe. | Config in `hk.pkl`. |
@@ -297,26 +297,30 @@ watcher). Declarative process definitions, autostart/autostop on `cd` into
 the repo. Never a production workload — that's a repo-policy choice, not a
 tool limitation.
 
-## Secrets: the local OpenBao daemon (ADR 0010/0011)
+## Secrets: the local in-cluster OpenBao (ADR 0011/0016)
 
-The local dev daemon's bootstrap secrets are **`0600` files** in
-`$OPENBAO_STATE_DIR` (`~/.local/state/toolbox/openbao/`), written atomically
-by `environments/local/scripts/openbao-bootstrap.sh` (ADR 0012 — the local
-OpenBao tofu unit and its orchestration scripts are owned by that
-environment, not `modules/`), beside the raft store they protect:
+The local dev OpenBao runs in-cluster (`environments/local/openbao/`,
+ADR 0016). `openbao-bootstrap.sh` (the one-time bridge) brings it up and,
+on every successful run, writes the restore bundle's values to `0600`
+files in `$OPENBAO_STATE_DIR` (`~/.local/state/toolbox/openbao/`), beside
+the `snapshots/` bundle:
 
 | file | role | held by |
 |---|---|---|
-| `seal.key` | static-seal key — daemon auto-unseals from it every start (`file://`) | the machine (0600) |
-| `root.token` | root token — `mise [env]` injects it as `VAULT_TOKEN`, no shell hook | the machine (0600) |
-| `recovery.key` | break-glass only (`bao operator generate-root` if `root.token` is lost) | the machine (0600) |
+| `seal.key` | static-seal key — the pod auto-unseals from the mounted `openbao-seal` Secret; this is the on-machine copy for a re-run | the machine (0600) |
+| `root.token` | the restore bundle's original root token — `mise [env]` injects it as `VAULT_TOKEN` | the machine (0600) |
+| `tls/ca.crt` | the live cert-manager dev CA — `mise [env]` injects it as `VAULT_CACERT` (public, no secrecy) | the machine |
+| `snapshots/` | the raft snapshot + `seal.key` + `root.token`, written together — the disaster / genesis bundle. Copy off-machine. | the machine (0600) |
 
 No keychain, no `fnox` (removed — it rewrote `fnox.toml` and its keychain
 items prompted for a password). There is **no memorized secret and no
-recurring manual step**: restart and reboot auto-unseal. The one manual
-case is the disaster `-force` snapshot restore, which needs the snapshot's
-*own* `seal.key` + `root.token` — `mise run local:openbao:snapshot` writes all
-three together as a bundle in `snapshots/`, which `local:openbao:reset` keeps.
+recurring manual step**: the pod auto-unseals from the Secret on every
+start; a pod restart or cluster return needs no action. The one manual case
+is the disaster `-force` restore — re-run `mise run local:openbao:bootstrap`,
+which restores from the `snapshots/` bundle. After the host daemon's
+retirement (ADR 0016) that bundle is the **only** genesis path; a lost
+bundle with no host daemon is the "resume signing" disaster (fresh init →
+re-export pubkey → re-sign → re-record).
 
 For app secrets created *after* OpenBao is up, OpenBao is the store of
 record; a client that reads them into the dev env is a future concern
@@ -371,27 +375,27 @@ Stated explicitly rather than guessed:
   (operator install + first `FluxInstance` apply + deploy-key/git
   write-back setup). Flux Operator replaces the *ongoing* config path only.
 - **pitchfork in production** — not used here; dev-only by policy.
-- **Local OpenBao unseal-key storage** — RESOLVED (ADR 0010/0011): static
-  seal auto-unseal from a `0600` `seal.key` file; the root + recovery keys
-  are `0600` files too; `fnox` and the keychain are gone. The production
-  `secret-openbao` module keeps the out-of-band requirement.
-- **Local OpenBao runs in-cluster** — IN PROGRESS (T7c Increment 4, ADR
-  0016, `~/.claude/plans/t7c-increment4-in-cluster-openbao.md`). The
-  loopback listener of `environments/local/openbao/` cannot serve pods (the
-  blocker in front of T8). **4a (shipped):** the pinned `helm_release` in
-  `environments/local/openbao-cluster/` + cert-manager. **4b (shipped):**
-  `openbao-cluster-bootstrap.sh` — the one-time bridge: snapshot the host →
-  ns + seal Secret → `tofu apply` → `bao operator init` → key-preserving
-  `raft snapshot restore -force` → hard-assert `approval-key` byte-identical
-  to `attestation/cosign-approval.pub` (**never rotated** — a fresh init
-  strands every past approval attestation). Idempotent. **4c (shipped):**
-  the bridge's final `tofu apply` — a new `sops` Transit key
-  (`aes256-gcm96`), a decrypt-only policy, the Kubernetes ServiceAccount
-  auth method + a `flux_sops` role. `approval-key` + the `transit` mount are
-  never tofu-managed (`openbao-cluster-verify.sh` greps the `.tf`). **4d:**
-  retire the host daemon + pitchfork, repoint `provider.tf`, rename
-  `openbao-cluster` → `openbao`. **4e (deferred):** wire
-  `--sops-vault-configmap`.
+- **Local OpenBao unseal-key storage** — RESOLVED (ADR 0011/0016): static
+  seal auto-unseal from a `0600` `seal.key` (mounted in-cluster as a k8s
+  Secret); the on-machine restore-bundle files are `0600`; `fnox` and the
+  keychain are gone. The production `secret-openbao` module keeps the
+  out-of-band requirement.
+- **Local OpenBao runs in-cluster** — SHIPPED (ADR 0016). The loopback
+  listener could not serve pods (the blocker in front of T8), so
+  `environments/local/openbao/` is now a tofu-owned single-replica raft
+  StatefulSet: `openbao-bootstrap.sh` (the one-time bridge) picks a source
+  (a live host daemon, an off-machine restore bundle, or the disaster
+  runbook), creates ns + the seal Secret, `tofu apply`s the `helm_release`,
+  runs `bao operator init` once, does a key-preserving
+  `raft snapshot restore -force` (**`approval-key` never rotated** — a fresh
+  init strands every past approval attestation), hard-asserts the
+  in-cluster `approval-key` matches `attestation/cosign-approval.pub`, then
+  `tofu apply`s Phase C (the `sops` `aes256-gcm96` key, a decrypt-only
+  policy, the k8s-ServiceAccount auth method + a `flux_sops` role).
+  `approval-key` + the `transit` mount are never tofu-managed
+  (`openbao-verify.sh` greps the `.tf`). The host `pitchfork` daemon is
+  retired. **Deferred (Plan B):** the reusable `modules/secret-openbao`
+  extraction; wiring `--sops-vault-configmap` onto the `FluxInstance`.
 - **Kyverno/Cilium enforcement mechanics** — scope, exceptions,
   webhook-failure mode, and default-deny bootstrap allow-list are undefined
   until those modules are built.

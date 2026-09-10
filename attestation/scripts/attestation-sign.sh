@@ -87,7 +87,7 @@ trap cleanup EXIT
 # --- 1. OpenBao must be able to sign before we waste the operator's time ---
 if [ -z "${TOOLBOX_APPROVE_KEY:-}" ]; then
 	"$SCRIPT_DIR/openbao-preflight.sh" "$KEY_NAME"
-	: "${VAULT_ADDR:=http://127.0.0.1:8200}"
+	: "${VAULT_ADDR:=https://openbao.openbao.svc.cluster.local:8200}"
 	export VAULT_ADDR
 	export VAULT_TOKEN="${VAULT_TOKEN:?openbao-preflight passed but VAULT_TOKEN is unset}"
 fi

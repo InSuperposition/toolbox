@@ -20,7 +20,7 @@
 # Convergence order on a fresh cluster:
 #   1. cert-manager HelmRelease (flux-system Kustomization) lands the CRDs
 #   2. this Kustomization's retry applies the Issuer + CA CRs
-#   3. openbao-cluster-bootstrap.sh (Increment 4b) creates namespace
+#   3. openbao-bootstrap.sh creates namespace
 #      `openbao` -> the `openbao-tls` leaf Certificate applies and
 #      cert-manager issues the `openbao-tls` Secret
 # Until step 3 has run once, the leaf shows not-applied (namespace missing)

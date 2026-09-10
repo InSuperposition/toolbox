@@ -1,5 +1,5 @@
-# [k8s]-gated (environments/local/scripts/openbao-cluster-chainsaw.sh skips
-# without an orbstack cluster, and skips until openbao-cluster-bootstrap.sh
+# [k8s]-gated (environments/local/scripts/openbao-chainsaw.sh skips
+# without an orbstack cluster, and skips until openbao-bootstrap.sh
 # has run once — probe: the `openbao` StatefulSet).
 #
 # Asserts the RUNNING post-migration state (T7c Increments 4b + 4c) — it
@@ -7,11 +7,11 @@
 # approval-key-preserved proof, and the in-OpenBao Phase-C state (the sops
 # key exists, the k8s-auth role denies signing) are the bridge's own hard
 # assertions (`tofu apply` fails if the API calls fail), `tofu output`, and
-# the documented `mise run local:openbao-cluster:bootstrap` acceptance run.
+# the documented `mise run local:openbao:bootstrap` acceptance run.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
-  name: openbao-cluster-reconcile
+  name: openbao-reconcile
 spec:
   steps:
     - name: cert-manager-issued-the-tls-secret

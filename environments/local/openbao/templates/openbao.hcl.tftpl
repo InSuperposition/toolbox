@@ -1,46 +1,40 @@
-# Rendered by modules/secret-openbao-local — do not edit by hand, edit
-# the module inputs instead (tofu apply re-renders this file).
+# Rendered by environments/local/openbao/main.tf into the helm value
+# server.ha.raft.config. The chart stores it in a ConfigMap; the server runs
+# `bao server -config=/openbao/config`.
 #
-# Raft storage, not `file` — OpenBao >=2.0's `file` physical backend is
-# deprecated (removal targeted for v2.7.0). `disable_mlock` is
-# intentionally absent: OpenBao >=2.0 removed mlock support entirely
-# (openbao/openbao GH-363), so the option is an obsolete no-op.
+# In-cluster shape (docs/adr/0016): an HTTPS listener (cert
+# from the cert-manager-issued TLS Secret mounted at /openbao/tls), raft
+# single-voter storage, static-seal auto-unseal from the seal Secret mounted
+# at /openbao/seal, and kubernetes service registration. Secret names are
+# main.tf's var.tls_secret_name / var.seal_secret_name.
 #
-# Loopback-only, TLS disabled: this is a local dev daemon
-# (pitchfork-supervised), not production infra.
+# There is NO `tls_disable = true`: the "loopback only" justification that
+# carried environments/local/openbao/templates/openbao.hcl.tftpl dies on the
+# move to a ClusterIP listener (plan § B4). A missing/empty cert Secret makes
+# the listener fail to start — fail closed, not fall back to plaintext.
 
-storage "raft" {
-  path    = "${data_path}"
-  node_id = "${node_id}"
-}
+ui = false
 
 listener "tcp" {
-  address     = "${listener_address}"
-  tls_disable = true
-%{ if static_seal_key_id != "" ~}
-
-  # Static-seal auto-unseal needs raft clustering active to fetch the
-  # stored root key (without this, init fails "unseal with stored key
-  # failed: cluster addresses not found"). :0 = a kernel-assigned
-  # ephemeral port, never advertised, never connected to (single node, no
-  # peers) — so two instances on one machine cannot collide on it.
-  cluster_address = "127.0.0.1:0"
-%{ endif ~}
+  address         = "[::]:8200"
+  cluster_address = "[::]:8201"
+  tls_disable     = false
+  tls_cert_file   = "/openbao/tls/tls.crt"
+  tls_key_file    = "/openbao/tls/tls.key"
 }
 
-api_addr = "http://${listener_address}"
-%{ if static_seal_key_id != "" ~}
-cluster_addr = "https://127.0.0.1:0"
+storage "raft" {
+  path = "/openbao/data"
+}
 
-# Auto-unseal: the 32-byte AES key is a raw 0600 file next to the raft
-# store, written by scripts/bootstrap-openbao.sh. `file://` (not `env://`)
-# so a boot-start daemon can read it before the login keychain unlocks.
-# The daemon unseals itself on every start — no `bao operator unseal`,
-# ever. ADR 0010.
+# Static seal — the daemon auto-unseals from the mounted 32-byte key on every
+# start (plan § B1). current_key_id MUST match the host daemon's so a
+# key-preserving raft snapshot restore unseals cleanly; the
+# file PATH differs from the host and that is immaterial (the key_id + the
+# 32 bytes are the match criteria — plan confirm #5).
 seal "static" {
   current_key_id = "${static_seal_key_id}"
-  current_key    = "file://${seal_key_path}"
+  current_key    = "file:///openbao/seal/seal.key"
 }
-%{ else ~}
-cluster_addr = "https://${cluster_address}"
-%{ endif ~}
+
+service_registration "kubernetes" {}

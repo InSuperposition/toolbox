@@ -33,8 +33,8 @@ the `ci-runtime` Flux `Kustomization`, not something Flux owns. There is no
 not feed Flux directly (the real flow is `timoni build` / `timoni bundle
 build` → `flux push artifact` → `OCIRepository`).
 
-Status: accepted. T7c Increments 0–3 and 4a–4c shipped (`TODOS.md`) — the
-in-cluster OpenBao Phase A + bootstrap bridge + Phase C are live. Increment
-4d+ (retire the host daemon, rename `openbao-cluster` → `openbao`) is the
-remaining OpenBao work, its own plan. Does **not** supersede ADR 0003 or
-ADR 0014.
+Status: accepted. T7c Increments 0–3 and the in-cluster OpenBao move
+(ADR 0016) shipped — the in-cluster unit is `environments/local/openbao/`,
+the host `pitchfork` daemon is retired. Remaining OpenBao work (the
+reusable `modules/secret-openbao` extraction, Flux SOPS wiring) is its own
+plan. Does **not** supersede ADR 0003 or ADR 0014.

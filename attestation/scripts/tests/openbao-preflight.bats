@@ -16,7 +16,7 @@ setup() {
 	load helper
 	FIX="$(mktemp -d)"
 	SCRIPTS="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-	export VAULT_ADDR="http://127.0.0.1:8200"
+	export VAULT_ADDR="http://127.0.0.1:1"  # a dead port — "cannot reach" is deterministic
 }
 
 teardown() {
@@ -28,7 +28,7 @@ teardown() {
 	run "$SCRIPTS/openbao-preflight.sh"
 	[ "$status" -eq 3 ]
 	[[ "$output" == *"cannot reach OpenBao"* ]]
-	[[ "$output" == *"mise run local:openbao:start"* ]]
+	[[ "$output" == *"mise run local:openbao:bootstrap"* ]]
 }
 
 @test "uninitialised: exit 3, fix is bootstrap — NOT unseal (checked before sealed)" {
@@ -45,8 +45,8 @@ teardown() {
 	run "$SCRIPTS/openbao-preflight.sh"
 	[ "$status" -eq 3 ]
 	[[ "$output" == *"sealed"* ]]
-	[[ "$output" == *"seal.key"* ]]
-	[[ "$output" == *"mise run local:openbao:start"* ]]
+	[[ "$output" == *"openbao-seal Secret"* ]]
+	[[ "$output" == *"mise run local:openbao:bootstrap"* ]]
 	[[ "$output" != *"printed"* ]]
 	[[ "$output" != *"out-of-band"* ]]
 }

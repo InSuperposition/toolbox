@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# openbao-cluster-verify.sh — the T7c Increment 4a failable check for the
-# in-cluster OpenBao Helm release (environments/local/openbao-cluster/).
+# openbao-verify.sh — the hk `openbao-verify` gate for the
+# in-cluster OpenBao Helm release (environments/local/openbao/).
 #
 # The OpenTofu helm provider cannot pin an OCI chart by digest
 # (hashicorp/terraform-provider-helm#1596), so this is where the digest
 # actually gets enforced:
 #
-#   1. `crane digest <repo>/<name>:<chart_version>` == openbao-cluster.lock's
-#      chart_digest — fail closed. (The bootstrap bridge, Increment 4b,
+#   1. `crane digest <repo>/<name>:<chart_version>` == openbao.lock's
+#      chart_digest — fail closed. (The bootstrap bridge,
 #      re-runs this same assertion immediately before `tofu apply`.)
 #   2. `crane digest <image_ref>:<image_tag>` == the lock's image_digest.
 #   3. `helm template` the chart BY DIGEST (`oci://…@<chart_digest>`) with
@@ -18,24 +18,24 @@ set -euo pipefail
 #      exactly 1 replica, a StatefulSet, an HTTPS listener, a `seal "static"`
 #      stanza, the seal + TLS mounts, and NO pod anti-affinity / PDB.
 #
-# hk runs this as the `openbao-cluster-verify` step (check layer). It needs
+# hk runs this as the `openbao-verify` step (check layer). It needs
 # network (crane + helm pull) — same class as the bats OpenBao suites.
 # Offline / registry-down: prints a skip line and exits 0, like the [k8s]
 # gates, so a flapping registry.opentofu.org does not red the whole check.
 #
-# Test seam: TOOLBOX_OPENBAO_CLUSTER_LOCK overrides the lock path (bats).
+# Test seam: TOOLBOX_OPENBAO_LOCK overrides the lock path (bats).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-UNIT_DIR="$(cd "$SCRIPT_DIR/../openbao-cluster" && pwd)"
-LOCK="${TOOLBOX_OPENBAO_CLUSTER_LOCK:-$UNIT_DIR/openbao-cluster.lock}"
+UNIT_DIR="$(cd "$SCRIPT_DIR/../openbao" && pwd)"
+LOCK="${TOOLBOX_OPENBAO_LOCK:-$UNIT_DIR/openbao.lock}"
 TFTPL="$UNIT_DIR/templates/openbao.hcl.tftpl"
 
 die() {
-	echo "openbao-cluster-verify: $*" >&2
+	echo "openbao-verify: $*" >&2
 	exit 1
 }
 skip() {
-	echo "openbao-cluster-verify: $* — skipping (network gate)"
+	echo "openbao-verify: $* — skipping (network gate)"
 	exit 0
 }
 val() { sed -n "s/^$1=//p" "$LOCK"; }
@@ -64,14 +64,14 @@ case "$image_digest" in sha256:*) ;; *) die "image_digest is not sha256:<hex>: '
 chart_ref_bare="${chart_repo#oci://}/$chart_name"
 
 # --- 1. chart tag resolves to the locked digest -------------------------
-echo "openbao-cluster-verify: crane digest $chart_ref_bare:$chart_version"
+echo "openbao-verify: crane digest $chart_ref_bare:$chart_version"
 got_chart="$(crane digest "$chart_ref_bare:$chart_version" 2>/dev/null)" ||
 	skip "cannot reach $chart_ref_bare (registry down / offline)"
 [ "$got_chart" = "$chart_digest" ] ||
 	die "chart tag $chart_version resolves to $got_chart, lock says $chart_digest — a mutated upstream tag or a stale lock"
 
 # --- 2. image tag resolves to the locked digest ------------------------
-echo "openbao-cluster-verify: crane digest $image_ref:$image_tag"
+echo "openbao-verify: crane digest $image_ref:$image_tag"
 got_image="$(crane digest "$image_ref:$image_tag" 2>/dev/null)" ||
 	skip "cannot reach $image_ref (registry down / offline)"
 [ "$got_image" = "$image_digest" ] ||
@@ -152,15 +152,15 @@ check "seal Secret mounted at /openbao/seal" \
 check "TLS Secret mounted at /openbao/tls" \
 	"grep -qE 'mountPath: /openbao/tls' '$rendered'"
 
-[ "$fail" = 0 ] || die "rendered chart does not match the Increment 4a shape"
+[ "$fail" = 0 ] || die "rendered chart does not match the expected shape"
 
 # --- 4. anti-rotation guard: this unit must NEVER tofu-manage the transit
-#        mount or approval-key (both are created by the 4b snapshot restore;
+#        mount or approval-key (both are created by the snapshot restore;
 #        a tofu recreate = a key rotation = every past approval attestation
 #        stops verifying, plan § B3). Matches an actual resource block /
 #        `name = "approval-key"` arg, not the validation string or a comment.
 if grep -REn 'resource[[:space:]]+"vault_mount"|name[[:space:]]*=[[:space:]]*"approval-key"' "$UNIT_DIR"/*.tf; then
-	die "environments/local/openbao-cluster/*.tf tofu-manages the transit mount or approval-key — those are restore-managed, tofu must not touch them"
+	die "environments/local/openbao/*.tf tofu-manages the transit mount or approval-key — those are restore-managed, tofu must not touch them"
 fi
 
-echo "openbao-cluster-verify: OK — chart $chart_version @ $chart_digest, image @ $image_digest; no approval-key / vault_mount in the unit"
+echo "openbao-verify: OK — chart $chart_version @ $chart_digest, image @ $image_digest; no approval-key / vault_mount in the unit"

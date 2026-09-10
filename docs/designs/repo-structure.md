@@ -113,7 +113,7 @@ they stay in `environments/local/flux/`.
 | `deploy/frontend/` | one consumer of an approved image: build, deploy, serve | `attestation` (the verify seam, via env), `tests/lib` |
 | `environments/local/` | one deployment target: the tofu composition, the orchestration scripts that bring its units up | its own `openbao/` unit, `tests/lib`; calls `attestation:export-pubkey` as a task |
 | `environments/local/openbao/` | the local-OpenBao **tofu unit** only (host pitchfork daemon — retires at T7c Increment 4d) | `tests/lib` (for its `.tftest.hcl`) — leaf |
-| `environments/local/openbao-cluster/` | the **in-cluster** local-OpenBao tofu unit (T7c Increment 4, ADR 0016 — Phase A `helm_release` today; renamed back to `openbao` at 4d) | `tests/lib` — leaf |
+| `environments/local/openbao/` | the **in-cluster** local-OpenBao tofu unit (ADR 0016 — Phase A `helm_release` + Phase C `vault_*`) | `tests/lib` — leaf |
 | `ci/` | reusable Tekton Task/Pipeline defs → digest-pinned OCI bundles; `ci/runtime/` namespace; each path's `kustomization.yaml` inventory; the bundle-push + taskrun scripts | `tests/lib`. **Never names a consumer** (like `attestation/`) — machine-checked (`rules/boundary-ci.yml`). `deploy/<consumer>/` consumes `ci/` bundles by digest via a pinned `PipelineRun`. Tekton **controller** + `zot` installs are `environments/local/`, not `ci/`; from T7c Increment 2 the Task/Pipeline **defs** are reconciled by Flux `Kustomization` CRs that live in `environments/local/flux/` (deployment policy is `environments/local/`'s, the defs + inventories stay `ci/`'s). |
 | `modules/` | reusable, versioned, URL-consumed OpenTofu modules only | — (empty today; a README states the rule) |
 
@@ -158,12 +158,9 @@ does it get a script.
 
 ```
 BEFORE                    AFTER                          form
-openbao-bootstrap         local:openbao:bootstrap        → environments/local/scripts/openbao-bootstrap.sh
-openbao-up                local:openbao:start            inline: pitchfork start global/openbao
-(new)                     local:openbao:stop             inline: pitchfork stop global/openbao
-openbao-reset             local:openbao:reset            → environments/local/scripts/openbao-reset.sh
-openbao-snapshot          local:openbao:snapshot         → environments/local/scripts/openbao-snapshot.sh
-openbao-snapshot-restore  local:openbao:snapshot-restore inline: bao operator raft snapshot restore
+(ADR 0016)                local:openbao:bootstrap        → environments/local/scripts/openbao-bootstrap.sh (the one-time in-cluster bridge; the host-daemon :start/:stop/:reset/:snapshot-restore tasks retired with the daemon)
+(ADR 0016)                local:openbao:verify          → environments/local/scripts/openbao-verify.sh
+openbao-snapshot          local:openbao:snapshot         → environments/local/scripts/openbao-snapshot.sh (the in-cluster restore bundle)
 export-approval-pubkey    attestation:export-pubkey      inline: cosign public-key --key openbao://approval-key --outfile attestation/cosign-approval.pub
 approve                   attestation:sign               → attestation/scripts/attestation-sign.sh
 verify-approval           attestation:verify             → attestation/scripts/attestation-verify.sh
@@ -173,8 +170,6 @@ consume                   frontend:deploy                → deploy/frontend/scr
 (T7a; deleted T7b1)       ci:taskrun                     — replaced by `mise run frontend:build` / `tkn pipeline start build-scan-approve`
 (T7a; T7c Inc.0)          local:tekton:install           → environments/local/scripts/tekton-install.sh (verify release.lock SHA-256 → apply local file); local:tekton:wait added
 (T7c Inc.1a)              local:flux:bootstrap           → environments/local/scripts/flux-bootstrap.sh (cosign-verify chart digest → helm upgrade --install → apply FluxInstance); local:flux:status
-(T7c Inc.4a)              local:openbao-cluster:helm-verify → environments/local/scripts/openbao-cluster-verify.sh (crane digest == openbao-cluster.lock → helm template by digest → assert the 4a shape)
-(T7c Inc.4b)              local:openbao-cluster:bootstrap   → environments/local/scripts/openbao-cluster-bootstrap.sh (one-time bridge: snapshot host → ns + seal Secret → tofu apply helm_release → bao operator init → key-preserving -force restore → assert approval-key unchanged; idempotent)
 (new, T7b0)               local:zot:wait                 inline: kubectl --context orbstack -n zot wait --for=condition=Available deploy/zot
 (T7b0; retired T7c Inc.1a) local:zot:install/uninstall   — deleted; environments/local/flux/zot-sync.yaml (a Flux Kustomization) reconciles zot now
 check / fix               check / fix                    unchanged
@@ -240,11 +235,11 @@ toolbox/
 │       │   ├── flux-bootstrap.sh                     T7c Inc.1a — the one-time acyclic bridge: cosign-verify chart digest → helm upgrade --install → apply FluxInstance
 │       │   ├── flux-chainsaw.sh  flux-kubeconform.sh T7c — the [k8s] chainsaw wrapper + the kubeconform-flux gate wrapper
 │       │   ├── cert-manager-kubeconform.sh           T7c Inc.4 — kubeconform-cert-manager wrapper (vendored cert-manager.io/v1 schemas)
-│       │   ├── openbao-cluster-verify.sh             T7c Inc.4a — the chart-pin gate (crane digest == lock, then helm template by digest)
-│       │   ├── openbao-cluster-bootstrap.sh          T7c Inc.4b/4c — the one-time bridge: snapshot host → ns + seal Secret → tofu apply Phase A → init → key-preserving -force restore → assert approval-key unchanged → tofu apply Phase C
-│       │   ├── openbao-cluster-chainsaw.sh           T7c Inc.4b — [k8s] running-state wrapper (skips without a cluster / until the bridge has run)
-│       │   ├── lib/openbao.sh                        state-dir resolution, daemon wait-loop, atomic 0600 write
-│       │   └── tests/                                *.bats beside each script (openbao-*, openbao-cluster-{verify,bootstrap,chainsaw}, tekton-install, flux-*, mise-env, zot-manifests)
+│       │   ├── openbao-verify.sh                     the chart-pin gate (crane digest == lock, then helm template by digest)
+│       │   ├── openbao-bootstrap.sh                  the one-time in-cluster bridge: pick source → ns + seal Secret → tofu apply Phase A → init → key-preserving -force restore → assert approval-key unchanged → tofu apply Phase C (ADR 0016)
+│       │   ├── openbao-chainsaw.sh                   [k8s] running-state wrapper (skips without a cluster / until the bridge has run)
+│       │   ├── openbao-snapshot.sh                   the in-cluster restore bundle (snap + seal.key + root.token)
+│       │   └── tests/                                *.bats beside each script (openbao-{verify,bootstrap,chainsaw}, tekton-install, flux-*, mise-env, zot-manifests)
 │       ├── flux/                                     T7c — the FluxInstance + operator HelmRelease + Kustomization CRs (ADR 0015)
 │       │   ├── flux-instance.yaml                    bridge-owned (excluded from its own sync path — the acyclic anchor)
 │       │   ├── flux-operator-helmrelease.yaml        OCIRepository (cosign spec.verify) + HelmRelease — operator self-management
@@ -260,17 +255,10 @@ toolbox/
 │       ├── tekton/
 │       │   └── release.lock                          T7c Inc.0 — pinned version + SHA-256 for tekton-install.sh (the controller stays a checksum-gated apply)
 │       ├── tests/flux/{flux-reconcile,ci-reconcile}/chainsaw-test.yaml   T7c — [k8s] running-state asserts (flux-chainsaw.sh; one subdir per Test)
-│       ├── tests/openbao-cluster/chainsaw-test.yaml   T7c Inc.4b — [k8s] post-migration running-state asserts (openbao-cluster-chainsaw.sh)
-│       ├── openbao/                                  the host-daemon tofu unit only (leaf; retires at T7c Inc.4d)
-│       │   ├── main.tf  variables.tf  outputs.tf  versions.tf  README.md
-│       │   ├── templates/openbao.hcl.tftpl
-│       │   └── tests/
-│       │       ├── config_render.tftest.hcl
-│       │       ├── keys.tftest.hcl
-│       │       └── policies.tftest.hcl
-│       ├── openbao-cluster/                          T7c Inc.4 — the in-cluster tofu unit (leaf; → renamed `openbao` at 4d)
+│       ├── tests/openbao/chainsaw-test.yaml          [k8s] running-state asserts for the in-cluster OpenBao (openbao-chainsaw.sh)
+│       ├── openbao/                                  the in-cluster OpenBao tofu unit (leaf; ADR 0016)
 │       │   ├── main.tf (Phase A helm_release + Phase C vault_*)  variables.tf  outputs.tf  versions.tf  provider.tf  README.md
-│       │   ├── openbao-cluster.lock                  pinned chart + image digests (helm provider can't pin a digest — verify.sh + the bridge enforce it)
+│       │   ├── openbao.lock                          pinned chart + image digests (helm provider can't pin a digest — verify.sh + the bridge enforce it)
 │       │   ├── templates/openbao.hcl.tftpl           HTTPS listener + raft + seal "static"
 │       │   └── tests/{helm_values,phase_c}.tftest.hcl   Phase A values + Phase C (sops key AES, decrypt-only policy, role scoped to Flux, approval-key rejected)
 │       └── zot/                                      T7b0 — interim local registry; reconciled by environments/local/flux/zot-sync.yaml (T7c Inc.1a)
