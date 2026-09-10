@@ -25,9 +25,10 @@ teardown() {
 	# flux-instance (1) + operator OCIRepository+HelmRelease (2) + zot-sync (1)
 	# + ci-runtime (1) + ci-defs ci-tasks/ci-pipelines (2) + cert-manager
 	# OCIRepository+HelmRelease (2) + cert-manager-pki Flux Kustomization (1)
-	# = 10 (T7c Increment 4b — the dev-PKI CRs moved to
-	# environments/local/cert-manager/, kubeconform-cert-manager).
-	[[ "$output" == *"Valid: 10"* ]]
+	# + kyverno OCIRepository+HelmRelease (2) + kyverno-policy Flux
+	# Kustomization (1) = 13 (Plan B K1 — the ImageValidatingPolicy + its
+	# ConfigMap moved to environments/local/kyverno/, kubeconform-kyverno).
+	[[ "$output" == *"Valid: 13"* ]]
 }
 
 @test "nothing skipped (the vendored Flux CRD schemas are all used)" {

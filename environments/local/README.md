@@ -200,6 +200,16 @@ is excluded, it is the bridge-owned acyclic anchor):
 - `ci-defs.yaml` → `ci/tasks/` + `ci/pipelines/` (two Kustomizations,
   `targetNamespace: ci`, `dependsOn: [ci-runtime]`, `ci-pipelines` also
   `[ci-tasks]`) — the reusable Task + Pipeline defs.
+- `cert-manager-helmrelease.yaml` / `cert-manager-pki.yaml` — in-cluster PKI
+  (ADR 0016).
+- `kyverno-helmrelease.yaml` / `kyverno-policy.yaml` → `environments/local/kyverno/`
+  — the admission policy engine + one `ImageValidatingPolicy` verifying the
+  `cv_frontend` approval attestation (Plan B K1, ADR 0020). `kyverno-policy`
+  is split out for the same unknown-CRD-dry-run reason as `cert-manager-pki`;
+  `healthChecks` on `kyverno-admission-controller`, `retryInterval: 30s`.
+  **Kyverno-absent:** `kyverno-policy` stays blocked on the missing
+  `ImageValidatingPolicy` CRD and retries until the HelmRelease lands it — no
+  notification; a fresh cluster self-heals as Flux reconciles the HelmRelease.
 
 `ci/` owns those manifests + their per-path `kustomization.yaml` inventories;
 `environments/local/` owns the deployment policy (the Flux `Kustomization` CRs
@@ -222,6 +232,14 @@ checks), `ci-defs` stays blocked on `dependsOn` and retries — no notification
 | `flux/cert-manager-pki.yaml` | a Flux `Kustomization` CR (`cert-manager-pki`) → `./environments/local/cert-manager`. **Separate** from flux-system because the Issuer CRs are cert-manager.io/v1 custom kinds and a whole-Kustomization dry-run fails on an unknown CRD — keeping them in flux-system deadlocked it against the HelmRelease that installs those CRDs. `healthChecks` on the cert-manager Deployments; `retryInterval: 30s`. |
 | `../cert-manager/issuers.yaml` | selfSigned root `ClusterIssuer` → CA `Certificate` (key in-cluster) → CA `ClusterIssuer` → the `openbao-tls` leaf `Certificate` (ns `openbao`, applied once `openbao-bootstrap.sh` creates the namespace). Dev limitation: selfSigned root; production swaps it, CA + leaves unchanged. |
 | `../cert-manager/tests/crd-schemas/*.json` | vendored cert-manager `Certificate`/`ClusterIssuer` v1 schemas for the `kubeconform-cert-manager` gate (from `github.com/cert-manager/cert-manager/releases/download/v1.21.1/cert-manager.crds.yaml`) |
+| `flux/kyverno.lock` | pinned Kyverno chart digest (chart **not** cosign-signed, verified — so no `spec.verify`) + 5 controller image digests + the CRD-lifecycle CLI + readiness-checker digests, each pinned via the `tag@digest` form; the bump procedure — Plan B K1 |
+| `flux/kyverno-helmrelease.yaml` | `OCIRepository` (digest pin, no `spec.verify`) + `HelmRelease` into ns `kyverno`; `replicas: 1` (single-node dev). In the flux-system Kustomization (always-known kinds). |
+| `flux/kyverno-policy.yaml` | Flux `Kustomization` CR (`kyverno-policy`) → `./environments/local/kyverno`. **Separate** from flux-system for the unknown-CRD dry-run reason; `healthChecks` on `kyverno-admission-controller`, `retryInterval: 30s`, `wait: false`, `prune: true`. |
+| `kyverno/imagevalidatingpolicy.yaml` | the `ImageValidatingPolicy` (`policies.kyverno.io/v1`) — keyed cosign, tlog ignored (OpenBao Transit, no Rekor), the approval pubkey read from a ConfigMap via `resource.get()`, the in-toto predicate-type gate + two CEL validations (signature/subject, then `verdict == "approved"` with a `has()` fail-close). Matches namespaces labelled `toolbox.dev/cv-frontend: approval-enforced` (M3's `frontend` ns must carry it) + the `cv-frontend*` image glob. Image source is **GHCR** (Kyverno referrer discovery does not work against the plain-HTTP in-cluster zot — ADR 0020, T12). |
+| `tests/kyverno/chainsaw-test.yaml` | `[k8s]`-gated (`kyverno-chainsaw.sh` — skips in CI and until the `kyverno-policy` Kustomization has reconciled): policy Ready, an **approved** `cv-frontend` digest is admitted, an **unsigned** one is denied with the policy message. The deny *variants* (rejection / wrong-subject / malformed) are the K1 T6 spike + `attestation-verify.bats`. Asserts running state; creates + cleans up its own pods. |
+| `scripts/kyverno-chainsaw.sh` / `scripts/kyverno-kubeconform.sh` | the `chainsaw-kyverno` / `kubeconform-kyverno` hk gate wrappers |
+| `kyverno/kustomization.yaml` | `configMapGenerator` reads `attestation/cosign-approval.pub` in place (`../../../`, one authored copy — the same public file `openbao-bootstrap.sh` reads); `disableNameSuffixHash` for a stable ConfigMap name so the policy's `resource.get()` is deterministic. |
+| `kyverno/tests/crd-schemas/imagevalidatingpolicy_v1.json` | vendored `ImageValidatingPolicy` v1 CRD schema for the `kubeconform-kyverno` gate (`.spec.versions[v1].schema.openAPIV3Schema` of the pinned chart's CRD) — **regenerate on a chart bump** per `kyverno.lock`'s header |
 | `flux/tests/crd-schemas/*.json` | v1/v2 CRD schemas vendored from Flux 2.9.5 + flux-operator v0.59.0 for the `kubeconform-flux` gate — **regenerate on a bump** (`crane digest` + `cosign verify` per the lock-file header; CRDs from `github.com/fluxcd/flux2/releases/download/v2.9.5/manifests.tar.gz`) |
 | `tests/flux/flux-reconcile/chainsaw-test.yaml` | `[k8s]`-gated server-side check (`flux-chainsaw.sh` — skips in CI and until `local:flux:bootstrap` has run): the operator accepted the FluxInstance, source-controller fetched an artifact from git, the OCIRepository is cosign-verified, the HelmRelease self-manages, the zot Kustomization applied. Asserts running state; does not bootstrap or tear down. |
 | `tests/flux/ci-reconcile/chainsaw-test.yaml` | `[k8s]`-gated (T7c Increment 2): the `ci-runtime` / `ci-tasks` / `ci-pipelines` Kustomizations are Ready, ns `ci` + the Tekton defs reconciled and Flux-owned, `ci/tests/**` not slurped. `flux-chainsaw.sh` runs it only once the CRs are on the synced ref (probe: `kustomization ci-runtime`). |

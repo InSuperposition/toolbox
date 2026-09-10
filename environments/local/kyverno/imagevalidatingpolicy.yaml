@@ -1,0 +1,84 @@
+# Admission-time verification of the cv_frontend approval attestation on the
+# local dev reference cluster (Plan B K1, docs/adr/0020). The declarative
+# equivalent of frontend-serve.sh's launch re-verify, for the in-cluster
+# delivery path (docs/adr/0019).
+#
+# Semantic contract (proven equivalent to attestation-verify.sh by the K1
+# build-time spike, 2026-09-10 — docs/adr/0020):
+#   - the attestation is signed by the approval key (verifyAttestationSignatures
+#     > 0; the key is read from the `kyverno-approval-pubkey` ConfigMap in ns
+#     kyverno — one source of truth, exported from openbao://approval-key)
+#   - its in-toto predicateType is the approval type (attestations[].intoto.type)
+#   - `verifyAttestationSignatures` runs IntotoSubjectClaimVerifier, so the
+#     attestation subject digest must equal the admitted image digest
+#     (wrong-subject denies at validation #1)
+#   - the predicate verdict is "approved" — a signed *rejection* is still
+#     signed, so this is a separate check (validation #2); the has() guard
+#     fail-closes on a missing/malformed verdict
+#   - failurePolicy: Fail + validationActions: [Deny] → no unverified
+#     cv_frontend pod is admitted
+#
+# Scope: any namespace LABELLED `toolbox.dev/cv-frontend: approval-enforced`
+# (M3's `frontend` namespace carries it; `chainsaw-kyverno`'s ephemeral test
+# namespace carries it). A label, not `kubernetes.io/metadata.name: frontend`,
+# so the blast radius stays scoped (plan intent — a Kyverno outage with
+# failurePolicy: Fail blocks cv_frontend pod creation only in labelled
+# namespaces) while an ephemeral-namespace chainsaw test can still exercise
+# it. `matchImageReferences` narrows further to the cv_frontend repo.
+#
+# tlog is ignored: toolbox cosign is keyed via OpenBao Transit, no Rekor
+# (docs/adr/0004). Image source is GHCR (HTTPS) — Kyverno's referrer
+# discovery does not work against the plain-HTTP in-cluster zot (docs/adr/0020,
+# TODOS T12).
+apiVersion: policies.kyverno.io/v1
+kind: ImageValidatingPolicy
+metadata:
+  name: frontend-approval
+spec:
+  failurePolicy: Fail
+  validationActions:
+    - Deny
+  webhookConfiguration:
+    timeoutSeconds: 30
+  matchConstraints:
+    namespaceSelector:
+      matchLabels:
+        toolbox.dev/cv-frontend: approval-enforced
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+  matchImageReferences:
+    - glob: "ghcr.io/insuperposition/cv-frontend*"
+  validationConfigurations:
+    mutateDigest: false
+    verifyDigest: false
+    required: false
+  variables:
+    - name: pubkey
+      expression: resource.get("v1", "configmaps", "kyverno", "kyverno-approval-pubkey").data["cosign-approval.pub"]
+  attestors:
+    - name: approvalKey
+      cosign:
+        key:
+          expression: variables.pubkey
+        ctlog:
+          insecureIgnoreTlog: true
+          insecureIgnoreSCT: true
+  attestations:
+    - name: approval
+      intoto:
+        type: https://insuperposition.github.io/toolbox/attestations/approval/v1
+  validations:
+    - expression: |-
+        images.containers.map(image,
+          verifyAttestationSignatures(image, attestations.approval, [attestors.approvalKey]) > 0
+        ).all(e, e)
+      message: "no valid approval attestation signed by the approval key for this image digest"
+    - expression: |-
+        images.containers.map(image,
+          has(extractPayload(image, attestations.approval).predicate.verdict) &&
+          extractPayload(image, attestations.approval).predicate.verdict == "approved"
+        ).all(e, e)
+      message: "approval attestation verdict is not 'approved' (a signed rejection is still signed)"

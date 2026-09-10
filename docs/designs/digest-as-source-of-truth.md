@@ -95,8 +95,14 @@ build ─▶ scan+gate ─▶ evidence referrers ─▶ human approval ─▶ co
 
    Both flags are required — cosign 3.1.3 otherwise fetches a TUF signing
    config and uploads to the public Rekor tlog. The attestation is stored
-   as an `application/vnd.dev.sigstore.bundle.v0.3+json` referrer. Every
-   completed decision is signed — approve *and* reject, never silent —
+   as an `application/vnd.dev.sigstore.bundle.v0.3+json` referrer, carrying
+   the `dev.sigstore.bundle.content` + `dev.sigstore.bundle.predicateType`
+   manifest annotations cosign's own discovery (`cosign.GetBundles`) filters
+   on — so an admission verifier that discovers by image reference, not by a
+   pinned digest (Kyverno, [ADR 0020](../adr/0020-imagevalidatingpolicy-on-the-dev-reference-cluster.md)),
+   finds it. `attestation-verify.sh` is handed the digest and never reads
+   those annotations. Every completed decision is signed — approve *and*
+   reject, never silent —
    except an EOF / Ctrl-C / empty prompt, which writes nothing.
    `attestation-sign.sh` prints the new attestation's own digest; that
    digest is the selection key ([ADR 0006](../adr/0006-approval-selection-is-attestation-digest-pin.md)).
@@ -326,9 +332,14 @@ independently (Gall's Law). The full sequencing lives in `TODOS.md`.
 
 ## Negative space (deliberately not used)
 
-- **Kyverno admission-time enforcement** — couples the Tekton set,
-  `cluster-k0sctl`, and Kyverno mechanics into one chain; contradicts the
-  "no production cluster in this wedge" premise. Tracked: `TODOS.md`.
+- **Kyverno admission-time enforcement on a *production* cluster** — couples
+  the Tekton set, `cluster-k0sctl`, and Kyverno mechanics into one chain;
+  the `ci`-namespace privilege-scoping policies stay deferred to that work
+  (`TODOS.md`). Narrowed by [ADR 0020](../adr/0020-imagevalidatingpolicy-on-the-dev-reference-cluster.md):
+  one `ImageValidatingPolicy` DOES run on the **dev reference cluster**,
+  verifying the approval attestation at admission for the in-cluster
+  `cv_frontend` — the declarative equal of `frontend-serve.sh`'s launch
+  re-verify (Plan B K1).
 - **Paketo buildpacks** — removed ([ADR 0007](../adr/0007-distroless-dockerfile-not-buildpacks.md)).
 - **apko / melange** — fully declarative image build; an innovation-token
   overspend for one npm app.

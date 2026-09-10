@@ -1,0 +1,33 @@
+# The Kyverno policy set for the local dev reference cluster — its own
+# kustomize root so it gets a dedicated Flux `kyverno-policy` Kustomization
+# (Plan B K1, Phase 2): `policies.kyverno.io` custom kinds cannot sit in the
+# flux-system inventory, whose whole-set server-side dry-run rejects an
+# unknown CRD until the Kyverno HelmRelease lands it (same split as
+# cert-manager-pki.yaml / ci-defs.yaml).
+#
+# The approval public key is materialised as a ConfigMap from the ONE
+# authored copy — attestation/cosign-approval.pub, written only by
+# `mise run attestation:export-pubkey` from openbao://approval-key. No
+# vendored second copy: a `configMapGenerator` reads it in place.
+# `disableNameSuffixHash` keeps the name stable (`kyverno-approval-pubkey`)
+# so the policy's `resource.Get(...)` is deterministic. The `../../../` read
+# is the same committed public file `openbao-bootstrap.sh` already reads;
+# kustomize-controller runs LoadRestrictionsNone, and the local kubeconform /
+# chainsaw wrappers pass `--load-restrictor LoadRestrictionsNone` to match.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# NB: no top-level `namespace:` — ImageValidatingPolicy is cluster-scoped and
+# the kustomize namespace transformer would wrongly stamp one on it. The
+# ConfigMap gets its namespace on the generator entry.
+resources:
+  - imagevalidatingpolicy.yaml
+
+configMapGenerator:
+  - name: kyverno-approval-pubkey
+    namespace: kyverno
+    files:
+      - cosign-approval.pub=../../../attestation/cosign-approval.pub
+
+generatorOptions:
+  disableNameSuffixHash: true

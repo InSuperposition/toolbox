@@ -17,3 +17,5 @@ resources:
   - ci-defs.yaml
   - cert-manager-helmrelease.yaml
   - cert-manager-pki.yaml
+  - kyverno-helmrelease.yaml
+  - kyverno-policy.yaml

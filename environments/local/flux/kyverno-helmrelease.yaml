@@ -1,0 +1,108 @@
+# Kyverno — admission-policy engine for the local dev reference cluster
+# (Plan B K1, docs/adr/0020). Runs one ImageValidatingPolicy that verifies
+# the cv_frontend approval attestation at pod admission
+# (environments/local/kyverno/, reconciled by the `kyverno-policy`
+# Kustomization).
+#
+# Reconciled by helm-controller (already in FluxInstance.spec.components) —
+# Kyverno is a HELPER component behind the GitOps loop, like cert-manager;
+# nothing secret-bearing depends on its reconcile being tofu-driven.
+#
+# PINNING (docs/adr/0001, digests in environments/local/flux/kyverno.lock):
+#   - the OCIRepository pins `ref.digest` (immutable, content addressed)
+#   - the Kyverno *chart* is NOT cosign-signed (verified — `cosign tree`
+#     empty), so there is NO `spec.verify`; the committed chart digest is the
+#     whole pin, exactly as with the OpenBao and cert-manager charts
+#   - the Kyverno chart's image helper emits `registry/repo:tag` with no
+#     digest field, so each component image is pinned via the
+#     `tag: "<tag>@<digest>"` form (kubelet pins the digest; the same trick
+#     openbao.lock uses)
+#
+# CRDs: installed by the chart (`crds.install: true`). Flux
+# `install.crds: CreateReplace` / `upgrade.crds: CreateReplace` so a chart
+# bump replaces them cleanly.
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: kyverno
+  namespace: flux-system
+spec:
+  interval: "30m"
+  url: "oci://ghcr.io/kyverno/charts/kyverno"
+  ref:
+    digest: "sha256:720542b97bdbc2633535c2297332690d21cfbb944053eb1ec1f0dbe8e3895444"
+  layerSelector:
+    mediaType: "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
+    operation: "copy"
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: kyverno
+  namespace: flux-system
+spec:
+  interval: "30m"
+  releaseName: "kyverno"
+  storageNamespace: "kyverno"
+  targetNamespace: "kyverno"
+  chartRef:
+    kind: OCIRepository
+    name: kyverno
+  install:
+    createNamespace: true
+    crds: "CreateReplace"
+    remediation:
+      retries: 3
+  upgrade:
+    crds: "CreateReplace"
+    remediation:
+      retries: 3
+  values:
+    # Single-node dev cluster — the HA default (3 admission replicas) is
+    # wasted here and the chart itself warns when it is below 2. This is a
+    # reference deployment, not a resilient one.
+    admissionController:
+      replicas: 1
+      initContainer:
+        image:
+          registry: "ghcr.io"
+          tag: "v1.19.1@sha256:c25c47461f06f2845a48c319ae86fbbc1730a7b9ed5b701889c9dc1f9ee94b09"
+      container:
+        image:
+          registry: "ghcr.io"
+          tag: "v1.19.1@sha256:b31d8511ae5fd6010e2a01ea72ebae08eb82fa51d91af14a1d9fe989949b4edb"
+    backgroundController:
+      replicas: 1
+      image:
+        registry: "ghcr.io"
+        tag: "v1.19.1@sha256:8f1e9143373a27578cafc2d28d2c66ba0926c63b4c77e63de8d2fdd4a122859f"
+    cleanupController:
+      replicas: 1
+      image:
+        registry: "ghcr.io"
+        tag: "v1.19.1@sha256:67a48e62a8d8f8120c86914ff822b90017c54054c7b64ef8a1555645e9d9761e"
+    reportsController:
+      replicas: 1
+      image:
+        registry: "ghcr.io"
+        tag: "v1.19.1@sha256:c0eee97b9b44a0dd35805d56b358fa52548480f79d4944602b9609538eccd64c"
+    # pre-delete webhook-cleanup hook (readiness-checker image)
+    webhooksCleanup:
+      image:
+        registry: "ghcr.io"
+        tag: "v1.19.1@sha256:31bb42ce7f5b2e27c1cf633aeff4f0cad1f5bb63761e2cb09f0e25cdd26572bf"
+    crds:
+      install: true
+      # post-upgrade CRD-migration hook (kyverno-cli image)
+      migration:
+        image:
+          registry: "ghcr.io"
+          tag: "v1.19.1@sha256:ced7b2be0b04250cabfe695f15307f69eb715fe23234816388af4f3812915b2a"
+    # helm-test hook (readiness-checker image). Flux does not run `helm test`
+    # so this never pulls, but pin it anyway — no un-pinned image reference
+    # in the release.
+    test:
+      image:
+        registry: "ghcr.io"
+        tag: "v1.19.1@sha256:31bb42ce7f5b2e27c1cf633aeff4f0cad1f5bb63761e2cb09f0e25cdd26572bf"

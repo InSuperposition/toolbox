@@ -1,0 +1,40 @@
+# Flux Kustomization — reconciles the Kyverno policy set
+# (environments/local/kyverno/: the ImageValidatingPolicy + the approval
+# public-key ConfigMap) from the flux-system GitRepository.
+#
+# A SEPARATE Kustomization, not part of flux-system's inventory, for the
+# same reason as cert-manager-pki.yaml / ci-defs.yaml: `ImageValidatingPolicy`
+# is a policies.kyverno.io custom kind. kustomize-controller server-side
+# dry-runs a Kustomization's whole resource set and rejects the entire apply
+# if one object's CRD is unknown — so with the policy in flux-system a fresh
+# cluster deadlocks (the Kyverno HelmRelease, which installs that CRD, is in
+# the same set and never applies). Here the transient "no matches for kind
+# ImageValidatingPolicy" is isolated and retried until the HelmRelease (still
+# in flux-system — HelmRelease + OCIRepository are always-known kinds) lands
+# the CRDs.
+#
+# healthChecks gate on the admission controller so this reports Ready only
+# once Kyverno is actually admitting. LoadRestrictionsNone: the
+# configMapGenerator reads attestation/cosign-approval.pub in place
+# (environments/local/kyverno/kustomization.yaml) — kustomize-controller runs
+# LoadRestrictionsNone by default, so no override is needed here.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: kyverno-policy
+  namespace: flux-system
+spec:
+  interval: "10m"
+  retryInterval: "30s"
+  timeout: "5m"
+  prune: true
+  wait: false
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: "./environments/local/kyverno"
+  healthChecks:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: kyverno-admission-controller
+      namespace: kyverno

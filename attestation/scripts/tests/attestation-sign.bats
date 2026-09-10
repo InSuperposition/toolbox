@@ -87,9 +87,15 @@ setup() {
 	run oras manifest fetch --plain-http "${IMAGE%@*}@${att}"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"application/vnd.dev.sigstore.bundle.v0.3+json"* ]]
-	# ... whose bundle carries our predicate type in the SIGNED statement
-	# (the referrer manifest itself does not annotate predicateType — neither
-	# did cosign's own push reliably; the consumer reads the statement).
+	# ... whose referrer manifest carries the two `dev.sigstore.bundle.*`
+	# annotations cosign's discovery (`cosign.GetBundles`) filters on — the
+	# reason Kyverno's ImageValidatingPolicy (Plan B K1) can find it. Without
+	# these a bare `oras attach` referrer is invisible to that path.
+	[ "$(printf '%s' "$output" | jq -r '.annotations["dev.sigstore.bundle.content"]')" = "dsse-envelope" ]
+	[ "$(printf '%s' "$output" | jq -r '.annotations["dev.sigstore.bundle.predicateType"]')" = "https://insuperposition.github.io/toolbox/attestations/approval/v1" ]
+	# ... and whose bundle also carries the predicate type in the SIGNED
+	# statement (the annotation is a discovery hint; the statement is the
+	# trust input the consumer reads).
 	layer="$(printf '%s' "$output" | jq -r '.layers[0].digest')"
 	oras blob fetch --plain-http --output "$FIX/att.json" "${IMAGE%@*}@${layer}"
 	ptype="$(jq -r '.dsseEnvelope.payload' "$FIX/att.json" | base64 -d | jq -r '.predicateType')"
