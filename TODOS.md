@@ -166,6 +166,11 @@ Timoni (already in the stack) can express and validate the edge set; a
 purpose-built resolver. Weigh each against "one more tool" — the lint may
 be enough paired with review.
 
+**Already covered (Plan B X1, ADR 0018):** the one hard tofu edge — no
+`kubernetes_*` / `kubernetes_manifest` resource — is the `no-kubernetes-tf`
+hk step (`tests/check-tf-boundary.sh`, a `git grep`). This session backstops
+only that one; the rest of the HCL layer stays review-only.
+
 **Context:** Codex 2nd-pass finding CX2, user decision CX1=A (ship the
 scoped lint + documented limits + this deferred session).
 `docs/designs/repo-structure.md` § Enforcement / Honest scope.
@@ -649,6 +654,8 @@ implementation tasks: `~/.claude/plans/plan-b-timoni-kyverno-crossplane.md`
 CODEX REVIEW 2026-09-10).
 
 **Ship order: `M1 → X1 → K1 → M3`.** Each = 1 PR = 1 squash commit.
+**M1 shipped** (PR #31, `b4c0b0c`). **X1 in progress** (branch
+`plan-b-x1-adr-crossplane-boundary`).
 
 - **M1** — author `deploy/frontend/timoni/` (CUE module for the `cv_frontend`
   k8s manifests — a build input, not a `modules/` entry). `#Config.image`
