@@ -639,43 +639,88 @@ system is unbuilt, and the backup-mechanism choice resurfaces at Plan B's
 **Depends on:** Plan A merged. **Overlaps:** Plan B O5 (`snapshot_schedule`).
 **Priority:** P2. Surfaced by `/plan-eng-review` 2026-09-10 (+ Codex #6/#7).
 
-### Plan B — Timoni + Crossplane + reusable `secret-openbao` module — P2/P3, own eng review
+### Plan B — Timoni + Kyverno + Crossplane boundary — P2, ENG CLEARED 2026-09-10
 
-**What:** the deferred half of the T7c Increment 4 replan, split out by
-`/plan-eng-review` 2026-09-10 (Step 0 complexity trigger — 11 chunks, two
-new stack tools in one increment). Design seed: the plan file's "REPLAN v2",
-"Crossplane per-consumer envelope", and "CODEX REVIEW (2026-09-10)"
-sections (`~/.claude/plans/t7c-increment4-in-cluster-openbao.md`).
+**What:** the deferred half of the T7c Increment 4 replan, re-scoped by
+`/plan-eng-review` 2026-09-10 (Step 0 complexity trigger, then a scope cut,
+then Kyverno added for correct ordering). Full reviewed plan + 12
+implementation tasks: `~/.claude/plans/plan-b-timoni-kyverno-crossplane.md`
+(seed: `~/.claude/plans/t7c-increment4-in-cluster-openbao.md` §§ REPLAN v2 /
+CODEX REVIEW 2026-09-10).
 
-- **Timoni** (M1/M3): author `deploy/frontend/timoni/` (CUE module for the
-  `cv_frontend` k8s manifests — a build input, not a `modules/` entry) +
-  deliver it via `timoni build` → `flux push artifact` → an `OCIRepository`
-  with `spec.verify`. Amends ADR 0009 (routes the demo app into the cluster;
-  the pitchfork-container demo is retained). The publish path preserves the
-  image approval-attestation verification (ADRs 0002/0005/0006).
-- **Crossplane** (X1/XE1/XE2): **ADR 0018** — the Crossplane/OpenTofu
-  boundary + a **precedence clause** (for in-cluster per-consumer k8s
-  objects that are not a bootstrap anchor and not a controller's own
-  resource, Crossplane Compositions win the authoring choice; tofu
-  `kubernetes_*` / `kubernetes_manifest` banned; substrate stays tofu
-  unconditionally). **XE1** commits the `XConsumerEnvelope` XRD skeleton +
-  a `kubeconform-crossplane` gate, **Crossplane not installed**. **XE2**
-  (install core + `provider-kubernetes` + the `function-patch-and-transform`
-  Composition) is **gated on a 2nd `deploy/<consumer>/`**.
-- **Reusable module** (O4/O5): extract `modules/secret-openbao/`
-  (provider-free, consumed by a thin per-env root) via OpenTofu **`moved`
-  blocks** — NOT `tofu destroy` (`deletion_allowed = false` on the `sops` /
-  `extra` transit keys makes destroy fail partway). **ADR 0017** amends
-  0012's "`modules/` stays empty" end-state. O4 is extraction ONLY; the
-  `deployment_mode=ha` / `auto_unseal=transit|awskms` / `snapshot_schedule`
-  / `tls_issuer` presets are **O5**, each with its own lifecycle tests.
-- **Flux SOPS** (G1): wire `--sops-vault-configmap` onto the `FluxInstance`
-  + the ConfigMap + `spec.decryption` on Kustomizations. Gated on a **named
-  secret** needing SOPS (none today); O4's module keeps the `sops` key +
-  `flux_sops` role ready.
+**Ship order: `M1 → X1 → K1 → M3`.** Each = 1 PR = 1 squash commit.
 
-**Depends on:** Plan A merged. Needs its own `/plan-eng-review` before it
-starts. **Priority:** P2/P3.
+- **M1** — author `deploy/frontend/timoni/` (CUE module for the `cv_frontend`
+  k8s manifests — a build input, not a `modules/` entry). `#Config.image`
+  carries the full `@sha256:[0-9a-f]{64}$` digest constraint + a negative
+  fixture. hk step = inline `timoni mod vet cv-frontend ./deploy/frontend/timoni`
+  — **no kubeconform** (`timoni mod vet` already validates against k8s CUE
+  schemas; a 2nd validator for one concern is forbidden). **ADR 0019** —
+  amends ADR 0009 (routes the demo into the cluster *as well*; pitchfork
+  container retained) and **must state the concrete capability Timoni adds
+  over the plain-CUE path** (typed multi-object `#Config`, semver'd module
+  artifact, reproducible build) or that is the signal to drop it.
+- **X1** — **ADR 0018**: the in-cluster pipeline is **render (Timoni/CUE) →
+  reconcile (Flux) → enforce at admission (Kyverno) → provision
+  consumer-declared backing infra (Crossplane, if ever activated)** — these
+  are *stages*, not rivals; one owner per object per stage. Flux + Timoni
+  **compose**, they are not alternatives. tofu `kubernetes_*` /
+  `kubernetes_manifest` **banned** — enforced by a new
+  `rules/boundary-no-kubernetes-tf.yml` ast-grep rule (needs an HCL-pattern
+  spike + `**/*.tf` added to the `["ast-grep"]` hk glob + an `ast-grep test`
+  step — none are free). The per-consumer namespace bundle stays Flux
+  plain-YAML indefinitely. `XConsumerEnvelope` / XE1 **dropped**.
+- **K1** — install Kyverno via Flux (HelmRelease + OCIRepository digest pin,
+  `spec.verify` if the chart is keyless) + one **`ImageValidatingPolicy`**
+  scoped to ns `frontend` that checks the cosign approval **attestation**
+  against `attestation/cosign-approval.pub` (via `configMapGenerator`, not
+  inlined). The policy must preserve the **ADR-0006 contract**: verify the
+  in-toto predicate type + a **verdict-approved** predicate (a signed
+  *rejection* is still signed) + the subject digest. Split-Kustomization
+  pattern (`kyverno-policy` CR, `retryInterval` short) per the
+  `toolbox-flux-kustomization-unknown-crd-deadlock` learning. **ADR 0020** —
+  narrows the "production cluster only" deferral below: the
+  ImageValidatingPolicy runs on the dev *reference* cluster (consistent with
+  Flux/OpenBao/cert-manager/Tekton already there); the `ci`-namespace
+  privilege-scoping policies stay deferred.
+  **FEASIBILITY RISK:** [kyverno#16435](https://github.com/kyverno/kyverno/issues/16435)
+  — Kyverno 1.19.0 SIGSEGVs on **keyed** cosign verification of
+  **OCI-referrer bundle-format** attestations with tlog on. toolbox's
+  attestations are exactly that shape. K1's build **must** pin a fixed
+  version and live-spike the keyed + referrer + `--insecure-ignore-tlog`
+  path, proving semantic equivalence to `attestation-verify.sh`
+  (selected-approval / selected-rejection / wrong-subject / malformed).
+- **M3** — deliver + deploy. Publish is a **Tekton Task**
+  (`ci/tasks/timoni-publish.yaml`, `command`+`args`, no `script:`),
+  workspace-shared, ordered **verify → render (`timoni build cv-frontend`) →
+  publish (`flux push --output json` for the digest)**. Three distinct
+  digests — image `D_img`, approval-attestation `D_att`, manifest-artifact
+  `D_man` — named + bound in the plan; the git pin promotion is a reviewed
+  human step, never auto-committed. `environments/local/flux/frontend.yaml` =
+  `OCIRepository` (digest-only, no `spec.verify`) + `frontend-ns`
+  Kustomization + `frontend` Kustomization
+  **`dependsOn: [frontend-ns, kyverno-policy]`** (runtime order ≠ ship
+  order — the workload must not reconcile before K1's webhook), **`wait:
+  false`** (the app has a known boot crash — `wait: true` would block
+  Kustomization-Ready forever). `chainsaw-frontend` asserts **delivery**
+  (`.image == D_img`, container **started** not just Scheduled, policy
+  **evaluated** via PolicyReport), **not** HTTP-200. One-line notes on ADRs
+  0002/0005/0006 (approval contract preserved) + 0009/0012.
+
+**Deferred (own triggers):**
+
+| Item | Trigger |
+|---|---|
+| **O4 / O5** — extract `modules/secret-openbao/` (`moved` blocks — `deletion_allowed=false` on `sops`/`extra` keys makes `tofu destroy` fail partway) + `ha` / `awskms`\|`transit` unseal / `snapshot_schedule` / `tls_issuer` presets. **ADR 0017**. | `environments/production/openbao/` becomes real planned work (the true 2nd consumer — one consumer is not a module, `modules/README.md`). ADR 0012 stands until then. O4 planning also picks up a dedicated OpenBao Transit `manifest-signing` key for the M3 artifact. |
+| **Crossplane install** (core + `provider-*` + a Composition + its own ADR) | a consumer declares backing infra it does not own (bucket / DB / queue / DNS as a CR) — **not** a directory count. |
+| **G1** — Flux SOPS (`--sops-vault-configmap` + ConfigMap + `spec.decryption`) | a named secret needs SOPS decryption. Plan A's Phase C left the OpenBao side (`sops` key, `flux_sops` role) ready. |
+| **Manifest authorization** (Codex #7) — scoped RBAC for the `frontend` kustomize-controller SA + a defined rendered-manifest review path (image approval ≠ authz of the manifests around it) | own review/session. |
+| **Kyverno `ci`-namespace privilege policies** (PSA scalpel, build-pod securityContext) | `cluster-k0sctl` built + the Cilium planning session done. |
+| **`chainsaw-frontend` HTTP-200 assertion** | the cv_frontend Remix v3 boot crash is fixed (cv_frontend repo). |
+
+**Depends on:** Plan A merged (done, `a3b5a24`). **Priority:** P2. Related:
+**T-DR** overlaps K1's snapshot needs / O5's `snapshot_schedule`; **T8**
+(Tekton Chains) uses the `policies` seam O4 must preserve.
 
 ### zot registry auth — planning session — P2
 
