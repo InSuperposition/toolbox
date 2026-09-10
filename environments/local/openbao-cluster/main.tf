@@ -113,11 +113,16 @@ resource "helm_release" "openbao" {
   # closed before any apply.
   version = var.chart_version
 
-  # A failed first install rolls back instead of leaving a half-applied
-  # StatefulSet the bridge then has to reason about.
-  atomic          = true
+  # The bridge polls readiness itself (pod phase, then `bao operator init` /
+  # auto-unseal). `wait = true` cannot be used here: the chart's readiness
+  # probe is `bao status`, which only passes once the raft store is
+  # initialised AND unsealed — never true for a fresh PVC at Phase A (a
+  # bundle-only recovery, ADR 0016), so `wait`+`atomic` would deadlock for
+  # `timeout` then roll the release back. `cleanup_on_fail` still purges a
+  # genuinely failed install (bad manifest, image pull).
+  atomic          = false
   cleanup_on_fail = true
-  wait            = true
+  wait            = false
   timeout         = 600
 
   values = [local.helm_values]

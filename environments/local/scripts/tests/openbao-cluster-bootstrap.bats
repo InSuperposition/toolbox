@@ -1,15 +1,17 @@
 #!/usr/bin/env bats
 
 # environments/local/scripts/openbao-cluster-bootstrap.sh — the one-time
-# imperative bridge that moves the local OpenBao into the cluster (T7c
-# Increment 4b).
+# imperative bridge that moves / recovers the local OpenBao in the cluster
+# (T7c Increment 4).
 #
-# The full migration needs an OrbStack cluster + a live host daemon + Flux,
-# so it is proven by the [k8s] chainsaw
-# (environments/local/tests/openbao-cluster/) and a manual acceptance run,
-# not here. These cases assert the guard FAILS CLOSED at each precondition —
-# a missing seal key, an unreachable host daemon, an unreachable cluster —
-# without ever touching a cluster.
+# The full migration needs an OrbStack cluster + Flux (+ optionally a live
+# host daemon), so it is proven by the [k8s] chainsaw
+# (environments/local/tests/openbao-cluster/) and the manual acceptance run
+# in the script header, not here. These cases assert the SOURCE SELECTION
+# and the fail-closed guards without ever touching a cluster: the host at
+# TOOLBOX_OPENBAO_HOST_ADDR is a dead port and the kube-context does not
+# exist, so every run resolves to "no host" and then either the disaster
+# exit (no bundle) or the cluster-unreachable exit (a bundle is present).
 
 setup() {
 	load helper
@@ -24,8 +26,8 @@ setup() {
 
 	export TOOLBOX_OPENBAO_STATE_DIR="$SCRATCH/state"
 	mkdir -p "$TOOLBOX_OPENBAO_STATE_DIR"
-	# a dead port so the host-daemon precondition is deterministic even on a
-	# dev box that happens to be running the real daemon on 8200.
+	# a dead port so "host reachable" is deterministically false even on a
+	# dev box running the real daemon on 8200.
 	export TOOLBOX_OPENBAO_HOST_ADDR="http://127.0.0.1:1"
 	# a context that is not in the kubeconfig
 	export TOOLBOX_OPENBAO_CLUSTER_KUBE_CONTEXT="toolbox-bats-nonexistent"
@@ -36,43 +38,43 @@ teardown() {
 	rm -rf "$SCRATCH"
 }
 
-seed_host_secrets() {
-	printf 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' >"$TOOLBOX_OPENBAO_STATE_DIR/seal.key"
-	printf 'hvs.fake-root-token' >"$TOOLBOX_OPENBAO_STATE_DIR/root.token"
-	chmod 600 "$TOOLBOX_OPENBAO_STATE_DIR"/{seal.key,root.token}
+seed_bundle() {
+	local snap="$TOOLBOX_OPENBAO_STATE_DIR/snapshots"
+	mkdir -p "$snap"
+	printf 'RAFT-SNAPSHOT-BYTES' >"$snap/latest.snap"
+	printf 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' >"$snap/seal.key"
+	printf 'hvs.fake-root-token' >"$snap/root.token"
+	chmod 600 "$snap"/{seal.key,root.token}
 }
 
-@test "fails when \$STATE_DIR/seal.key is missing" {
+@test "no host and no bundle -> the disaster exit naming the recovery runbook" {
 	run "$SW"
 	[ "$status" -ne 0 ]
-	[[ "$output" == *"seal.key missing"* ]]
-	[[ "$output" == *"local:openbao:bootstrap"* ]]
+	[[ "$output" == *"no migration source"* ]]
+	[[ "$output" == *"ADR 0016"* ]]
+	[[ "$output" == *"resume signing"* ]]
+	[[ "$output" == *"attestation:export-pubkey"* ]]
 }
 
-@test "fails when \$STATE_DIR/root.token is missing" {
-	printf 'x' >"$TOOLBOX_OPENBAO_STATE_DIR/seal.key"
+@test "a valid bundle carries source selection past the missing host" {
+	seed_bundle
 	run "$SW"
 	[ "$status" -ne 0 ]
-	[[ "$output" == *"root.token missing"* ]]
+	# it did NOT die at source selection...
+	[[ "$output" != *"no migration source"* ]]
+	# ...it got to the cluster check and died there instead
+	[[ "$output" == *"kube-context 'toolbox-bats-nonexistent' unreachable"* ]]
 }
 
-@test "fails when the host daemon is unreachable" {
-	seed_host_secrets
+@test "source selection runs before any cluster call" {
 	run "$SW"
 	[ "$status" -ne 0 ]
-	[[ "$output" == *"host OpenBao at http://127.0.0.1:1 is not initialised"* ]]
-}
-
-@test "the host-daemon check runs before any cluster call" {
-	seed_host_secrets
-	run "$SW"
-	[ "$status" -ne 0 ]
-	# it must not have reached the kube-context check
+	[[ "$output" == *"no migration source"* ]]
 	[[ "$output" != *"kube-context 'toolbox-bats-nonexistent' unreachable"* ]]
 }
 
 @test "a missing required binary fails closed" {
-	seed_host_secrets
+	seed_bundle
 	# a PATH with only bash/coreutils-ish essentials, no bao
 	local stub="$SCRATCH/stubbin"
 	mkdir -p "$stub"
@@ -84,13 +86,28 @@ seed_host_secrets() {
 	[[ "$output" == *"not on PATH"* ]]
 }
 
+@test "the seal Secret is created from the bundle key file, never a literal or stdin" {
+	# Codex #1 — the pod auto-unseals from this Secret; its bytes must be the
+	# restore bundle's 0600 seal key, delivered --from-file (never state,
+	# never a helm value, never --from-literal / a piped heredoc).
+	run grep -Eq 'create secret generic openbao-seal' "$SW"
+	[ "$status" -eq 0 ]
+	run grep -Eq -- '--from-file=seal\.key="\$SNAP_DIR/seal\.key"' "$SW"
+	[ "$status" -eq 0 ]
+	run bash -c "grep -vE '^[[:space:]]*#' '$SW' | grep -Eq 'openbao-seal.*--from-literal'"
+	[ "$status" -ne 0 ]
+}
+
 @test "the approval-key assertion reads the endpoint directly, never via a nested \`mise run\`" {
 	# T7c Increment 4 eng review, Codex #4: `mise run` re-applies mise.toml's
 	# [env], pinning VAULT_ADDR at the host loopback — so an assertion routed
 	# through `mise run attestation:export-pubkey` verifies the host, not the
 	# migrated cluster. assert_key_preserved must call cosign directly.
-	# no non-comment line invokes the attestation mise task
-	run bash -c "grep -vE '^[[:space:]]*#' '$SW' | grep -q 'mise run attestation'"
+	# the bug was `(cd "$root" && mise run attestation:export-pubkey)` — guard
+	# the two invocation shapes, not the backtick-quoted hint in a die message
+	run grep -Eq '&&[[:space:]]*mise run attestation' "$SW"
+	[ "$status" -ne 0 ]
+	run grep -Eq '^[[:space:]]*mise run attestation' "$SW"
 	[ "$status" -ne 0 ]
 	run grep -Eq 'cosign public-key --key openbao://approval-key' "$SW"
 	[ "$status" -eq 0 ]
