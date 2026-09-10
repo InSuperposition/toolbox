@@ -570,10 +570,18 @@ chainsaw harness → Flux reconciles `zot` + `ci/{runtime,tasks,pipelines}` from
 `main`. The build *run* stays operator-triggered (`frontend-build.sh`), **not**
 Flux-reconciled — Pipelines-as-Code is the eventual git-event trigger, still
 deferred.
-_Remaining T7c:_ **Increment 4+ — in-cluster OpenBao** (its own plan, 6
-blockers B1–B6 + a separate `transit/keys/sops` AES key). Until then the host
-OpenBao daemon keeps serving loopback and T8 (Tekton Chains provenance) stays
-blocked.
+_Remaining T7c:_ **Increment 4 — in-cluster OpenBao.** 4a–4c SHIPPED
+(#23–#25, [ADR 0016](docs/adr/0016-local-openbao-in-cluster-statefulset.md)):
+the Phase-A `helm_release`, the `openbao-cluster-bootstrap.sh` bridge
+(key-preserving `raft snapshot restore -force`, `approval-key` never
+rotated), Phase-C `vault_*` (`sops` AES key + `flux_sops` k8s-auth role).
+`/plan-eng-review` (2026-09-10) split the rest — **Plan A:** `H1 → O1 → O0 →
+O2+O3` (retire the host daemon + pitchfork, rename `openbao-cluster` →
+`openbao`), unblocks T8; **Plan B** and **T-DR** are separate sections
+below. Until Plan A lands the host daemon keeps serving loopback and T8
+(Tekton Chains provenance) stays blocked. Plan:
+`~/.claude/plans/t7c-increment4-in-cluster-openbao.md` § "ENG REVIEW — PLAN
+SPLIT".
 _Observability (from the CI-log-visibility review):_ persist **failed-step
 logs beyond `tkn taskrun logs`** via **Tekton Results** (needs log-collection +
 a durable-storage backend, not just the API). **Not** Tekton Chains. Acceptance
@@ -608,6 +616,66 @@ prod). Effort: ~1d.
 **Priority:** P2 · **Depends on:** ~~T5 + T5b~~ done. **T7b0–T7b3** ✓ →
 **T7c pre-plan + Increments 0/1a/1b/2** ✓ → Increment 4+ (in-cluster OpenBao) +
 the distribution phase + T7d.
+
+### T-DR — declarative disaster recovery for the in-cluster OpenBao — P2, planning session
+
+**What:** design the full recovery story for the in-cluster OpenBao once the
+host daemon is gone (Plan A O2/O3): a **cluster-sourced** snapshot bundle
+(host snapshots omit the cluster-created `sops` key material), an OpenTofu
+**state backup / import** path for the external `openbao.tfstate` (a
+re-`tofu apply` after machine loss fails creating the already-enabled k8s
+auth backend), an **off-machine copy verification** step, and whether
+scheduled backup goes **declarative** — CSI `VolumeSnapshot` of the raft PVC
+(verify OrbStack's default StorageClass exposes the snapshot API), a k8s
+`CronJob` running `bao operator raft snapshot save`, or the current CLI
+script retargeted.
+
+**Why:** Plan A ships only ADR 0016's plain-language statement ("genesis is
+forever restore-from-bundle; lost bundle + lost host = the resume-signing
+disaster") plus one bundle-only `[k8s]` restore test. The actual recovery
+system is unbuilt, and the backup-mechanism choice resurfaces at Plan B's
+`snapshot_schedule` preset.
+
+**Depends on:** Plan A merged. **Overlaps:** Plan B O5 (`snapshot_schedule`).
+**Priority:** P2. Surfaced by `/plan-eng-review` 2026-09-10 (+ Codex #6/#7).
+
+### Plan B — Timoni + Crossplane + reusable `secret-openbao` module — P2/P3, own eng review
+
+**What:** the deferred half of the T7c Increment 4 replan, split out by
+`/plan-eng-review` 2026-09-10 (Step 0 complexity trigger — 11 chunks, two
+new stack tools in one increment). Design seed: the plan file's "REPLAN v2",
+"Crossplane per-consumer envelope", and "CODEX REVIEW (2026-09-10)"
+sections (`~/.claude/plans/t7c-increment4-in-cluster-openbao.md`).
+
+- **Timoni** (M1/M3): author `deploy/frontend/timoni/` (CUE module for the
+  `cv_frontend` k8s manifests — a build input, not a `modules/` entry) +
+  deliver it via `timoni build` → `flux push artifact` → an `OCIRepository`
+  with `spec.verify`. Amends ADR 0009 (routes the demo app into the cluster;
+  the pitchfork-container demo is retained). The publish path preserves the
+  image approval-attestation verification (ADRs 0002/0005/0006).
+- **Crossplane** (X1/XE1/XE2): **ADR 0018** — the Crossplane/OpenTofu
+  boundary + a **precedence clause** (for in-cluster per-consumer k8s
+  objects that are not a bootstrap anchor and not a controller's own
+  resource, Crossplane Compositions win the authoring choice; tofu
+  `kubernetes_*` / `kubernetes_manifest` banned; substrate stays tofu
+  unconditionally). **XE1** commits the `XConsumerEnvelope` XRD skeleton +
+  a `kubeconform-crossplane` gate, **Crossplane not installed**. **XE2**
+  (install core + `provider-kubernetes` + the `function-patch-and-transform`
+  Composition) is **gated on a 2nd `deploy/<consumer>/`**.
+- **Reusable module** (O4/O5): extract `modules/secret-openbao/`
+  (provider-free, consumed by a thin per-env root) via OpenTofu **`moved`
+  blocks** — NOT `tofu destroy` (`deletion_allowed = false` on the `sops` /
+  `extra` transit keys makes destroy fail partway). **ADR 0017** amends
+  0012's "`modules/` stays empty" end-state. O4 is extraction ONLY; the
+  `deployment_mode=ha` / `auto_unseal=transit|awskms` / `snapshot_schedule`
+  / `tls_issuer` presets are **O5**, each with its own lifecycle tests.
+- **Flux SOPS** (G1): wire `--sops-vault-configmap` onto the `FluxInstance`
+  + the ConfigMap + `spec.decryption` on Kustomizations. Gated on a **named
+  secret** needing SOPS (none today); O4's module keeps the `sops` key +
+  `flux_sops` role ready.
+
+**Depends on:** Plan A merged. Needs its own `/plan-eng-review` before it
+starts. **Priority:** P2/P3.
 
 ### zot registry auth — planning session — P2
 

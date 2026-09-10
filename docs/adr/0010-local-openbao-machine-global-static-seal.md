@@ -34,5 +34,8 @@ Wrong shape for a single-operator local box; it stays a candidate for the
 deferred production `secret-openbao` module, which keeps its out-of-band
 requirement.
 
-Status: accepted. Closes the "Local OpenBao unseal-key storage" item in
-CLAUDE.md § Deferred.
+Status: superseded by [ADR 0016](0016-local-openbao-in-cluster-statefulset.md)
+— the machine-global pitchfork daemon is retired for an in-cluster raft
+StatefulSet; static-seal auto-unseal from a `0600` `file://` key survives,
+now delivered as a Kubernetes Secret. Originally closed the "Local OpenBao
+unseal-key storage" item in CLAUDE.md § Deferred.
