@@ -27,15 +27,22 @@ package pipelinerun
 _rev:     =~"^[0-9a-f]{7,40}$" @tag(rev)
 _defsRev: =~"^[0-9a-f]{7,40}$" @tag(defsRev)
 
-// cv_frontend's registry facts — the ONE place both hostnames live.
+// cv_frontend's registry facts — the ONE place these hostnames live.
 // The pipeline pushes/scans over the in-cluster service DNS; every
-// host-side tool (`oras resolve`, `attestation:sign`, `frontend:deploy`)
-// addresses the same repo over the loopback NodePort. The manifest digest
-// is identical either way. `cue export -e image.host` hands the operator
-// the loopback form.
+// host-side tool (`oras resolve`, `attestation:sign`, `frontend:deploy`,
+// `frontend:publish`) addresses the same repo over the loopback NodePort.
+// The digest is identical either way. `cue export -e image.host` hands the
+// operator the loopback form; `-e image.manifests.inCluster` the form the
+// Flux `OCIRepository frontend` pulls (Plan B M3, ADR 0019).
 #image: {
 	inCluster: "zot.zot.svc.cluster.local:5000/cv-frontend"
 	host:      "localhost:30500/cv-frontend"
+	// The rendered-manifest OCI artifact (D_man) — `frontend:publish`
+	// `flux push`es it to `.host`, the Flux `OCIRepository` pulls `.inCluster`.
+	manifests: {
+		inCluster: "zot.zot.svc.cluster.local:5000/cv-frontend-manifests"
+		host:      "localhost:30500/cv-frontend-manifests"
+	}
 }
 image: #image
 

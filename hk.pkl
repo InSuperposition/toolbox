@@ -132,6 +132,13 @@ local fast = new Mapping<String, Step> {
     glob = List("environments/local/kyverno/**/*.yaml", "environments/local/kyverno/tests/crd-schemas/**/*.json", "environments/local/scripts/kyverno-kubeconform.sh", "attestation/cosign-approval.pub")
     check = "./environments/local/scripts/kyverno-kubeconform.sh"
   }
+  // The `frontend` Namespace manifest (Plan B M3) reconciled by the
+  // `frontend-ns` Flux Kustomization. A core kind — no CRD schema, so
+  // inline (no `-schema-location` template to collide with hk's).
+  ["kubeconform-frontend"] {
+    glob = List("deploy/frontend/k8s/**/*.yaml")
+    check = "kustomize build deploy/frontend/k8s | kubeconform -strict -summary -schema-location default -"
+  }
 }
 
 /// Offline correctness. pre-push and check.
@@ -234,6 +241,23 @@ local heavy = new Mapping<String, Step> {
       "environments/local/scripts/kyverno-chainsaw.sh"
     )
     check = "./environments/local/scripts/kyverno-chainsaw.sh"
+  }
+  // The cv_frontend in-cluster delivery running state (Plan B M3, ADR 0019).
+  // Same [k8s] gate — skips in CI and until the `frontend` Flux Kustomization
+  // has reconciled (probe: `kubectl get kustomization frontend`, only present
+  // post-merge). Asserts DELIVERY (the rendered Deployment runs the approved
+  // digest, its container started, the approval policy admitted it), NOT app
+  // health — cv_frontend has a known boot crash.
+  ["chainsaw-frontend"] {
+    glob = List(
+      "environments/local/tests/frontend/**/*.yaml",
+      "environments/local/flux/frontend.yaml",
+      "deploy/frontend/k8s/**/*.yaml",
+      "deploy/frontend/timoni/**/*.cue",
+      "deploy/frontend/timoni.lock",
+      "environments/local/scripts/frontend-chainsaw.sh"
+    )
+    check = "./environments/local/scripts/frontend-chainsaw.sh"
   }
   // Silent-coverage-drop guard (F5). Diffs the suites on disk, the
   // committed tests/manifest.txt, and what hk schedules — a mismatch fails

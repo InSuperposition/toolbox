@@ -1,0 +1,31 @@
+# cv_frontend — the three digests the in-cluster delivery path pins
+# (Plan B M3, docs/adr/0019; docs/designs/digest-as-source-of-truth.md
+# § "three distinct digests").
+#
+# Hand-maintained (NOT generated). The digest IS the trust boundary
+# (ADR 0001). Updated in a reviewed PR — `mise run frontend:publish` prints
+# the new `manifest_digest`; a human copies it here AND into
+# `environments/local/flux/frontend.yaml`'s `OCIRepository frontend`
+# `ref.digest`. `frontend:publish` never auto-commits.
+#
+# To re-publish (a new approved cv_frontend image, or a module change):
+#   1. get the approved image + its attestation digest (attestation:sign)
+#   2. mise run frontend:publish -- <image@digest> <sha256:att> <revision>
+#   3. copy the printed manifest_digest -> `manifest_digest` below +
+#      frontend.yaml; commit both in the PR
+#
+# `image_ref` / `attestation_digest` mirror `deploy/frontend/current-image.txt`
+# (line 1 / line 2) — the approved image the rendered Deployment runs and
+# K1's ImageValidatingPolicy verifies at admission.
+
+# The rendered-manifest OCI artifact — `frontend:publish` flux-pushes it to
+# the loopback NodePort; the Flux `OCIRepository frontend` pulls the
+# identical digest over `zot.zot.svc.cluster.local:5000`.
+manifests_repo=cv-frontend-manifests
+manifest_digest=sha256:48dc67f0f0cf3289a68c5297499048b443c8edd3232608bc911e3497ae828715
+manifest_revision=fd02f152
+
+# The approved cv_frontend container image (D_img) + its approval
+# attestation (D_att).
+image_ref=ghcr.io/insuperposition/cv-frontend@sha256:fd02f152c99b49ed0841857fcb7e75f64b664f72e69b073303dcfc4d789eb26d
+attestation_digest=sha256:1e118e053f0e07f70fae7048d2fc5d7904e8193b5fd3c321992a9f148a3f902a

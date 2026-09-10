@@ -100,6 +100,16 @@ run = "./deploy/frontend/scripts/frontend-deploy.sh"
 description = "timoni mod vet the cv_frontend module (schema-checks the rendered Deployment/Service/ServiceAccount)."
 run = "timoni mod vet ./deploy/frontend/timoni --name cv-frontend"
 
+# Plan B M3 — the operator entrypoint for in-cluster delivery. Verifies a
+# pinned approval attestation, then renders the Timoni module against that
+# digest and `flux push`es the manifests as an OCI artifact for the
+# `frontend` Flux Kustomization to reconcile (docs/adr/0019). Verify FIRST —
+# nothing renders or pushes unless the attestation holds. Prints D_man (the
+# manifest-artifact digest) + the git-pin lines for the reviewed PR.
+[tasks."frontend:publish"]
+description = "Verify a pinned approval attestation, render the cv_frontend Timoni module against that digest, and flux-push the manifests as an OCI artifact — args: <registry/repo@sha256:...> <sha256:attestation-digest> <revision>."
+run = "./deploy/frontend/scripts/frontend-publish.sh"
+
 # T7b1-followup: mirror the digest-pinned base + `# syntax=` images from
 # deploy/frontend/Dockerfile into the local zot, so the in-cluster build never
 # reaches docker.io / gcr.io (the OrbStack IPv6-egress defect — TODOS.md T7,

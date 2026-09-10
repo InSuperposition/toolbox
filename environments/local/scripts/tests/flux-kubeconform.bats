@@ -26,9 +26,9 @@ teardown() {
 	# + ci-runtime (1) + ci-defs ci-tasks/ci-pipelines (2) + cert-manager
 	# OCIRepository+HelmRelease (2) + cert-manager-pki Flux Kustomization (1)
 	# + kyverno OCIRepository+HelmRelease (2) + kyverno-policy Flux
-	# Kustomization (1) = 13 (Plan B K1 — the ImageValidatingPolicy + its
-	# ConfigMap moved to environments/local/kyverno/, kubeconform-kyverno).
-	[[ "$output" == *"Valid: 13"* ]]
+	# Kustomization (1) + frontend OCIRepository + frontend-ns/frontend Flux
+	# Kustomizations (3) = 16 (Plan B M3 — the cv_frontend delivery objects).
+	[[ "$output" == *"Valid: 16"* ]]
 }
 
 @test "nothing skipped (the vendored Flux CRD schemas are all used)" {

@@ -15,6 +15,7 @@ bats    attestation/scripts/tests/attestation-sign.bats     10
 bats    attestation/scripts/tests/attestation-verify.bats   11
 bats    attestation/scripts/tests/openbao-preflight.bats    8
 bats    deploy/frontend/scripts/tests/frontend-deploy.bats  4    # 2 [docker] cases skip without docker
+bats    deploy/frontend/scripts/tests/frontend-publish.bats  6
 bats    deploy/frontend/scripts/tests/frontend-serve.bats   6    # 1 [docker] case skips without docker
 bats    deploy/frontend/scripts/tests/dockerfile-pin.bats   2
 bats    deploy/frontend/scripts/tests/frontend-build.bats   24
@@ -27,6 +28,7 @@ bats    environments/local/scripts/tests/flux-kubeconform.bats   4
 bats    environments/local/scripts/tests/cert-manager-kubeconform.bats  4
 bats    environments/local/scripts/tests/kyverno-kubeconform.bats  5
 bats    environments/local/scripts/tests/kyverno-chainsaw.bats   5
+bats    environments/local/scripts/tests/frontend-chainsaw.bats  5
 bats    environments/local/scripts/tests/flux-chainsaw.bats      4
 bats    environments/local/scripts/tests/openbao-verify.bats     8
 bats    environments/local/scripts/tests/openbao-bootstrap.bats  7
