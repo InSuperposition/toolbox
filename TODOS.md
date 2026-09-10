@@ -654,95 +654,21 @@ implementation tasks: `~/.claude/plans/plan-b-timoni-kyverno-crossplane.md`
 CODEX REVIEW 2026-09-10).
 
 **Ship order: `M1 → X1 → K1 → M3`.** Each = 1 PR = 1 squash commit.
-**M1 shipped** (PR #31, `b4c0b0c`). **X1 in progress** (branch
-`plan-b-x1-adr-crossplane-boundary`).
+**✅ ALL MERGED — Plan B ship arc COMPLETE 2026-09-10:** M1 #31 (`b4c0b0c`),
+X1 #32 (`d286867`), K1 #33 (`1dc6e91`), M3 #34 (`2c6a1e1`). Live on `main`:
+Flux reconciles Kyverno + the `ImageValidatingPolicy` + the `frontend`
+OCIRepository/Kustomizations; `cv-frontend` runs 1/1 in ns `frontend`,
+admitted by the approval policy. `chainsaw-{kyverno,frontend}` pass
+post-merge. K1 pins Kyverno v1.19.1 (ADR 0020); M3 publish is a host step
+(`mise run frontend:publish`, ADR 0021 — no timoni image). Only the
+**Deferred** rows below remain.
 
-- **M1** — author `deploy/frontend/timoni/` (CUE module for the `cv_frontend`
-  k8s manifests — a build input, not a `modules/` entry). `#Config.image`
-  carries the full `@sha256:[0-9a-f]{64}$` digest constraint + a negative
-  fixture. hk step = inline `timoni mod vet cv-frontend ./deploy/frontend/timoni`
-  — **no kubeconform** (`timoni mod vet` already validates against k8s CUE
-  schemas; a 2nd validator for one concern is forbidden). **ADR 0019** —
-  amends ADR 0009 (routes the demo into the cluster *as well*; pitchfork
-  container retained) and **must state the concrete capability Timoni adds
-  over the plain-CUE path** (typed multi-object `#Config`, semver'd module
-  artifact, reproducible build) or that is the signal to drop it.
-- **X1** — **ADR 0018**: the in-cluster pipeline is **render (Timoni/CUE) →
-  reconcile (Flux) → enforce at admission (Kyverno) → provision
-  consumer-declared backing infra (Crossplane, if ever activated)** — these
-  are *stages*, not rivals; one owner per object per stage. Flux + Timoni
-  **compose**, they are not alternatives. tofu `kubernetes_*` /
-  `kubernetes_manifest` **banned** — enforced by a new
-  `rules/boundary-no-kubernetes-tf.yml` ast-grep rule (needs an HCL-pattern
-  spike + `**/*.tf` added to the `["ast-grep"]` hk glob + an `ast-grep test`
-  step — none are free). The per-consumer namespace bundle stays Flux
-  plain-YAML indefinitely. `XConsumerEnvelope` / XE1 **dropped**.
-- **K1** — install Kyverno via Flux + one **`ImageValidatingPolicy`** scoped
-  to any namespace labelled `toolbox.dev/cv-frontend: approval-enforced`
-  (blast radius scoped like a ns pin, but an ephemeral-namespace chainsaw
-  test can carry the label) + the `cv-frontend*` image glob, verifying the
-  cosign approval **attestation** against `attestation/cosign-approval.pub`.
-  Preserves the **ADR-0006 contract**: in-toto predicate type +
-  **verdict-approved** predicate (a signed *rejection* is still signed) + the
-  subject digest (all four covered — T6
-  spike). Split-Kustomization pattern (`kyverno-policy` CR) per the
-  `toolbox-flux-kustomization-unknown-crd-deadlock` learning. **ADR 0020**
-  narrows the "production cluster only" deferral below.
-  **T6 spike — DONE 2026-09-10 (PASSED)**, findings folded into ADR 0020 +
-  `kyverno.lock`:
-  - kyverno#16435 fixed since v1.19.0; **pin v1.19.1 / chart 3.9.1** (chart
-    NOT cosign-signed → digest pin, no `spec.verify`, like OpenBao/cert-manager).
-    Zero SIGSEGV live.
-  - Semantic equivalence to `attestation-verify.sh` proven (approved ADMIT;
-    signed-rejection / wrong-subject / malformed / no-attestation all DENY,
-    fail-closed).
-  - **Prereq (done, this branch):** `attestation-sign.sh` now writes
-    `dev.sigstore.bundle.{content,predicateType}` manifest annotations —
-    Kyverno's discovery filters on them; a bare `oras attach` referrer is
-    invisible. `attestation-verify.sh` unaffected.
-  - **Constraint:** image + attestation source = **GHCR (HTTPS)**. Kyverno's
-    referrer discovery ignores `--allowInsecureRegistry` for plain-HTTP zot —
-    in-cluster-zot verify stays T12.
-  - **Pubkey:** `configMapGenerator` reads `attestation/cosign-approval.pub`
-    in place (`../../../`, `disableNameSuffixHash` for a stable name) — one
-    authored copy, no vendored second, the same public file
-    `openbao-bootstrap.sh` reads.
-  - `chainsaw-kyverno` asserts **admission** (deny/admit at CREATE), not the
-    PolicyReport — background re-scan needs registry reach and flaked on an
-    OrbStack DNS blip during the spike.
-  - **Phases 1–3 committed on branch `k1-kyverno-imagevalidatingpolicy`,
-    draft PR #33** (not merged). P1 (`6a858f0`): sign.sh annotations + bats,
-    mise pin, `kyverno.lock`, `environments/local/kyverno/*`, ADR 0020.
-    P2 (`e226b75`): `kyverno-{helmrelease,policy}.yaml` (7 images
-    `tag@digest`), inventory, `kubeconform-kyverno` gate. P3: the ns-label
-    scope revision, real approved fixture
-    (`cv-frontend@sha256:fd02f152…` + att `sha256:1e118e05…`),
-    `chainsaw-kyverno` (`[k8s]`, probe `imagevalidatingpolicy frontend-approval`,
-    asserts admit-approved + deny-unsigned — the deny *variants* are the T6
-    spike + `attestation-verify.bats`, not re-proven here). Live-proven on
-    OrbStack (helm-installed committed manifests, torn down).
-  - **M3 must** label the `frontend` namespace
-    `toolbox.dev/cv-frontend: approval-enforced` (frontend-ns Kustomization)
-    or the policy does not match its pods.
-  - **Follow-ups:** merge #33 → Flux reconciles the policy → `chainsaw-kyverno`
-    stops skipping. A key rotation needs the fixture re-signed
-    (`mise run attestation:sign`).
-- **M3** — deliver + deploy. Publish is a **Tekton Task**
-  (`ci/tasks/timoni-publish.yaml`, `command`+`args`, no `script:`),
-  workspace-shared, ordered **verify → render (`timoni build cv-frontend`) →
-  publish (`flux push --output json` for the digest)**. Three distinct
-  digests — image `D_img`, approval-attestation `D_att`, manifest-artifact
-  `D_man` — named + bound in the plan; the git pin promotion is a reviewed
-  human step, never auto-committed. `environments/local/flux/frontend.yaml` =
-  `OCIRepository` (digest-only, no `spec.verify`) + `frontend-ns`
-  Kustomization + `frontend` Kustomization
-  **`dependsOn: [frontend-ns, kyverno-policy]`** (runtime order ≠ ship
-  order — the workload must not reconcile before K1's webhook), **`wait:
-  false`** (the app has a known boot crash — `wait: true` would block
-  Kustomization-Ready forever). `chainsaw-frontend` asserts **delivery**
-  (`.image == D_img`, container **started** not just Scheduled, policy
-  **evaluated** via PolicyReport), **not** HTTP-200. One-line notes on ADRs
-  0002/0005/0006 (approval contract preserved) + 0009/0012.
+- **M1 #31** (`b4c0b0c`) — `deploy/frontend/timoni/` CUE module (Deployment/Service/SA, typed `#Config`, full-`@sha256` image constraint + negative fixture), `timoni mod vet` hk step (no kubeconform — one validator per concern). **ADR 0019** (amends 0009; states the Timoni-over-plain-CUE capability).
+- **X1 #32** (`d286867`) — **ADR 0018**: the in-cluster pipeline is render (Timoni/CUE) → reconcile (Flux) → enforce (Kyverno) → provision (Crossplane, if activated) — *stages*, not rivals. tofu `kubernetes_*` **banned** via `tests/check-tf-boundary.sh` + `no-kubernetes-tf` hk step (ast-grep 0.45.3 has no HCL grammar). `XConsumerEnvelope` dropped.
+- **K1 #33** (`1dc6e91`) — Kyverno v1.19.1 via Flux (`kyverno.lock` — chart NOT cosign-signed → digest pin, images `tag@digest`; `kyverno-policy` split Kustomization) + one **`ImageValidatingPolicy`** verifying the `cv_frontend` approval attestation at admission (`failurePolicy: Fail`, deny-only; namespace label `toolbox.dev/cv-frontend: approval-enforced` + `cv-frontend*` glob; preserves the ADR-0006 contract — predicate type + verdict-approved + subject digest). **ADR 0020** narrows the "production only" deferral. `attestation-sign.sh` now writes `dev.sigstore.bundle.{content,predicateType}` annotations so Kyverno's `cosign.GetBundles` discovers the referrer. Image + attestation source = **GHCR** (Kyverno referrer discovery fails on plain-HTTP zot — T12). `kubeconform-kyverno` (vendored IVPol schema) + `chainsaw-kyverno` (`[k8s]`, admit-approved + deny-unsigned; deny *variants* = the T6 spike + `attestation-verify.bats`). T6 spike: kyverno#16435 fixed since v1.19.0; zero SIGSEGV; semantic equivalence to `attestation-verify.sh` proven.
+- **M3 #34** (`2c6a1e1`) — **ADR 0021**: publish is a host step (`mise run frontend:publish` — verify seam → `timoni build` → `flux push --output json`), NOT a Tekton Task (`timoni` ships no container image). Three digests: `D_img` / `D_att` / `D_man` in `deploy/frontend/timoni.lock`, re-pinned per publish in a PR. `environments/local/flux/frontend.yaml` = `OCIRepository frontend` (pulls `D_man` from the in-cluster zot, `insecure: true`, `ref.digest`, no `spec.verify`) + `frontend-ns` Kustomization (`deploy/frontend/k8s/`, PSA restricted + the approval label) + `frontend` Kustomization (`dependsOn: [frontend-ns, kyverno-policy]`, `wait: false` — known boot crash). `chainsaw-frontend`: `frontend-delivery` (D_img digest, container started, policy admitted — delivery not health) + `frontend-reconcile` (dependsOn chain). Live on `main`: `cv-frontend` runs 1/1 in ns `frontend`.
+
+**Op note:** the interim zot is ephemeral + GC-off — recreate loses `D_man` → re-run `frontend:publish` + re-pin (like `frontend:seed`).
 
 **Deferred (own triggers):**
 

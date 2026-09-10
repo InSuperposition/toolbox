@@ -70,9 +70,9 @@ each row links to.
 | **OpenTofu** | Owns the full lifecycle (create/upgrade/destroy) of foundational infra: VM, k0s cluster, OpenBao secret engine. | Plan/apply, cloud-agnostic. `k0sctl` is not a competing layer — it's the CLI the `cluster-k0sctl` module wraps, same relationship as `vm-orbstack` wrapping OrbStack. |
 | **Flux** | GitOps sync — reconciles manifests (plain YAML, or a Timoni-built OCI artifact) from git/OCI continuously. | Nothing is applied by hand once Flux owns a path. |
 | **Flux Operator** | Manages Flux CD's *ongoing* configuration via a declarative `FluxInstance` CRD, once installed. | **Not** a full replacement for `flux bootstrap` — see GitOps Flow below for what still happens once, imperatively. [fluxoperator.dev](https://fluxoperator.dev/get-started/) |
-| **Timoni** | Renders + type-checks application manifests from CUE, then publishes them as an OCI artifact (Helm-chart alternative). | A build step (likely CI) produces the artifact; Flux reconciles *that artifact*, not a live Timoni controller object. [timoni.sh/gitops-flux](https://timoni.sh/gitops-flux) |
+| **Timoni** | Renders + type-checks application manifests from CUE, then publishes them as an OCI artifact (Helm-chart alternative). | First real module: `deploy/frontend/timoni/` (`cv_frontend`, ADR 0019). A **host operator step** produces the artifact — `mise run frontend:publish` verifies the approval attestation, then `timoni build` → `flux push` (ADR 0021 — `timoni` ships no container image); Flux reconciles *that artifact*, not a live Timoni controller object. [timoni.sh/gitops-flux](https://timoni.sh/gitops-flux) |
 | **Crossplane** | *Negative space* — pinned, not active. The **provision** stage of the in-cluster pipeline (render → reconcile → enforce → provision; ADR 0018). | Creates the backing infra a consumer *declares* it needs (bucket/DB/queue/DNS as a CR), if ever activated — trigger `TODOS.md` T-X1, **not** a directory count. Layered above the substrate, delivered by Flux, consumes OpenBao creds; never co-owns a resource, never wraps a substrate module in `provider-terraform`. tofu `kubernetes_*` / `kubernetes_manifest` resources are **banned** (`no-kubernetes-tf` hk step). |
-| **Kyverno** | Admission policy. | Enforcement mechanics (scope, exceptions, webhook-failure mode) not yet defined — design at Kyverno module build time, not asserted here as a slogan. |
+| **Kyverno** | Admission policy — the **enforce** stage of the in-cluster pipeline (ADR 0018). | Live on the local dev *reference* cluster (v1.19.1, Flux-reconciled): **one** `ImageValidatingPolicy` verifies the `cv_frontend` approval attestation at admission (`failurePolicy: Fail`, deny-only, never mutate; scoped by the `toolbox.dev/cv-frontend: approval-enforced` namespace label + the `cv-frontend*` image glob) — Plan B K1, ADR 0020. Broader `ci`-namespace privilege-scoping policies stay deferred to a production Kyverno module + the Cilium session. |
 | **Cilium** | Network policy, default-deny between workloads, explicit allow only. | Bootstrap allow-list (DNS, API server, git/OCI pulls, OpenBao) needed before default-deny can reconcile anything — defined at Cilium module build time. |
 | **cert-manager** | In-cluster PKI for the **local dev cluster** — issues the TLS server cert the in-cluster OpenBao listener needs (T7c Increment 4, ADR 0016). | A Flux-reconciled **helper** component (chart + images digest-pinned in `environments/local/flux/cert-manager.lock`; no runtime `spec.verify` — cert-manager signs with a static key, the digest is the pin, ADR 0001). Dev uses a selfSigned root → CA → `openbao-tls` leaf chain (the leaf applies once the 4b bridge creates ns `openbao`); **production** points the leaf's `issuerRef` at a real backend (ACME / org intermediate / OpenBao PKI) — the CA and every leaf unchanged. Unlike OpenBao (OpenTofu-owned substrate, ADR 0015), a helper behind the GitOps loop is fine — nothing secret-bearing depends on its reconcile being tofu-driven. |
 | **OpenBao** | Secret store of record — for anything created *after* OpenBao exists and is unsealed. | Local dev: an in-cluster tofu-owned raft StatefulSet (`environments/local/openbao/`, ADR 0016 — supersedes the ADR 0010 machine-global pitchfork daemon). Auto-unseals from a static seal key mounted as a k8s Secret; the on-machine `0600` restore-bundle files (`seal.key`, `root.token`) in `~/.local/state/toolbox/openbao/snapshots/` are the disaster / genesis path (ADR 0011 custody model). `mise [env]` injects `VAULT_ADDR` (ClusterIP HTTPS), `VAULT_CACERT`, `VAULT_TOKEN`. The out-of-band requirement is real for the *deferred production* `secret-openbao` module, not the local one. |
@@ -97,6 +97,9 @@ each row links to.
    declaratively via `FluxInstance` — no repeated `flux bootstrap` runs.
 4. Flux reconciles everything else from git, pulling Timoni-built OCI
    artifacts where a module uses Timoni for app-manifest packaging.
+5. Kyverno admission policy runs on the reconciled workloads (the **enforce**
+   stage, ADR 0018): today one `ImageValidatingPolicy` verifies the
+   `cv_frontend` approval attestation before its pod is admitted (Plan B K1).
 
 ## Zero Trust
 
@@ -109,9 +112,11 @@ each row links to.
   the local one.
 - **Network** — Cilium default-deny between workloads, explicit allow only.
   Bootstrap allow-list needs are defined at Cilium module build time.
-- **Admission** — Kyverno policy intended on every manifest. Enforcement
-  scope/exceptions/webhook-failure mode are not yet defined — design at
-  Kyverno module build time, not asserted here as done.
+- **Admission** — Kyverno is live on the dev reference cluster with one
+  `ImageValidatingPolicy` gating `cv_frontend` on its approval attestation
+  (`failurePolicy: Fail`, deny-only; Plan B K1, ADR 0020). A policy on
+  *every* manifest, and the `ci`-namespace privilege scoping, are a
+  production Kyverno module + Cilium-session concern.
 
 ## Operational Lifecycle Trace (planning gate)
 
@@ -177,9 +182,12 @@ The rule:
 The concerns: `tests/` (repo-level shared test support, leaf) · `attestation/`
 (the sign/verify seam — never names a consumer) · `ci/` (reusable Tekton
 defs → digest-pinned OCI bundles — never names a consumer; ADR 0014,
-Phase 2) · `deploy/frontend/` (one image consumer) · `environments/local/`
-(one deployment target — owns its `openbao/` tofu unit and the scripts that
-bring it up) · `modules/` (reusable, versioned, URL-consumed OpenTofu
+Phase 2) · `deploy/frontend/` (the one consumer — the Dockerfile, the
+Timoni module `timoni/`, the `k8s/` namespace, `pipelinerun.cue`, and the
+`frontend-{build,deploy,serve,publish}.sh` operator scripts) ·
+`environments/local/` (one deployment target — owns its `openbao/` tofu
+unit, the `kyverno/` policy set, `flux/` deployment policy, and the scripts
+that bring them up) · `modules/` (reusable, versioned, URL-consumed OpenTofu
 modules only — empty + README today).
 
 The rule is in force and the tree matches it — the phased restructure
@@ -359,6 +367,12 @@ Pipelines/Chains + `zot` on OrbStack's k8s (`docs/adr/0003`, deferred).
 Triggers/EventListener) remains the already-researched *webhook-triggering*
 mechanism for if/when this pipeline moves from on-demand to webhook-driven.
 
+**Delivery** (after approval) is a separate host step, not part of this
+pipeline: `mise run frontend:publish` verifies the approval attestation,
+renders the Timoni module (ADR 0019), and `flux push`es the manifests for
+Flux to reconcile into ns `frontend`, where Kyverno re-verifies at admission
+(Plan B K1/M3, ADRs 0020/0021).
+
 ## Deferred / Not Yet Decided
 
 Stated explicitly rather than guessed:
@@ -400,9 +414,13 @@ Stated explicitly rather than guessed:
   (`openbao-verify.sh` greps the `.tf`). The host `pitchfork` daemon is
   retired. **Deferred (Plan B):** the reusable `modules/secret-openbao`
   extraction; wiring `--sops-vault-configmap` onto the `FluxInstance`.
-- **Kyverno/Cilium enforcement mechanics** — scope, exceptions,
-  webhook-failure mode, and default-deny bootstrap allow-list are undefined
-  until those modules are built.
+- **Kyverno — broader enforcement** — one `ImageValidatingPolicy` ships
+  (Plan B K1, ADR 0020). A policy on every manifest, `ci`-namespace
+  privilege scoping (PSA scalpel, build-pod `securityContext`), and the
+  webhook-failure posture for those are a production Kyverno module concern.
+- **Cilium enforcement mechanics** — network default-deny between workloads
+  and the bootstrap allow-list are undefined until the Cilium module is
+  built (planning session, `TODOS.md`).
 - **Testing harness prerequisites** — isolated test cluster, schema
   sources, readiness/timeout/cleanup semantics — undefined until the first
   k8s-manifest-bearing module is built.

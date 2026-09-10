@@ -128,6 +128,17 @@ build ─▶ scan+gate ─▶ evidence referrers ─▶ human approval ─▶ co
    used — it fails if *any* attestation of the type on the image fails the
    policy, which the digest pin avoids.
 
+   The **in-cluster** consumer reaches the same seam:
+   `mise run frontend:publish -- <ref> <attestation-digest> <rev>`
+   (`deploy/frontend/scripts/frontend-publish.sh`, ADR 0021) verifies the
+   pinned attestation the identical way, then renders the Timoni module
+   (ADR 0019) and `flux push`es the manifests for Flux to reconcile into ns
+   `frontend` — where Kyverno's `ImageValidatingPolicy` re-verifies the
+   approval attestation at pod admission (Plan B K1,
+   [ADR 0020](../adr/0020-imagevalidatingpolicy-on-the-dev-reference-cluster.md)).
+   Two gates, one contract: the operator step and the admission webhook both
+   demand a digest-pinned "approved" attestation signed by the approval key.
+
 ### The approval schema
 
 `attestation/verdict-approved.cue` is one file with two definitions:
@@ -179,9 +190,13 @@ attestation/                         # the consumer-agnostic sign+verify seam (A
 
 deploy/frontend/                     # the per-consumer instantiation for cv_frontend:
   Dockerfile, Dockerfile.dockerignore   #   the distroless build (ADR 0007)
-  pipelinerun.cue                       #   T7b3 — the per-consumer PipelineRun, plain CUE (NOT a Timoni module); cue export -t rev/defsRev
+  pipelinerun.cue                       #   T7b3 — the per-consumer PipelineRun, plain CUE (NOT a Timoni module); #image.manifests.{host,inCluster} for M3
+  timoni/                               #   M3/ADR 0019 — the cv_frontend Timoni module (Deployment/Service/SA, typed #Config, full-digest image constraint) + tests/
+  timoni.lock                           #   M3 — D_img + D_att + D_man (the rendered-manifest artifact digest); re-pinned in a PR per publish
+  k8s/namespace.yaml                    #   M3 — the `frontend` namespace: PSA restricted + the `toolbox.dev/cv-frontend: approval-enforced` label K1's policy matches
   scripts/frontend-build.sh            #   T7b3 — mise run frontend:build — render pipelinerun.cue + create + watch + print digest + attestation:sign line
-  scripts/frontend-deploy.sh            #   mise run frontend:deploy — verify + record + restart + readiness check
+  scripts/frontend-deploy.sh            #   mise run frontend:deploy — verify + record + restart + readiness check (the pitchfork path, ADR 0009)
+  scripts/frontend-publish.sh           #   M3/ADR 0021 — mise run frontend:publish — verify + timoni build + flux push (the k8s path)
   scripts/frontend-serve.sh            #   pitchfork frontend daemon entrypoint (ADR 0009)
   scripts/lib/frontend.sh               #   frontend_repo_root + TOOLBOX_ATTESTATION_VERIFY seam + frontend_kube/tkn/strict_digest/host_image (T7b3)
   scripts/tests/*.bats + helper.bash
@@ -203,11 +218,14 @@ ci/                                  # reusable Tekton defs — Flux-reconciled 
 environments/local/                  # the ONE deployment target — owns its OpenBao unit + Flux config + orchestration
   main.tf                               #   applies module "secret_openbao_local" { source = "./openbao" }
   openbao/                              #   the local-OpenBao tofu unit (ADR 0012) — *.tf, templates/, tests/*.tftest.hcl
-  flux/                                 #   T7c — the FluxInstance + operator HelmRelease + the Kustomization CRs (zot-sync, ci-runtime, ci-defs); flux-operator.lock; tests/crd-schemas/ (ADR 0015)
+  flux/                                 #   T7c — FluxInstance + operator/cert-manager/kyverno HelmReleases + the Kustomization CRs (zot-sync, ci-*, cert-manager-pki, kyverno-policy, frontend*); *.lock; tests/crd-schemas/ (ADR 0015)
+  kyverno/                              #   K1/ADR 0020 — the ImageValidatingPolicy + its approval-pubkey ConfigMap (configMapGenerator) + tests/crd-schemas/
+  cert-manager/                         #   T7c Inc.4 — the dev-PKI CRs (ADR 0016)
+  openbao/                              #   the local-OpenBao tofu unit (ADR 0016) — a raft StatefulSet, key-preserving snapshot restore
   zot/                                  #   T7b0 — committed manifests; reconciled by environments/local/flux/zot-sync.yaml (T7c, was `mise run local:zot:install`)
   tekton/                               #   T7c Inc.0 — release.lock (SHA-256) for tekton-install.sh; the *controller* install stays a checksum-gated `kubectl apply`, a named Flux prerequisite (ADR 0015)
-  tests/flux/{flux-reconcile,ci-reconcile}/chainsaw-test.yaml   #   T7c — [k8s]-gated running-state asserts (flux-chainsaw.sh)
-  scripts/openbao-{bootstrap,reset,snapshot}.sh + flux-{bootstrap,chainsaw,kubeconform}.sh + lib/ + tests/
+  tests/{flux,kyverno,frontend}/**/chainsaw-test.yaml   #   [k8s]-gated running-state asserts (flux-/kyverno-/frontend-chainsaw.sh)
+  scripts/openbao-{bootstrap,reset,snapshot}.sh + {flux,kyverno,frontend}-chainsaw.sh + {flux,cert-manager,kyverno}-kubeconform.sh + flux-bootstrap.sh + lib/ + tests/
 
 modules/                             # reusable, versioned, URL-consumed OpenTofu modules only — README today
                                      # (the deferred production secret-openbao is the first candidate; Tekton
