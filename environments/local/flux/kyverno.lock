@@ -10,8 +10,9 @@
 # signatures found"). So — exactly as with the OpenBao and cert-manager
 # charts — there is NO `spec.verify` block; the committed `chart_digest`
 # below is the whole pin. The OCIRepository in `kyverno-helmrelease.yaml`
-# sets `ref.digest` (content addressed, immutable); the five component
-# images + the CRD-lifecycle CLI image are digest-pinned via chart values.
+# sets `ref.digest` (content addressed, immutable); the six component
+# images (five controllers + readiness-checker) + the CRD-lifecycle CLI
+# image are digest-pinned via chart values.
 #
 # The Kyverno component *images* ARE keyless-signed (Fulcio); we do not add a
 # runtime image `spec.verify` — a digest pinned in git, reviewed in the PR,

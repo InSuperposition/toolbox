@@ -121,6 +121,17 @@ local fast = new Mapping<String, Step> {
     glob = List("environments/local/cert-manager/**/*.yaml", "environments/local/cert-manager/tests/crd-schemas/**/*.json", "environments/local/scripts/cert-manager-kubeconform.sh")
     check = "./environments/local/scripts/cert-manager-kubeconform.sh"
   }
+  // The Kyverno ImageValidatingPolicy (policies.kyverno.io/v1) + its
+  // generated approval-pubkey ConfigMap, reconciled by the `kyverno-policy`
+  // Flux Kustomization — kept out of environments/local/flux/ for the same
+  // unknown-CRD-dry-run reason as cert-manager-pki. The wrapper runs
+  // `kustomize build` first (the configMapGenerator reads
+  // attestation/cosign-approval.pub in place); the pub key is in the glob so
+  // a rotation re-runs the gate.
+  ["kubeconform-kyverno"] {
+    glob = List("environments/local/kyverno/**/*.yaml", "environments/local/kyverno/tests/crd-schemas/**/*.json", "environments/local/scripts/kyverno-kubeconform.sh", "attestation/cosign-approval.pub")
+    check = "./environments/local/scripts/kyverno-kubeconform.sh"
+  }
 }
 
 /// Offline correctness. pre-push and check.
