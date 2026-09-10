@@ -24,5 +24,6 @@ superseded.
 | [0014](0014-tekton-defs-are-oci-bundles-in-ci.md) | Tekton Task/Pipeline defs are digest-pinned OCI bundles in a `ci/` concern, not versioned dirs in `modules/` (supersedes the CLAUDE.md carve-out) |
 | [0015](0015-flux-precedes-in-cluster-openbao-gitrepository-plain-yaml.md) | T7c order: Flux precedes the in-cluster OpenBao move; Flux reconciles plain YAML from a `GitRepository` (Crossplane not sequenced; does not supersede 0003/0014) |
 | [0016](0016-local-openbao-in-cluster-statefulset.md) | The local OpenBao runs in-cluster as an OpenTofu-owned raft StatefulSet, moved via key-preserving snapshot restore (supersedes 0010; amends 0011) |
+| [0019](0019-cv-frontend-timoni-module-and-k8s-target.md) | `cv_frontend` is a Timoni module delivered into the OrbStack cluster via Flux (amends 0009 — the demo app now also runs as a k8s Deployment; the pitchfork container is retained) |
 
 Architecture: `docs/designs/`. Open work: `TODOS.md`.

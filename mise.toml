@@ -93,6 +93,13 @@ run = "./attestation/scripts/attestation-verify.sh"
 description = "Verify a pinned approval attestation and deploy that image to the local pitchfork frontend daemon — args: <registry/repo@sha256:...> <sha256:attestation-digest>"
 run = "./deploy/frontend/scripts/frontend-deploy.sh"
 
+# Type-check the cv_frontend Timoni module + its rendered manifests against
+# the vendored k8s CUE schemas (ADR 0019). Same check the `timoni` hk step
+# runs; offline, no cluster.
+[tasks."frontend:vet"]
+description = "timoni mod vet the cv_frontend module (schema-checks the rendered Deployment/Service/ServiceAccount)."
+run = "timoni mod vet ./deploy/frontend/timoni --name cv-frontend"
+
 # T7b1-followup: mirror the digest-pinned base + `# syntax=` images from
 # deploy/frontend/Dockerfile into the local zot, so the in-cluster build never
 # reaches docker.io / gcr.io (the OrbStack IPv6-egress defect — TODOS.md T7,
