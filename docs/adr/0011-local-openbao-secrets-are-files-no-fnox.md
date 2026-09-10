@@ -36,3 +36,6 @@ real disaster recovery).
 
 Status: accepted. Supersedes the T3 fnox/keychain call. The production
 `secret-openbao` module (deferred) keeps its own out-of-band requirement.
+Amended by [ADR 0016](0016-local-openbao-in-cluster-statefulset.md) — the
+seal key is now also delivered as a Kubernetes Secret, sourced from the same
+`0600` file; the `0600`-files-are-the-trust-model call is unchanged.

@@ -17,11 +17,12 @@ superseded.
 | [0007](0007-distroless-dockerfile-not-buildpacks.md) | Distroless Node image from a hand-authored Dockerfile (supersedes Paketo buildpacks) |
 | [0008](0008-arm64-only.md) | `linux/arm64` only (supersedes the amd64 constraint) |
 | [0009](0009-demo-consumer-is-local-container-not-k8s.md) | The demo consumer is a local pitchfork container, not a k8s Deployment |
-| [0010](0010-local-openbao-machine-global-static-seal.md) | Local OpenBao is one machine-global pitchfork daemon that auto-unseals from a static `file://` seal key |
-| [0011](0011-local-openbao-secrets-are-files-no-fnox.md) | Local OpenBao's secrets are 0600 files beside its data — no fnox, no keychain (supersedes T3) |
+| [0010](0010-local-openbao-machine-global-static-seal.md) | Local OpenBao is one machine-global pitchfork daemon that auto-unseals from a static `file://` seal key (superseded by 0016) |
+| [0011](0011-local-openbao-secrets-are-files-no-fnox.md) | Local OpenBao's secrets are 0600 files beside its data — no fnox, no keychain (supersedes T3; amended by 0016) |
 | [0012](0012-local-openbao-is-environment-nested.md) | The local-OpenBao tofu unit lives under `environments/local/`, not `modules/` (breaks the sibling symmetry deliberately) |
 | [0013](0013-attestation-seam-is-consumer-agnostic.md) | The attestation sign/verify seam is its own `attestation/` concern, not part of `deploy/frontend/` |
 | [0014](0014-tekton-defs-are-oci-bundles-in-ci.md) | Tekton Task/Pipeline defs are digest-pinned OCI bundles in a `ci/` concern, not versioned dirs in `modules/` (supersedes the CLAUDE.md carve-out) |
 | [0015](0015-flux-precedes-in-cluster-openbao-gitrepository-plain-yaml.md) | T7c order: Flux precedes the in-cluster OpenBao move; Flux reconciles plain YAML from a `GitRepository` (Crossplane not sequenced; does not supersede 0003/0014) |
+| [0016](0016-local-openbao-in-cluster-statefulset.md) | The local OpenBao runs in-cluster as an OpenTofu-owned raft StatefulSet, moved via key-preserving snapshot restore (supersedes 0010; amends 0011) |
 
 Architecture: `docs/designs/`. Open work: `TODOS.md`.
