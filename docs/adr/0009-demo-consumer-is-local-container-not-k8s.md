@@ -17,4 +17,8 @@ demo/proof of the pipeline mechanism, not where a real `cv_frontend` site
 lives (that stays a separate decision — `TODOS.md`).
 
 Status: accepted. Supersedes the earlier locked decision (a `cv-frontend`
-k8s namespace + `kubectl apply` gated by `mise run consume`).
+k8s namespace + `kubectl apply` gated by `mise run consume`). **Amended by
+[ADR 0019](0019-cv-frontend-timoni-module-and-k8s-target.md)** — the demo app
+now *also* runs as a Kubernetes Deployment (Timoni + Flux); the pitchfork
+container is retained as the path with full launch-time approval
+re-verification.

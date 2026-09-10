@@ -167,6 +167,7 @@ verify-approval           attestation:verify             → attestation/scripts
 consume                   frontend:deploy                → deploy/frontend/scripts/frontend-deploy.sh
 (new, T7b1-followup)      frontend:seed                  → ci/scripts/registry-seed.sh deploy/frontend/Dockerfile
 (new, T7b3)               frontend:build                 → deploy/frontend/scripts/frontend-build.sh
+(Plan B M1, ADR 0019)     frontend:vet                   inline: timoni mod vet ./deploy/frontend/timoni --name cv-frontend (the `timoni` hk step's manual entry point)
 (T7a; deleted T7b1)       ci:taskrun                     — replaced by `mise run frontend:build` / `tkn pipeline start build-scan-approve`
 (T7a; T7c Inc.0)          local:tekton:install           → environments/local/scripts/tekton-install.sh (verify release.lock SHA-256 → apply local file); local:tekton:wait added
 (T7c Inc.1a)              local:flux:bootstrap           → environments/local/scripts/flux-bootstrap.sh (cosign-verify chart digest → helm upgrade --install → apply FluxInstance); local:flux:status
@@ -214,6 +215,11 @@ toolbox/
 │   └── frontend/                                     one consumer of an approved image
 │       ├── Dockerfile  Dockerfile.dockerignore  README.md
 │       ├── pipelinerun.cue                           T7b3 — the per-consumer PipelineRun, plain CUE (not a Timoni module); `cue export -t rev=<sha> -t defsRev=<toolbox-ref>`
+│       ├── timoni/                                   Plan B M1 (ADR 0019) — the cv_frontend Timoni MODULE (Deployment/Service/SA + typed #Config); `timoni mod vet` is its schema gate
+│       │   ├── timoni.cue  values.cue  images.cue  README.md  timoni.ignore
+│       │   ├── templates/{config,deployment,service,serviceaccount}.cue
+│       │   ├── tests/invalid-image-digest.cue        negative fixture — a tag-only image.digest MUST fail `timoni mod vet`
+│       │   └── cue.mod/{gen,pkg}/                    vendored k8s + timoni.sh/core CUE schemas (committed, `.gitattributes` linguist-generated; `timoni mod vendor k8s`)
 │       └── scripts/
 │           ├── frontend-build.sh                     T7b3 — `mise run frontend:build` — render + create + watch the pipeline, print the digest + attestation:sign line
 │           ├── frontend-deploy.sh                    (was consume.sh)
@@ -223,6 +229,7 @@ toolbox/
 │               ├── frontend-build.bats               fake cluster/registry/git/mise; real cue renders pipelinerun.cue
 │               ├── frontend-deploy.bats
 │               ├── frontend-serve.bats               (one case uses the DEFAULT verify path)
+│               ├── timoni-vet.bats                   Plan B M1 — `timoni mod vet` passes clean + rejects the negative fixture
 │               └── fixtures/
 │
 ├── environments/

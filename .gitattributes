@@ -1,0 +1,6 @@
+# Timoni vendors the Kubernetes + timoni.sh/core CUE schemas into each
+# module's cue.mod/ (upstream convention — stefanprodan/timoni's own example
+# modules commit them; regenerate with `timoni mod vendor k8s`). They are
+# generated, deterministic, and not reviewed line-by-line.
+deploy/frontend/timoni/cue.mod/gen/**   linguist-generated=true -diff
+deploy/frontend/timoni/cue.mod/pkg/**   linguist-generated=true -diff
