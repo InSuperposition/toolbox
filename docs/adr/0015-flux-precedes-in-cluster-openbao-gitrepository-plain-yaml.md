@@ -33,6 +33,8 @@ the `ci-runtime` Flux `Kustomization`, not something Flux owns. There is no
 not feed Flux directly (the real flow is `timoni build` / `timoni bundle
 build` → `flux push artifact` → `OCIRepository`).
 
-Status: accepted. Increments 0/1a/1b/2 shipped (`TODOS.md`, T7c);
-Increment 4+ (in-cluster OpenBao) is a separate plan. Does **not** supersede
-ADR 0003 or ADR 0014.
+Status: accepted. T7c Increments 0–3 and 4a–4c shipped (`TODOS.md`) — the
+in-cluster OpenBao Phase A + bootstrap bridge + Phase C are live. Increment
+4d+ (retire the host daemon, rename `openbao-cluster` → `openbao`) is the
+remaining OpenBao work, its own plan. Does **not** supersede ADR 0003 or
+ADR 0014.
