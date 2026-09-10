@@ -678,10 +678,13 @@ CODEX REVIEW 2026-09-10).
   step — none are free). The per-consumer namespace bundle stays Flux
   plain-YAML indefinitely. `XConsumerEnvelope` / XE1 **dropped**.
 - **K1** — install Kyverno via Flux + one **`ImageValidatingPolicy`** scoped
-  to ns `frontend` that verifies the cosign approval **attestation** against
-  `attestation/cosign-approval.pub`. Preserves the **ADR-0006 contract**:
-  in-toto predicate type + **verdict-approved** predicate (a signed
-  *rejection* is still signed) + the subject digest (all four covered — T6
+  to any namespace labelled `toolbox.dev/cv-frontend: approval-enforced`
+  (blast radius scoped like a ns pin, but an ephemeral-namespace chainsaw
+  test can carry the label) + the `cv-frontend*` image glob, verifying the
+  cosign approval **attestation** against `attestation/cosign-approval.pub`.
+  Preserves the **ADR-0006 contract**: in-toto predicate type +
+  **verdict-approved** predicate (a signed *rejection* is still signed) + the
+  subject digest (all four covered — T6
   spike). Split-Kustomization pattern (`kyverno-policy` CR) per the
   `toolbox-flux-kustomization-unknown-crd-deadlock` learning. **ADR 0020**
   narrows the "production cluster only" deferral below.
@@ -707,14 +710,23 @@ CODEX REVIEW 2026-09-10).
   - `chainsaw-kyverno` asserts **admission** (deny/admit at CREATE), not the
     PolicyReport — background re-scan needs registry reach and flaked on an
     OrbStack DNS blip during the spike.
-  - **Phase 1 shipped on branch `k1-kyverno-imagevalidatingpolicy`:**
-    `attestation-sign.sh` fix + bats, `mise.toml` pin bump,
-    `environments/local/flux/kyverno.lock`,
-    `environments/local/kyverno/{kustomization,imagevalidatingpolicy}.yaml`,
-    ADR 0020, doc pointers. **Remaining:** Flux `kyverno-helmrelease.yaml` +
-    `kyverno-policy` Kustomization + `flux/kustomization.yaml` inventory,
-    `kubeconform-kyverno` / `chainsaw-kyverno` hk steps, a real approved
-    cv_frontend attestation for the chainsaw admit case.
+  - **Phases 1–3 committed on branch `k1-kyverno-imagevalidatingpolicy`,
+    draft PR #33** (not merged). P1 (`6a858f0`): sign.sh annotations + bats,
+    mise pin, `kyverno.lock`, `environments/local/kyverno/*`, ADR 0020.
+    P2 (`e226b75`): `kyverno-{helmrelease,policy}.yaml` (7 images
+    `tag@digest`), inventory, `kubeconform-kyverno` gate. P3: the ns-label
+    scope revision, real approved fixture
+    (`cv-frontend@sha256:fd02f152…` + att `sha256:1e118e05…`),
+    `chainsaw-kyverno` (`[k8s]`, probe `imagevalidatingpolicy frontend-approval`,
+    asserts admit-approved + deny-unsigned — the deny *variants* are the T6
+    spike + `attestation-verify.bats`, not re-proven here). Live-proven on
+    OrbStack (helm-installed committed manifests, torn down).
+  - **M3 must** label the `frontend` namespace
+    `toolbox.dev/cv-frontend: approval-enforced` (frontend-ns Kustomization)
+    or the policy does not match its pods.
+  - **Follow-ups:** merge #33 → Flux reconciles the policy → `chainsaw-kyverno`
+    stops skipping. A key rotation needs the fixture re-signed
+    (`mise run attestation:sign`).
 - **M3** — deliver + deploy. Publish is a **Tekton Task**
   (`ci/tasks/timoni-publish.yaml`, `command`+`args`, no `script:`),
   workspace-shared, ordered **verify → render (`timoni build cv-frontend`) →

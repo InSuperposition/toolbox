@@ -45,3 +45,9 @@ planning session.
 - The Kyverno chart is **not** cosign-signed, so the OCIRepository pins
   `ref.digest` with no `spec.verify` — same shape as the OpenBao and
   cert-manager charts.
+- The policy matches namespaces by the label
+  `toolbox.dev/cv-frontend: approval-enforced`, not by `metadata.name`. This
+  keeps the blast radius scoped (a Kyverno outage with `failurePolicy: Fail`
+  blocks `cv_frontend` pod creation only in labelled namespaces) while an
+  ephemeral-namespace `chainsaw-kyverno` test can still exercise it. **M3's
+  `frontend` namespace must carry the label.**

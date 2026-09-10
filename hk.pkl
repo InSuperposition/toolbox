@@ -220,6 +220,21 @@ local heavy = new Mapping<String, Step> {
     )
     check = "./environments/local/scripts/openbao-chainsaw.sh"
   }
+  // The Kyverno ImageValidatingPolicy running state (Plan B K1, ADR 0020).
+  // Same [k8s] gate as chainsaw-flux — skips in CI (no OrbStack) and skips
+  // locally until the `kyverno-policy` Flux Kustomization has reconciled the
+  // policy (probe: `kubectl get imagevalidatingpolicy frontend-approval`,
+  // which is only present post-merge). Asserts admission both ways against
+  // real GHCR fixtures; does not install Kyverno or tear down.
+  ["chainsaw-kyverno"] {
+    glob = List(
+      "environments/local/tests/kyverno/**/*.yaml",
+      "environments/local/kyverno/**/*.yaml",
+      "environments/local/flux/kyverno-policy.yaml",
+      "environments/local/scripts/kyverno-chainsaw.sh"
+    )
+    check = "./environments/local/scripts/kyverno-chainsaw.sh"
+  }
   // Silent-coverage-drop guard (F5). Diffs the suites on disk, the
   // committed tests/manifest.txt, and what hk schedules — a mismatch fails
   // the gate. Runs last: it reads `hk check --plan`, it does not re-run

@@ -15,8 +15,16 @@
 #   - the predicate verdict is "approved" — a signed *rejection* is still
 #     signed, so this is a separate check (validation #2); the has() guard
 #     fail-closes on a missing/malformed verdict
-#   - failurePolicy: Fail + validationActions: [Deny] → no unverified pod in
-#     ns `frontend` is admitted
+#   - failurePolicy: Fail + validationActions: [Deny] → no unverified
+#     cv_frontend pod is admitted
+#
+# Scope: any namespace LABELLED `toolbox.dev/cv-frontend: approval-enforced`
+# (M3's `frontend` namespace carries it; `chainsaw-kyverno`'s ephemeral test
+# namespace carries it). A label, not `kubernetes.io/metadata.name: frontend`,
+# so the blast radius stays scoped (plan intent — a Kyverno outage with
+# failurePolicy: Fail blocks cv_frontend pod creation only in labelled
+# namespaces) while an ephemeral-namespace chainsaw test can still exercise
+# it. `matchImageReferences` narrows further to the cv_frontend repo.
 #
 # tlog is ignored: toolbox cosign is keyed via OpenBao Transit, no Rekor
 # (docs/adr/0004). Image source is GHCR (HTTPS) — Kyverno's referrer
@@ -35,7 +43,7 @@ spec:
   matchConstraints:
     namespaceSelector:
       matchLabels:
-        kubernetes.io/metadata.name: frontend
+        toolbox.dev/cv-frontend: approval-enforced
     resourceRules:
       - apiGroups: [""]
         apiVersions: ["v1"]

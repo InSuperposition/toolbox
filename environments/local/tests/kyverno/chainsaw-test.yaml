@@ -1,0 +1,89 @@
+# [k8s]-gated (environments/local/scripts/kyverno-chainsaw.sh skips without
+# an orbstack cluster whose `frontend-approval` ImageValidatingPolicy has
+# reconciled). Server-side checks the static kubeconform-kyverno gate cannot
+# do: the Flux-reconciled policy actually gates a real cv_frontend pod both
+# ways.
+#
+# Asserts the RUNNING state — it does not install Kyverno or tear anything
+# down beyond the pods it creates. The deny variants (signed rejection,
+# wrong subject, malformed predicate) are covered by the K1 T6 build-time
+# spike (docs/adr/0020) + attestation-verify.bats; this only exercises the
+# admit path and the common unsigned-image deny.
+#
+# Fixtures are REAL, on public GHCR:
+#   - approved: cv-frontend@sha256:fd02f152... carries a real approval
+#     attestation signed by openbao://approval-key (annotated referrer)
+#   - unsigned: cv-frontend@sha256:8067480b... (a CI build, no attestation)
+# Regenerate the approved one after an approval-key rotation:
+#   mise run attestation:sign -- ghcr.io/insuperposition/cv-frontend@<digest>
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: kyverno-reconcile
+spec:
+  # Kyverno's admission verification pulls the image + its referrers from
+  # GHCR and runs cosign verify — well over chainsaw's default operation
+  # timeout on a cold pull.
+  timeouts:
+    apply: 90s
+    assert: 90s
+    error: 90s
+  # the policy's namespaceSelector is `toolbox.dev/cv-frontend: approval-enforced`
+  namespaceTemplate:
+    metadata:
+      labels:
+        toolbox.dev/cv-frontend: approval-enforced
+  steps:
+    - name: policy-is-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: policies.kyverno.io/v1
+              kind: ImageValidatingPolicy
+              metadata:
+                name: frontend-approval
+              status:
+                (conditionStatus.ready): true
+
+    - name: an-approved-cv-frontend-pod-is-admitted
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: cv-frontend-approved
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: c
+                    image: ghcr.io/insuperposition/cv-frontend@sha256:fd02f152c99b49ed0841857fcb7e75f64b664f72e69b073303dcfc4d789eb26d
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: cv-frontend-approved
+              spec:
+                # the digest was NOT mutated (mutateDigest: false) and the
+                # pod exists == admission passed
+                (containers[0].image): ghcr.io/insuperposition/cv-frontend@sha256:fd02f152c99b49ed0841857fcb7e75f64b664f72e69b073303dcfc4d789eb26d
+
+    - name: an-unsigned-cv-frontend-pod-is-denied
+      try:
+        - create:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: cv-frontend-unsigned
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: c
+                    image: ghcr.io/insuperposition/cv-frontend@sha256:8067480b8618c638166287cfcee5536b8333add208be885a7d18c32e33e988c2
+            expect:
+              - check:
+                  ($error != null): true
+                  (contains($error, 'frontend-approval')): true
+                  (contains($error, 'no valid approval attestation')): true
