@@ -1,0 +1,55 @@
+# Kyverno — pinned. Admission-time verification of the cv_frontend approval
+# attestation on the local dev *reference* cluster (Plan B K1, docs/adr/0020).
+#
+# Hand-maintained (NOT generated). The digest IS the trust boundary
+# (ADR 0001) — a tag is never the pin.
+#
+# SIGNATURE: the Kyverno *chart* is NOT cosign-signed (verified at authoring,
+# 2026-09-10: `cosign tree ghcr.io/kyverno/charts/kyverno:3.9.1` → "No Supply
+# Chain Security Related Artifacts found"; keyless `cosign verify` → "no
+# signatures found"). So — exactly as with the OpenBao and cert-manager
+# charts — there is NO `spec.verify` block; the committed `chart_digest`
+# below is the whole pin. The OCIRepository in `kyverno-helmrelease.yaml`
+# sets `ref.digest` (content addressed, immutable); the five component
+# images + the CRD-lifecycle CLI image are digest-pinned via chart values.
+#
+# The Kyverno component *images* ARE keyless-signed (Fulcio); we do not add a
+# runtime image `spec.verify` — a digest pinned in git, reviewed in the PR,
+# is the trust input (same rationale as cert-manager.lock decision d8e2b203).
+#
+# K1 BUILD-TIME SPIKE (2026-09-10): v1.19.1 was live-proven semantically
+# equivalent to `attestation-verify.sh` for the four ADR-0006 cases (approved
+# admit; signed-rejection / wrong-subject / malformed / no-attestation all
+# deny, fail-closed). kyverno#16435 (SIGSEGV on keyed cosign verify of
+# new-bundle OCI-referrer attestations) is fixed since v1.19.0 (PR #16298);
+# zero crashes observed across the spike.
+#
+# To bump Kyverno:
+#   1. pick chart version V (chart repo versions independently of appVersion)
+#   2. helm show chart oci://ghcr.io/kyverno/charts/kyverno --version V   -> confirm appVersion A
+#   3. crane digest ghcr.io/kyverno/charts/kyverno:V                      -> chart_digest
+#   4. cosign tree ghcr.io/kyverno/charts/kyverno:V                       -> re-confirm still unsigned
+#   5. for each component: crane digest ghcr.io/kyverno/<repo>:A          -> *_image_digest
+#      crane digest ghcr.io/kyverno/kyverno-cli:A                         -> cli_image_digest
+#   6. update every line below + kyverno-helmrelease.yaml
+#   7. re-run the T6 semantic-equivalence spike on the new version
+
+chart_repo=oci://ghcr.io/kyverno/charts/kyverno
+chart_version=3.9.1
+chart_digest=sha256:720542b97bdbc2633535c2297332690d21cfbb944053eb1ec1f0dbe8e3895444
+chart_signed=false
+
+app_version=v1.19.1
+
+# Component images (registry ghcr.io/kyverno). Tag stays readable in
+# `kubectl describe`; only the digest is used to pull.
+kyvernopre_image_digest=sha256:c25c47461f06f2845a48c319ae86fbbc1730a7b9ed5b701889c9dc1f9ee94b09
+kyverno_image_digest=sha256:b31d8511ae5fd6010e2a01ea72ebae08eb82fa51d91af14a1d9fe989949b4edb
+background_controller_image_digest=sha256:8f1e9143373a27578cafc2d28d2c66ba0926c63b4c77e63de8d2fdd4a122859f
+cleanup_controller_image_digest=sha256:67a48e62a8d8f8120c86914ff822b90017c54054c7b64ef8a1555645e9d9761e
+reports_controller_image_digest=sha256:c0eee97b9b44a0dd35805d56b358fa52548480f79d4944602b9609538eccd64c
+readiness_checker_image_digest=sha256:31bb42ce7f5b2e27c1cf633aeff4f0cad1f5bb63761e2cb09f0e25cdd26572bf
+
+# CRD install/upgrade/cleanup helm-hook CLI image (chart default registry
+# reg.kyverno.io; ghcr.io/kyverno/kyverno-cli is the same digest).
+cli_image_digest=sha256:ced7b2be0b04250cabfe695f15307f69eb715fe23234816388af4f3812915b2a

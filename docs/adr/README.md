@@ -26,5 +26,6 @@ superseded.
 | [0016](0016-local-openbao-in-cluster-statefulset.md) | The local OpenBao runs in-cluster as an OpenTofu-owned raft StatefulSet, moved via key-preserving snapshot restore (supersedes 0010; amends 0011) |
 | [0018](0018-in-cluster-authoring-pipeline-and-tofu-kubernetes-ban.md) | In-cluster k8s objects go render (Timoni/CUE) → reconcile (Flux) → enforce (Kyverno) → provision (Crossplane, if activated); tofu `kubernetes_*` banned (amends 0015) |
 | [0019](0019-cv-frontend-timoni-module-and-k8s-target.md) | `cv_frontend` is a Timoni module delivered into the OrbStack cluster via Flux (amends 0009 — the demo app now also runs as a k8s Deployment; the pitchfork container is retained) |
+| [0020](0020-imagevalidatingpolicy-on-the-dev-reference-cluster.md) | One Kyverno `ImageValidatingPolicy` verifies the `cv_frontend` approval attestation at admission on the dev *reference* cluster (narrows the "production only" Kyverno deferral); pins Kyverno v1.19.1; `attestation-sign.sh` gains sigstore discovery annotations |
 
 Architecture: `docs/designs/`. Open work: `TODOS.md`.

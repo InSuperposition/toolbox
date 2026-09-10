@@ -211,9 +211,20 @@ fi
 #        assignment gets its own `if !` branch: a bare `ATT_DIGEST=$(...)`
 #        would exit under `set -e` on push failure, before the check runs.
 #        --disable-path-validation: att.bundle is our own mktemp workdir,
-#        deliberately an absolute path (oras rejects those by default). ---
+#        deliberately an absolute path (oras rejects those by default).
+#
+#        The two `dev.sigstore.bundle.*` manifest annotations are how cosign's
+#        own `attest` upload marks a new-bundle-format referrer, and how
+#        cosign's discovery (`cosign.GetBundles`) FINDS it — a bare
+#        `oras attach` with only `--artifact-type` is invisible to that path,
+#        so Kyverno's ImageValidatingPolicy (Plan B K1) could not verify our
+#        attestations without them. `attestation-verify.sh` is unaffected: it
+#        is handed the referrer digest and reads `.layers[0]`, never the
+#        manifest annotations. ---
 if ! ATT_DIGEST="$(oras attach "${ORAS_HTTP[@]}" \
 		--artifact-type "$BUNDLE_ARTIFACT_TYPE" \
+		--annotation "dev.sigstore.bundle.content=dsse-envelope" \
+		--annotation "dev.sigstore.bundle.predicateType=$TYPE" \
 		--disable-path-validation \
 		--format go-template --template '{{.digest}}' \
 		"$IMAGE_REF" "$WORKDIR/att.bundle:$BUNDLE_ARTIFACT_TYPE")" ||

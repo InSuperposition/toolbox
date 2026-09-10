@@ -677,26 +677,44 @@ CODEX REVIEW 2026-09-10).
   spike + `**/*.tf` added to the `["ast-grep"]` hk glob + an `ast-grep test`
   step — none are free). The per-consumer namespace bundle stays Flux
   plain-YAML indefinitely. `XConsumerEnvelope` / XE1 **dropped**.
-- **K1** — install Kyverno via Flux (HelmRelease + OCIRepository digest pin,
-  `spec.verify` if the chart is keyless) + one **`ImageValidatingPolicy`**
-  scoped to ns `frontend` that checks the cosign approval **attestation**
-  against `attestation/cosign-approval.pub` (via `configMapGenerator`, not
-  inlined). The policy must preserve the **ADR-0006 contract**: verify the
-  in-toto predicate type + a **verdict-approved** predicate (a signed
-  *rejection* is still signed) + the subject digest. Split-Kustomization
-  pattern (`kyverno-policy` CR, `retryInterval` short) per the
-  `toolbox-flux-kustomization-unknown-crd-deadlock` learning. **ADR 0020** —
-  narrows the "production cluster only" deferral below: the
-  ImageValidatingPolicy runs on the dev *reference* cluster (consistent with
-  Flux/OpenBao/cert-manager/Tekton already there); the `ci`-namespace
-  privilege-scoping policies stay deferred.
-  **FEASIBILITY RISK:** [kyverno#16435](https://github.com/kyverno/kyverno/issues/16435)
-  — Kyverno 1.19.0 SIGSEGVs on **keyed** cosign verification of
-  **OCI-referrer bundle-format** attestations with tlog on. toolbox's
-  attestations are exactly that shape. K1's build **must** pin a fixed
-  version and live-spike the keyed + referrer + `--insecure-ignore-tlog`
-  path, proving semantic equivalence to `attestation-verify.sh`
-  (selected-approval / selected-rejection / wrong-subject / malformed).
+- **K1** — install Kyverno via Flux + one **`ImageValidatingPolicy`** scoped
+  to ns `frontend` that verifies the cosign approval **attestation** against
+  `attestation/cosign-approval.pub`. Preserves the **ADR-0006 contract**:
+  in-toto predicate type + **verdict-approved** predicate (a signed
+  *rejection* is still signed) + the subject digest (all four covered — T6
+  spike). Split-Kustomization pattern (`kyverno-policy` CR) per the
+  `toolbox-flux-kustomization-unknown-crd-deadlock` learning. **ADR 0020**
+  narrows the "production cluster only" deferral below.
+  **T6 spike — DONE 2026-09-10 (PASSED)**, findings folded into ADR 0020 +
+  `kyverno.lock`:
+  - kyverno#16435 fixed since v1.19.0; **pin v1.19.1 / chart 3.9.1** (chart
+    NOT cosign-signed → digest pin, no `spec.verify`, like OpenBao/cert-manager).
+    Zero SIGSEGV live.
+  - Semantic equivalence to `attestation-verify.sh` proven (approved ADMIT;
+    signed-rejection / wrong-subject / malformed / no-attestation all DENY,
+    fail-closed).
+  - **Prereq (done, this branch):** `attestation-sign.sh` now writes
+    `dev.sigstore.bundle.{content,predicateType}` manifest annotations —
+    Kyverno's discovery filters on them; a bare `oras attach` referrer is
+    invisible. `attestation-verify.sh` unaffected.
+  - **Constraint:** image + attestation source = **GHCR (HTTPS)**. Kyverno's
+    referrer discovery ignores `--allowInsecureRegistry` for plain-HTTP zot —
+    in-cluster-zot verify stays T12.
+  - **Pubkey:** `configMapGenerator` reads `attestation/cosign-approval.pub`
+    in place (`../../../`, `disableNameSuffixHash` for a stable name) — one
+    authored copy, no vendored second, the same public file
+    `openbao-bootstrap.sh` reads.
+  - `chainsaw-kyverno` asserts **admission** (deny/admit at CREATE), not the
+    PolicyReport — background re-scan needs registry reach and flaked on an
+    OrbStack DNS blip during the spike.
+  - **Phase 1 shipped on branch `k1-kyverno-imagevalidatingpolicy`:**
+    `attestation-sign.sh` fix + bats, `mise.toml` pin bump,
+    `environments/local/flux/kyverno.lock`,
+    `environments/local/kyverno/{kustomization,imagevalidatingpolicy}.yaml`,
+    ADR 0020, doc pointers. **Remaining:** Flux `kyverno-helmrelease.yaml` +
+    `kyverno-policy` Kustomization + `flux/kustomization.yaml` inventory,
+    `kubeconform-kyverno` / `chainsaw-kyverno` hk steps, a real approved
+    cv_frontend attestation for the chainsaw admit case.
 - **M3** — deliver + deploy. Publish is a **Tekton Task**
   (`ci/tasks/timoni-publish.yaml`, `command`+`args`, no `script:`),
   workspace-shared, ordered **verify → render (`timoni build cv-frontend`) →
