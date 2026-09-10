@@ -1,0 +1,88 @@
+# trust-manager — in-cluster CA-bundle distribution for the local dev
+# reference cluster (docs/adr/0022). cert-manager's sibling: a `Bundle` CR
+# merges the pinned Debian public-root snapshot (`useDefaultCAs`) with the
+# `toolbox-dev-ca` Secret into a target ConfigMap. First (R1b, only)
+# consumer: the Kyverno admission controller's `caCertificates.volume`
+# (T7c R1b-ii) — so the pod trusts the dev CA for the HTTPS zot pull without
+# losing the public roots.
+#
+# R1b-i installs the tool ONLY. The `Bundle` CRs land in R1b-ii, in their
+# own dir `environments/local/trust-manager/` under a dedicated Flux
+# Kustomization (mirrors `cert-manager-pki.yaml`) — a `trust.cert-manager.io`
+# custom kind in `flux-system` would deadlock the whole apply on the unknown
+# CRD (see `cert-manager-pki.yaml`).
+#
+# Reconciled by helm-controller (already in FluxInstance.spec.components).
+# `dependsOn` the `cert-manager` HelmRelease: the chart's own
+# ValidatingWebhookConfiguration takes its `caBundle` from a chart-created
+# self-signed Issuer + `Certificate` (`trust-manager` in ns `cert-manager`),
+# injected by cert-manager's cainjector — independent of `toolbox-dev-ca`.
+#
+# PINNING: the OCIRepository pins `ref.digest` (immutable, content
+# addressed — ADR 0001). The trust-manager chart is NOT cosign-signed (same
+# as OpenBao / cert-manager / Kyverno), so there is NO `spec.verify` block;
+# the digest is the whole pin. BOTH component images are digest-pinned via
+# chart values — the `defaultPackageImage` digest is the actual public-trust
+# input (frozen until bumped, NOT auto-refreshing). Digests +
+# bump procedure: `trust-manager.lock`.
+#
+# CRDs: the chart templates `bundles.trust.cert-manager.io` under
+# `crds.enabled: true`; `crds.keep: true` keeps it on a HelmRelease delete
+# so `Bundle`s cluster-wide are not garbage-collected.
+#
+# Secret targets: DELIBERATELY OFF (`secretTargets` unset → chart default
+# `authorizedSecretsAll: false`, `authorizedSecrets: []`). ADR 0022 scopes
+# trust-manager to the Kyverno CA-bundle ConfigMap only; routing buildkitd /
+# Flux source-controller through trust-manager (which would need a Secret
+# target + its RBAC) is an R1b-ii decision, not this chunk.
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: trust-manager
+  namespace: flux-system
+spec:
+  interval: "30m"
+  url: "oci://quay.io/jetstack/charts/trust-manager"
+  ref:
+    digest: "sha256:805f23e6f4debcca444a7d70e43e7e3a540b52f43298e114e1daeb850ba49017"
+  layerSelector:
+    mediaType: "application/vnd.cncf.helm.chart.content.v1.tar+gzip"
+    operation: "copy"
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: trust-manager
+  namespace: flux-system
+spec:
+  interval: "30m"
+  releaseName: "trust-manager"
+  storageNamespace: "cert-manager"
+  targetNamespace: "cert-manager"
+  dependsOn:
+    - name: cert-manager
+  chartRef:
+    kind: OCIRepository
+    name: trust-manager
+  install:
+    createNamespace: false
+    crds: "CreateReplace"
+    remediation:
+      retries: 3
+  upgrade:
+    crds: "CreateReplace"
+  values:
+    crds:
+      enabled: true
+      keep: true
+    # Digest-pinned images (tag stays readable in `kubectl describe`; only
+    # the digest is used to pull). Digests + rationale: trust-manager.lock.
+    image:
+      tag: "v0.24.0"
+      digest: "sha256:a7c1d71cad37b404738192213e3801dbf89fe797e72664b0ff0d498db35cea74"
+    # The `useDefaultCAs` public-root snapshot init container — the
+    # public-trust pin. Frozen at this digest until bumped in the lock.
+    defaultPackageImage:
+      tag: "20250419.1"
+      digest: "sha256:17084a794d1e75065c9047438e2a6167907771fe78d7e4b5d4373a4b1d4e0494"

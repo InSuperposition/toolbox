@@ -212,6 +212,11 @@ is excluded, it is the bridge-owned acyclic anchor):
   `[ci-tasks]`) — the reusable Task + Pipeline defs.
 - `cert-manager-helmrelease.yaml` / `cert-manager-pki.yaml` — in-cluster PKI
   (ADR 0016).
+- `trust-manager-helmrelease.yaml` — cert-manager's sibling (ADR 0022):
+  distributes the CA **trust bundle** (public roots + the dev CA) Kyverno
+  mounts for the HTTPS zot pull (T7c R1b). In the flux-system Kustomization
+  (always-known kinds); `dependsOn` the `cert-manager` HelmRelease. `Bundle`
+  CRs land in `environments/local/trust-manager/` in R1b-ii, never here.
 - `kyverno-helmrelease.yaml` / `kyverno-policy.yaml` → `environments/local/kyverno/`
   — the admission policy engine + one `ImageValidatingPolicy` verifying the
   `cv_frontend` approval attestation (Plan B K1, ADR 0020). `kyverno-policy`
@@ -242,6 +247,9 @@ checks), `ci-defs` stays blocked on `dependsOn` and retries — no notification
 | `flux/cert-manager-pki.yaml` | a Flux `Kustomization` CR (`cert-manager-pki`) → `./environments/local/cert-manager`. **Separate** from flux-system because the Issuer CRs are cert-manager.io/v1 custom kinds and a whole-Kustomization dry-run fails on an unknown CRD — keeping them in flux-system deadlocked it against the HelmRelease that installs those CRDs. `healthChecks` on the cert-manager Deployments; `retryInterval: 30s`. |
 | `../cert-manager/issuers.yaml` | selfSigned root `ClusterIssuer` → CA `Certificate` (key in-cluster) → CA `ClusterIssuer` → the `openbao-tls` leaf `Certificate` (ns `openbao`, applied once `openbao-bootstrap.sh` creates the namespace). Dev limitation: selfSigned root; production swaps it, CA + leaves unchanged. |
 | `../cert-manager/tests/crd-schemas/*.json` | vendored cert-manager `Certificate`/`ClusterIssuer` v1 schemas for the `kubeconform-cert-manager` gate (from `github.com/cert-manager/cert-manager/releases/download/v1.21.1/cert-manager.crds.yaml`) |
+| `flux/trust-manager.lock` | pinned trust-manager chart digest (chart **not** cosign-signed, verified — so no `spec.verify`) + the controller **and** default-package image digests (the `trust-pkg-debian-trixie` package is the public-root snapshot, frozen at its pin); the bump procedure — T7c R1b-i, ADR 0022 |
+| `flux/trust-manager-helmrelease.yaml` | `OCIRepository` (digest pin, no `spec.verify`) + `HelmRelease` into ns `cert-manager`, `dependsOn: [cert-manager]`; `crds.enabled` + `crds.keep`; `secretTargets` deliberately off. In the flux-system Kustomization (always-known kinds). |
+| `tests/flux/trust-manager-reconcile/chainsaw-test.yaml` | `[k8s]`-gated, **always-run** (a regression that drops trust-manager from the inventory turns the run red, not green-skip): HelmRelease + Deployment Ready, the chart's webhook `Certificate` Ready + its `caBundle` cainjector-injected, a dry-run `Bundle` apply passes the `failurePolicy: Fail` webhook. |
 | `flux/kyverno.lock` | pinned Kyverno chart digest (chart **not** cosign-signed, verified — so no `spec.verify`) + 5 controller image digests + the CRD-lifecycle CLI + readiness-checker digests, each pinned via the `tag@digest` form; the bump procedure — Plan B K1 |
 | `flux/kyverno-helmrelease.yaml` | `OCIRepository` (digest pin, no `spec.verify`) + `HelmRelease` into ns `kyverno`; `replicas: 1` (single-node dev). In the flux-system Kustomization (always-known kinds). |
 | `flux/kyverno-policy.yaml` | Flux `Kustomization` CR (`kyverno-policy`) → `./environments/local/kyverno`. **Separate** from flux-system for the unknown-CRD dry-run reason; `healthChecks` on `kyverno-admission-controller`, `retryInterval: 30s`, `wait: false`, `prune: true`. |

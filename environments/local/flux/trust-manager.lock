@@ -1,0 +1,79 @@
+# trust-manager — pinned. In-cluster CA-bundle distribution for the local
+# dev *reference* cluster (T7c R1b-i, docs/adr/0022). trust-manager is
+# cert-manager's sibling: a `Bundle` CR merges `useDefaultCAs: true` (a
+# pinned Debian public-root snapshot the chart ships as an init container)
+# with the `toolbox-dev-ca` Secret into a target ConfigMap, synced into a
+# selected namespace. First (and, in R1b, only) consumer: the Kyverno
+# admission controller's `caCertificates.volume` (R1b-ii) — so the pod keeps
+# the public roots AND trusts the dev CA for the HTTPS zot pull.
+#
+# Hand-maintained (NOT generated). The digest IS the trust boundary
+# (ADR 0001) — a tag is never the pin.
+#
+# SIGNATURE: the trust-manager *chart* is NOT cosign-signed (verified at
+# authoring, 2026-09-10: `cosign tree quay.io/jetstack/charts/trust-manager
+# @sha256:805f23e6…` → "No Supply Chain Security Related Artifacts found";
+# keyless `cosign verify` → "no signatures found"). Exactly as with the
+# OpenBao, cert-manager and Kyverno charts there is NO `spec.verify` block;
+# the committed `chart_digest` below is the whole pin. The OCIRepository in
+# `trust-manager-helmrelease.yaml` sets `ref.digest` (content addressed,
+# immutable); both component images are digest-pinned via chart values.
+#
+# The trust-manager component *images* ARE keyless-signed (Fulcio,
+# `cert-manager/trust-manager` GitHub Actions OIDC) — we do not add a
+# runtime image `spec.verify`; a digest pinned in git, reviewed in the PR,
+# is the trust input (same rationale as `cert-manager.lock` decision
+# `d8e2b203`, `kyverno.lock`).
+#
+# THREE ARTIFACTS, not two — the third is the actual public-trust input:
+#   1. chart            — the Helm chart (this file's `chart_digest`)
+#   2. controller image — `quay.io/jetstack/trust-manager`
+#   3. default-package image — `quay.io/jetstack/trust-pkg-debian-trixie`,
+#      the CA snapshot that backs `useDefaultCAs`. **This is a PINNED
+#      artifact, not auto-refreshing** — the public roots stay frozen at
+#      whatever `default_package_image_digest` below points at until a human
+#      bumps it here. trust-manager DOES track the live `toolbox-dev-ca`
+#      Secret (that half is dynamic); the public-root half is a pin.
+#
+# NAMESPACE: runs in `cert-manager` (the chart's trust namespace default —
+# where `Bundle` source Secrets are read from; `toolbox-dev-ca` is already
+# there). `dependsOn` the `cert-manager` HelmRelease: the chart's own
+# ValidatingWebhookConfiguration gets its `caBundle` from a chart-created
+# self-signed Issuer + `Certificate`, injected by cert-manager's cainjector.
+#
+# To bump trust-manager:
+#   1. pick chart version V (chart + appVersion move together, e.g. v0.25.0)
+#   2. crane digest quay.io/jetstack/charts/trust-manager:V              -> chart_digest
+#   3. cosign tree  quay.io/jetstack/charts/trust-manager:V             -> re-confirm still unsigned
+#   4. crane digest quay.io/jetstack/trust-manager:V                     -> controller_image_digest
+#   5. helm template … --version V | grep 'trust-pkg-debian'           -> the package tag T (chart-baked)
+#      crane digest quay.io/jetstack/trust-pkg-debian-trixie:T          -> default_package_image_digest
+#      (a package-only refresh — new public roots, same chart — bumps ONLY T + its digest)
+#   6. cosign verify quay.io/jetstack/trust-manager@<controller_digest> \
+#        --certificate-identity-regexp 'https://github.com/cert-manager/trust-manager/.*' \
+#        --certificate-oidc-issuer 'https://token.actions.githubusercontent.com'   -> Verified OK
+#   7. update every line below + trust-manager-helmrelease.yaml
+
+version=v0.24.0
+chart_repo=oci://quay.io/jetstack/charts/trust-manager
+chart_digest=sha256:805f23e6f4debcca444a7d70e43e7e3a540b52f43298e114e1daeb850ba49017
+chart_signed=false
+
+app_version=v0.24.0
+
+# Controller image (registry quay.io/jetstack). Tag stays readable in
+# `kubectl describe`; only the digest is used to pull.
+controller_image_tag=v0.24.0
+controller_image_digest=sha256:a7c1d71cad37b404738192213e3801dbf89fe797e72664b0ff0d498db35cea74
+
+# Default-package image — the `useDefaultCAs` public-root snapshot. The tag
+# is set at CHART BUILD TIME (chart v0.24.0 bakes 20250419.1); a package
+# refresh ships as a new tag on the same chart. THIS is the public-trust
+# pin — frozen until bumped here.
+default_package_image_tag=20250419.1
+default_package_image_digest=sha256:17084a794d1e75065c9047438e2a6167907771fe78d7e4b5d4373a4b1d4e0494
+
+# CRDs: the chart templates `bundles.trust.cert-manager.io` under
+# `crds.enabled: true`; `crds.keep: true` adds `helm.sh/resource-policy:
+# keep` so a HelmRelease delete does NOT garbage-collect every `Bundle`
+# cluster-wide (same protection as cert-manager's `crds.keep`).
