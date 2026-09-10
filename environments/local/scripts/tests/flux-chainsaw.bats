@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 
-# environments/local/scripts/flux-chainsaw.sh — the [k8s] skip gate. A fake
-# kubectl on PATH drives the skip decision; these cover only that. The real
+# environments/local/scripts/flux-chainsaw.sh — the [k8s] skip gate and the
+# per-subdir gate loop. A fake kubectl + a fake chainsaw on PATH drive the
+# decisions; these cover only which subdirs get selected. The real
 # end-to-end chainsaw run is the hk `chainsaw` step itself
 # (`./environments/local/scripts/flux-chainsaw.sh` — skips in CI, runs against
 # the live cluster locally) and the documented `mise run local:flux:bootstrap`
@@ -19,10 +20,21 @@ setup() {
 		*"config get-contexts -o name"*) printf '%s\n' ${STUB_CONTEXTS-orbstack}; exit 0 ;;
 		*"cluster-info"*)                 exit "${STUB_CLUSTERINFO_RC:-0}" ;;
 		*"get fluxinstance flux"*)        exit "${STUB_FLUXINSTANCE_RC:-0}" ;;
+		*"get kustomization.kustomize.toolkit.fluxcd.io ci-runtime"*) exit "${STUB_CIRUNTIME_RC:-0}" ;;
 		*) exit 0 ;;
 		esac
 	SH
 	chmod +x "$FAKEBIN/kubectl"
+
+	# Fake chainsaw: record its argv so a test can assert which --test-dir
+	# entries the loop selected, then exit 0.
+	cat >"$FAKEBIN/chainsaw" <<-SH
+		#!/usr/bin/env bash
+		printf '%s\n' "\$@" > "$BATS_TEST_TMPDIR/chainsaw.args"
+		exit 0
+	SH
+	chmod +x "$FAKEBIN/chainsaw"
+
 	PATH="$FAKEBIN:$PATH"
 	export TOOLBOX_FLUX_KUBE_CONTEXT=orbstack
 }
@@ -49,4 +61,27 @@ setup() {
 	STUB_FLUXINSTANCE_RC=1 run "$SW"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"local:flux:bootstrap"* ]]
+}
+
+@test "flux-reconcile + trust-manager-reconcile always selected (no probe)" {
+	run "$SW"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"+ flux-reconcile"* ]]
+	[[ "$output" == *"+ trust-manager-reconcile"* ]]
+	grep -qF "flux-reconcile" "$BATS_TEST_TMPDIR/chainsaw.args"
+	grep -qF "trust-manager-reconcile" "$BATS_TEST_TMPDIR/chainsaw.args"
+}
+
+@test "ci-reconcile skipped when the ci-runtime Kustomization is absent" {
+	STUB_CIRUNTIME_RC=1 run "$SW"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"- ci-reconcile (gate probe negative"* ]]
+	! grep -qF "ci-reconcile" "$BATS_TEST_TMPDIR/chainsaw.args"
+}
+
+@test "ci-reconcile selected when the ci-runtime Kustomization is present" {
+	STUB_CIRUNTIME_RC=0 run "$SW"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"+ ci-reconcile"* ]]
+	grep -qF "ci-reconcile" "$BATS_TEST_TMPDIR/chainsaw.args"
 }

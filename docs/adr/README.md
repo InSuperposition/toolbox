@@ -28,5 +28,6 @@ superseded.
 | [0019](0019-cv-frontend-timoni-module-and-k8s-target.md) | `cv_frontend` is a Timoni module delivered into the OrbStack cluster via Flux (amends 0009 — the demo app now also runs as a k8s Deployment; the pitchfork container is retained) |
 | [0020](0020-imagevalidatingpolicy-on-the-dev-reference-cluster.md) | One Kyverno `ImageValidatingPolicy` verifies the `cv_frontend` approval attestation at admission on the dev *reference* cluster (narrows the "production only" Kyverno deferral); pins Kyverno v1.19.1; `attestation-sign.sh` gains sigstore discovery annotations |
 | [0021](0021-cv-frontend-publish-is-a-host-operator-step.md) | `cv_frontend` manifest render+publish is a host `mise run frontend:publish` step (verify → `timoni build` → `flux push`), not a Tekton Task — matches the operator-boundary seam (ADR 0013), avoids authoring a `timoni` container image; delivery stays declarative Flux CRs |
+| [0022](0022-trust-manager-distributes-the-kyverno-ca-bundle.md) | trust-manager (a Flux HelmRelease) merges the pinned public-root snapshot + the live `toolbox-dev-ca` Secret into the ConfigMap Kyverno mounts for the HTTPS zot pull (T7c R1b); scoped to that one consumer — buildkitd / source-controller routing deferred to R1b-ii; R1b-i installs the tool only |
 
 Architecture: `docs/designs/`. Open work: `TODOS.md`.

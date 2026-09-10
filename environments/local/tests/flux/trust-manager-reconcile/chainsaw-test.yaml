@@ -1,0 +1,103 @@
+# [k8s]-gated (environments/local/scripts/flux-chainsaw.sh skips without an
+# orbstack cluster running a bootstrapped Flux). ALWAYS-RUN — no probe: once
+# trust-manager-helmrelease.yaml is on the ref the FluxInstance syncs, this
+# test must pass, and a regression that drops it from the Flux inventory
+# must turn the run RED, not green-skip (T7c R1b-i eng review, Codex #4).
+#
+# In its own subdir so chainsaw discovers it (chainsaw's default --test-file
+# is the fixed name `chainsaw-test`; a sibling test needs its own subdir —
+# same layout as ci-reconcile/, flux-reconcile/).
+#
+# Asserts the RUNNING state of the trust-manager install (docs/adr/0022) —
+# it does NOT bootstrap or tear down. "HelmRelease Ready" alone does not
+# prove trust-manager works: the chart ships its own ValidatingWebhookConfig
+# (`failurePolicy: Fail`) whose caBundle is populated by cert-manager's
+# cainjector from a chart-created self-signed Certificate. So the last step
+# server-side dry-run applies a Bundle — if the webhook cert / caBundle /
+# controller is broken, that apply fails (R1b-i eng review, Codex #2).
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: trust-manager-reconcile
+spec:
+  timeouts:
+    apply: 90s
+    assert: 90s
+    error: 90s
+  steps:
+    - name: helmrelease-is-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: helm.toolkit.fluxcd.io/v2
+              kind: HelmRelease
+              metadata:
+                name: trust-manager
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] | [0].status): "True"
+
+    - name: controller-deployment-available
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: trust-manager
+                namespace: cert-manager
+              status:
+                (conditions[?type == 'Available'] | [0].status): "True"
+                (availableReplicas): 1
+
+    - name: webhook-certificate-is-ready
+      try:
+        - assert:
+            # The chart's self-signed leaf for its own webhook — independent
+            # of toolbox-dev-ca. cainjector reads this cert's Secret.
+            resource:
+              apiVersion: cert-manager.io/v1
+              kind: Certificate
+              metadata:
+                name: trust-manager
+                namespace: cert-manager
+              status:
+                (conditions[?type == 'Ready'] | [0].status): "True"
+
+    - name: webhook-cabundle-is-injected
+      try:
+        - assert:
+            # cainjector populated the caBundle from the cert above — a
+            # non-empty base64 blob. Empty == API-server -> webhook TLS is
+            # broken and every Bundle apply would fail closed.
+            resource:
+              apiVersion: admissionregistration.k8s.io/v1
+              kind: ValidatingWebhookConfiguration
+              metadata:
+                name: trust-manager
+              (webhooks[0].clientConfig.caBundle != null): true
+              (length(webhooks[0].clientConfig.caBundle) > `100`): true
+
+    - name: a-bundle-passes-the-webhook
+      try:
+        - apply:
+            # Server-side DRY RUN — exercises the validating webhook
+            # (failurePolicy: Fail) + the trust-manager controller's schema
+            # without persisting anything. A broken webhook / down controller
+            # fails this step. namespaceSelector matches no namespace, so
+            # even a real apply would sync nothing.
+            dryRun: true
+            resource:
+              apiVersion: trust.cert-manager.io/v1alpha1
+              kind: Bundle
+              metadata:
+                name: trust-manager-reconcile-webhook-probe
+              spec:
+                sources:
+                  - useDefaultCAs: true
+                target:
+                  configMap:
+                    key: ca-certificates.crt
+                  namespaceSelector:
+                    matchLabels:
+                      toolbox.dev/trust-manager-probe: "never-matches"

@@ -6,13 +6,18 @@ set -euo pipefail
 # line and exits 0 — GitHub runners have no OrbStack (same precedent as
 # ci/scripts/chainsaw-test.sh).
 #
-# With a cluster + Flux it runs `chainsaw test` over
-# environments/local/tests/flux/. The Test asserts the RUNNING Flux state
-# (Ready conditions, the generated GitRepository artifact, the cosign-verified
-# OCIRepository, the adopted HelmRelease, the zot Kustomization) — it does
-# NOT bootstrap or tear down. The full bootstrap path is the documented
-# `mise run local:flux:bootstrap` acceptance run (PR #19), and the
-# drift-and-revert is a manual check in that same run.
+# With a cluster + Flux it runs `chainsaw test` over the runnable subdirs of
+# environments/local/tests/flux/. Each subdir holds ONE Test asserting the
+# RUNNING state of one slice of the reconcile — it does NOT bootstrap or
+# tear down (the bootstrap path + drift-and-revert are the documented
+# `mise run local:flux:bootstrap` acceptance run, PR #19).
+#
+# SUBDIR GATING (`subdir_gate`): a subdir whose CRs are merged to `main`
+# ALWAYS runs — a regression that drops one from the Flux inventory must
+# turn the run RED, not green-skip (R1b-i eng review, Codex #4). A subdir
+# whose CRs are not yet on the ref the FluxInstance syncs gets a `kubectl
+# get` probe so a feature branch does not fail on the not-yet-reconciled
+# state; that probe is transitional and removed once the chunk merges.
 #
 # Test seam: TOOLBOX_FLUX_SKIP_CHAINSAW=1 forces the skip path.
 
@@ -31,6 +36,23 @@ skip() {
 	exit 0
 }
 
+# Per-subdir gate. Exit 0 => run the subdir. Exit non-zero => skip it.
+# Keep `flux-reconcile` + any merged chunk in the always-run arm; only a
+# not-yet-on-`main` chunk gets a probe (and only until it merges).
+subdir_gate() {
+	case "$1" in
+	flux-reconcile | trust-manager-reconcile) return 0 ;;
+	ci-reconcile)
+		# ci-runtime Kustomization exists on the cluster only once
+		# environments/local/flux/{ci-runtime,ci-defs}.yaml are on the synced
+		# ref (T7c Increment 2 — merged PR #21; probe kept for branch safety).
+		kubectl --context "$CONTEXT" -n flux-system \
+			get kustomization.kustomize.toolkit.fluxcd.io ci-runtime >/dev/null 2>&1
+		;;
+	*) return 0 ;; # a new subdir defaults to always-run
+	esac
+}
+
 [ -z "${TOOLBOX_FLUX_SKIP_CHAINSAW:-}" ] || skip "TOOLBOX_FLUX_SKIP_CHAINSAW set"
 command -v chainsaw >/dev/null || skip "chainsaw not on PATH"
 kubectl config get-contexts -o name 2>/dev/null | grep -qxF "$CONTEXT" ||
@@ -40,27 +62,20 @@ kubectl --context "$CONTEXT" cluster-info >/dev/null 2>&1 ||
 kubectl --context "$CONTEXT" -n flux-system get fluxinstance flux >/dev/null 2>&1 ||
 	skip "Flux not bootstrapped (mise run local:flux:bootstrap)"
 
-# tests/flux/ has one subdir per Test (chainsaw's default --test-file is the
-# fixed name `chainsaw-test`, so a second Test needs its own subdir — same
-# layout as ci/tests/<name>/chainsaw-test.yaml):
-#
-#   flux-reconcile/  the PR #19/#20 running-Flux checks — always run
-#   ci-reconcile/    the T7c Increment 2 ci/{runtime,tasks,pipelines} reconcile
-#
-# ci-reconcile asserts the ci-runtime / ci-tasks / ci-pipelines Kustomization
-# CRs, which exist on the cluster only once this branch's
-# environments/local/flux/{ci-runtime,ci-defs}.yaml are on the ref the
-# FluxInstance syncs. Until then, run flux-reconcile only. Probe: the
-# ci-runtime Kustomization in flux-system. (chainsaw 0.2.15's
-# --exclude-test-regex does not filter reliably — scope by --test-dir.)
-if kubectl --context "$CONTEXT" -n flux-system \
-	get kustomization.kustomize.toolkit.fluxcd.io ci-runtime >/dev/null 2>&1; then
-	target="$TESTS_DIR"
-	echo "flux-chainsaw: running chainsaw over environments/local/tests/flux/ (all tests)"
-else
-	target="$TESTS_DIR/flux-reconcile"
-	echo "flux-chainsaw: ci-runtime Kustomization absent — running flux-reconcile only" \
-		"(ci-reconcile needs the T7c Increment 2 CRs on the synced ref)"
-fi
+run_dirs=()
+for d in "$TESTS_DIR"/*/; do
+	[ -d "$d" ] || continue
+	name="$(basename "$d")"
+	if subdir_gate "$name"; then
+		run_dirs+=("$d")
+		echo "flux-chainsaw: + $name"
+	else
+		echo "flux-chainsaw: - $name (gate probe negative — CRs not on the synced ref yet)"
+	fi
+done
 
-exec chainsaw test --config "$REPO_ROOT/.chainsaw.yaml" --kube-context "$CONTEXT" "$target"
+[ "${#run_dirs[@]}" -gt 0 ] || skip "no runnable tests/flux subdirs"
+
+args=(test --config "$REPO_ROOT/.chainsaw.yaml" --kube-context "$CONTEXT")
+for d in "${run_dirs[@]}"; do args+=(--test-dir "$d"); done
+exec chainsaw "${args[@]}"

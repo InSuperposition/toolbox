@@ -199,6 +199,30 @@ approval must persist. `.../rotate` on the same key would keep old versions
 verifiable but the *exported* public key still changes, so a full reset is
 simpler while nothing real depends on the key.
 
+### Dev CA (`toolbox-dev-ca`) rotation runbook + `rotationPolicy` decision — P2
+
+**What:** Define how the `toolbox-dev-ca` CA `Certificate`
+(`environments/local/cert-manager/issuers.yaml`) renews and re-keys, and a
+runbook for it.
+
+**Why:** cert-manager renews the CA on its duration cycle. With the default
+`privateKey.rotationPolicy` (key reuse) a renewed CA cert keeps validating
+existing leaves, but a *key* rotation (`rotationPolicy: Always`, or a manual
+re-key on compromise) briefly leaves the old and new roots mutually
+non-validating — every leaf (`openbao-tls` today, `zot-tls` after T7c R1b-ii)
+and every distributed CA bundle breaks mid-rotation. Undefined today.
+
+**Context:** trust-manager (T7c R1b-i) tracking the live `toolbox-dev-ca`
+Secret covers the renew-same-key case for the Kyverno bundle. The open part
+is key rotation: cert-manager's trust-bundle-then-issuer ordering, whether to
+run overlapping roots, and a `kubectl`-level runbook. Surfaced by the Codex
+outside voice on the T7c R1b-i eng review (2026-09-10); R1b-ii carries a
+one-line "acknowledged limitation" pointer here.
+
+**Depends on / blocked by:** nothing. Not blocking T7c R1b-i or R1b-ii.
+Production (`environments/production/`, T7d) needs a real answer; the local
+dev cluster's `rebuild → re-approve → re-pin` disaster path is the interim.
+
 ### Auth + multi-member DX — DEFERRED, no trigger yet
 
 **Status (2026-09-08):** Deferred, not scheduled. YAGNI — there is one
@@ -601,26 +625,49 @@ that re-runs on a `deploy/frontend/Dockerfile` `FROM`-digest change is still
 open. Once Cilium's datapath is settled (Cilium planning session), revisit
 whether the seed + mirror is still load-bearing or just an optimization.
 
-**T7c/T7d distribution phase (was T7b4/T7b5).**
-`ci/pipelines/*` + `ci/tasks/*` distributed by the chosen mechanism (`tkn bundle
-push` → digest, or `flux push artifact` → `OCIRepository` digest), `@sha256:`
-pinned in `deploy/frontend/`, cosign-signed; then **delete
-`.github/workflows/build-cv-frontend.yml`** once build + evidence + approval +
-consumption are demonstrated in-cluster end to end (T7b3 builds the chain; its
-end-to-end demo closes it — this phase adds pinned distribution, retires GHA). **Do
-not carry `build-cv-frontend.yml`'s embedded `run:` shell** (`:48` `tr`
-lowercase, `:98` digest-extract + `case` guard) into anything — extract to a
-tested script or delete with the workflow.
+**T7c/T7d distribution tail — RESCOPED 2026-09-10** (`/plan-eng-review` +
+Codex; plan `~/.claude/plans/t7c-distribution-t7d.md`). Codex killed the
+first framing (the Flux-synced git SHA is **not** a per-run def pin — Flux
+tracks mutable `main`). The real blocker: the in-cluster build pushes to the
+plain-HTTP zot, Kyverno referrer discovery needs HTTPS. Chunked, blocker
+first:
 
-**T7d — production repoint.** The local zot is already Flux-reconciled
-(`environments/local/flux/zot-sync.yaml`, Increment 1a). The eventual
-`environments/production/` gets a zot with a real backup policy (the local
-zot's disaster path is rebuild → re-approve → re-pin — acceptable for dev, not
-prod). Effort: ~1d.
+- **R1a (SPIKE)** — ✅ DONE 2026-09-10, **GO**. Kyverno's admission
+  controller can trust the dev CA for the HTTPS zot pull via chart values
+  (`caCertificates`), `allowInsecureRegistry=false`. The mount replaces the
+  whole trust store → need a merged bundle → trust-manager (ADR 0022).
+- **R1b-i** — trust-manager install (Flux `HelmRelease` + `trust-manager.lock`
+  + `trust-manager-reconcile` chainsaw + ADR 0022). Eng-reviewed 2026-09-10.
+  _(this branch)_
+- **R1b-ii** — `zot-tls` leaf + a trust-manager `Bundle` → the Kyverno CA
+  ConfigMap; zot HTTPS-only; `OCIRepository frontend` `insecure: false`;
+  buildkitd registry CA; `TOOLBOX_ZOT_CACERT` mise `[env]`; delete the
+  `--plain-http` paths + `attestation_is_local_registry`.
+- **R2** — repoint `current-image.txt` / `timoni.lock` / `pipelinerun.cue`
+  `#image` / the IVPol glob to `zot.zot.svc:5000/cv-frontend*`; re-sign.
+- **R3** — one documented end-to-end acceptance run (zot only), each hop +
+  digest asserted. Closes T7b's deferred end-to-end demo.
+- **R4** — delete `.github/workflows/build-cv-frontend.yml` + the GHCR
+  `cv-frontend*` packages + the verified doc sweep. Gated on R3. **Do not
+  carry `build-cv-frontend.yml`'s embedded `run:` shell** (`:48` `tr`,
+  `:98` digest-extract + `case`) into anything.
+- **R5 (DEFERRED)** — OCI-bundle distribution of the `ci/` defs
+  (`tkn bundle push`, self-contained Pipeline + Task closure, `@sha256:`
+  resolver pins). This is ADR 0014's stated end state, recorded UNFINISHED —
+  per-run def pinning is unfinished until this ships. **Trigger:** a 2nd
+  `ci/` consumer, OR `environments/production/`. Until then a `PipelineRun`
+  uses whatever `ci-{tasks,pipelines}` last reconciled from `main` —
+  acceptable for a single-operator dev cluster, **not** a pin.
+
+**T7d — production repoint (DEFERRED).** Trigger = `environments/production/`
+exists (needs `cluster-k0sctl`, unbuilt). Nothing to repoint until then. With
+R1 done, production's zot is HTTPS + the dev-CA pattern from day one
+(production swaps the CA `issuerRef` for a real backend, leaves the leaves).
+T7d = a `TODOS.md` checklist next to O4/O5, no estimate.
 
 **Priority:** P2 · **Depends on:** ~~T5 + T5b~~ done. **T7b0–T7b3** ✓ →
-**T7c pre-plan + Increments 0/1a/1b/2** ✓ → Increment 4+ (in-cluster OpenBao) +
-the distribution phase + T7d.
+**T7c pre-plan + Increments 0/1a/1b/2** ✓ → Increment 4 (in-cluster OpenBao) ✓
+→ distribution tail `R1a ✓ → R1b-i → R1b-ii → R2 → R3 → R4`; R5 + T7d deferred.
 
 ### T-DR — declarative disaster recovery for the in-cluster OpenBao — P2, planning session
 

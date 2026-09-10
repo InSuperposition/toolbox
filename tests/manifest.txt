@@ -29,7 +29,7 @@ bats    environments/local/scripts/tests/cert-manager-kubeconform.bats  4
 bats    environments/local/scripts/tests/kyverno-kubeconform.bats  5
 bats    environments/local/scripts/tests/kyverno-chainsaw.bats   5
 bats    environments/local/scripts/tests/frontend-chainsaw.bats  5
-bats    environments/local/scripts/tests/flux-chainsaw.bats      4
+bats    environments/local/scripts/tests/flux-chainsaw.bats      7
 bats    environments/local/scripts/tests/openbao-verify.bats     8
 bats    environments/local/scripts/tests/openbao-bootstrap.bats  7
 bats    environments/local/scripts/tests/openbao-chainsaw.bats   5
