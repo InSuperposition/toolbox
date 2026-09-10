@@ -84,6 +84,18 @@ seed_host_secrets() {
 	[[ "$output" == *"not on PATH"* ]]
 }
 
+@test "the approval-key assertion reads the endpoint directly, never via a nested \`mise run\`" {
+	# T7c Increment 4 eng review, Codex #4: `mise run` re-applies mise.toml's
+	# [env], pinning VAULT_ADDR at the host loopback — so an assertion routed
+	# through `mise run attestation:export-pubkey` verifies the host, not the
+	# migrated cluster. assert_key_preserved must call cosign directly.
+	# no non-comment line invokes the attestation mise task
+	run bash -c "grep -vE '^[[:space:]]*#' '$SW' | grep -q 'mise run attestation'"
+	[ "$status" -ne 0 ]
+	run grep -Eq 'cosign public-key --key openbao://approval-key' "$SW"
+	[ "$status" -eq 0 ]
+}
+
 @test "shellcheck-clean" {
 	run shellcheck "$SW"
 	[ "$status" -eq 0 ]
