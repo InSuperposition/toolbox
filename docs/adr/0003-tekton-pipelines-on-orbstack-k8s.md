@@ -22,5 +22,8 @@ Considered and rejected:
   contradicts the "no production cluster in this wedge" premise. Belongs
   after the pipeline is proven, not instead of it.
 
-Status: Phase 1 ships this without Tekton (GitHub Actions + GHCR). Tekton
-(Phase 2) is deferred and re-scoped — see `TODOS.md`.
+Status: accepted. Phase 1 shipped (GitHub Actions + GHCR). Phase 2 — the
+Tekton Pipeline on OrbStack k8s — shipped: the build/scan/gate pipeline
+(`ci/`, T7b1–b3) reconciled by Flux (T7c Increment 2). Tekton Chains
+provenance is **T8**, still blocked on the in-cluster OpenBao move
+(`TODOS.md` — the loopback listener cannot serve an in-cluster Chains pod).
