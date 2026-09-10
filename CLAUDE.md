@@ -234,7 +234,7 @@ non-overlapping claim:
 | Layer | Tool | Notes |
 |---|---|---|
 | k8s manifests, static | kubeconform | Schema validation, no cluster needed, fast pre-merge gate. First user: `ci/` (T7a) — via `ci/scripts/kubeconform-scan.sh` (the `-schema-location` template collides with hk's own), Tekton has no standalone validator so the Task is checked against a v1 CRD schema vendored from the pinned release at `ci/tests/crd-schemas/`. |
-| k8s manifests, live behavior/policy | chainsaw | End-to-end in a real/test cluster; runs after kubeconform passes. First user: `ci/` (T7a) — `[k8s]`-gated via `ci/scripts/chainsaw-test.sh` (skips, never fatal, without an orbstack cluster + Tekton — GitHub runners have no OrbStack; a documented departure from `[docker]`). |
+| k8s manifests, live behavior/policy | chainsaw | End-to-end in a real/test cluster; runs after kubeconform passes. First user: `ci/` (T7a) — `[k8s]`-gated via `ci/scripts/chainsaw-test.sh` (skips, never fatal, without an orbstack cluster + Tekton — GitHub runners have no OrbStack; a documented departure from `[docker]`). Every wrapper (`{flux,openbao,kyverno,frontend}-chainsaw.sh`, `ci/scripts/chainsaw-test.sh`) passes `--config .chainsaw.yaml` (repo root): `namespace.fastDelete: true` so a loaded single-node cluster's slow ephemeral-namespace teardown never fails the run on a non-signal (investigated 2026-09-10). |
 | OpenTofu units | `tofu test` (`.tftest.hcl`) | Native framework; tests in `<unit>/tests/`. |
 | Shell scripts | bats | Every script gets one, in `<concern>/scripts/tests/*.bats` beside the script. |
 

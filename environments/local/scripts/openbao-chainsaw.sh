@@ -20,6 +20,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TESTS_DIR="$(cd "$SCRIPT_DIR/../tests/openbao" && pwd)"
 CONTEXT="${TOOLBOX_OPENBAO_KUBE_CONTEXT:-orbstack}"
 
+# The repo-root chainsaw config (.chainsaw.yaml — `namespace.fastDelete` so a
+# loaded single-node cluster's slow ephemeral-namespace teardown does not
+# fail the run). Resolved by a marker walk, not a `../../` climb.
+REPO_ROOT="$SCRIPT_DIR"
+while [ "$REPO_ROOT" != / ] && [ ! -e "$REPO_ROOT/mise.toml" ]; do REPO_ROOT="$(dirname "$REPO_ROOT")"; done
+
 skip() {
 	echo "openbao-chainsaw: $* — skipping ([k8s] gate)"
 	exit 0
@@ -34,4 +40,4 @@ kubectl --context "$CONTEXT" cluster-info >/dev/null 2>&1 ||
 kubectl --context "$CONTEXT" -n openbao get statefulset openbao >/dev/null 2>&1 ||
 	skip "in-cluster OpenBao not deployed (mise run local:openbao:bootstrap)"
 
-exec chainsaw test --kube-context "$CONTEXT" --test-dir "$TESTS_DIR"
+exec chainsaw test --config "$REPO_ROOT/.chainsaw.yaml" --kube-context "$CONTEXT" --test-dir "$TESTS_DIR"

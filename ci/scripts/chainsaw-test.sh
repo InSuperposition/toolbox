@@ -8,7 +8,9 @@ set -euo pipefail
 #
 # With a cluster it runs `chainsaw test` over ci/tests/. chainsaw creates
 # an ephemeral namespace per test and tears it down; the committed `ci`
-# namespace is never touched.
+# namespace is never touched. `--config` points at the repo-root
+# `.chainsaw.yaml` (`namespace.fastDelete` — a loaded single-node cluster's
+# slow ephemeral-namespace teardown must not fail the run).
 #
 # Test seam: TOOLBOX_CI_SKIP_CHAINSAW=1 forces the skip path.
 
@@ -29,4 +31,5 @@ ci_kubectl -n "${TOOLBOX_CI_TEKTON_NS:-tekton-pipelines}" \
 	skip "Tekton Pipelines not installed (mise run local:tekton:install)"
 
 echo "chainsaw-test: running chainsaw test over ci/tests/"
-exec chainsaw test --kube-context "$(ci_kube_context)" "$SCRIPT_DIR/../tests"
+exec chainsaw test --config "$(ci_repo_root)/.chainsaw.yaml" \
+	--kube-context "$(ci_kube_context)" "$SCRIPT_DIR/../tests"

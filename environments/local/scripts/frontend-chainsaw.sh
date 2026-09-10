@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# hk `chainsaw-frontend` step — the [k8s]-gated running-state check for the
+# hk `chainsaw-frontend` step â the [k8s]-gated running-state check for the
 # cv_frontend in-cluster delivery (Plan B M3, docs/adr/0019). Same gate
 # shape as flux-chainsaw.sh / kyverno-chainsaw.sh:
 #
 #   - no chainsaw / no kube-context / cluster unreachable -> skip, exit 0
 #   - the `frontend` Flux Kustomization absent -> skip, exit 0 (the M3 Flux
-#     objects have not reconciled onto this cluster yet — they only exist
+#     objects have not reconciled onto this cluster yet â they only exist
 #     once this branch is on the ref the FluxInstance syncs, i.e. after
 #     merge; same as ci-reconcile in flux-chainsaw.sh)
 #
 # It asserts DELIVERY, not app health: the cv_frontend app has a known Remix
 # v3 boot crash (deploy/frontend/README.md), so the tests check that the
 # rendered Deployment carries the approved image digest and that K1's
-# ImageValidatingPolicy admitted it — NOT that the pod is Available.
+# ImageValidatingPolicy admitted it â NOT that the pod is Available.
 #
 # Two Tests (chainsaw's default --test-file is the fixed name `chainsaw-test`,
 # so each needs its own subdir):
@@ -29,8 +29,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TESTS_DIR="$(cd "$SCRIPT_DIR/../tests/frontend" && pwd)"
 CONTEXT="${TOOLBOX_FRONTEND_KUBE_CONTEXT:-orbstack}"
 
+# The repo-root chainsaw config (.chainsaw.yaml — namespace.fastDelete so a
+# loaded single-node cluster's slow ephemeral-namespace teardown does not
+# fail the run). Resolved by a marker walk, not a `../..` climb.
+REPO_ROOT="$SCRIPT_DIR"
+while [ "$REPO_ROOT" != / ] && [ ! -e "$REPO_ROOT/mise.toml" ]; do REPO_ROOT="$(dirname "$REPO_ROOT")"; done
+
 skip() {
-	echo "frontend-chainsaw: $* — skipping ([k8s] gate)"
+	echo "frontend-chainsaw: $* â skipping ([k8s] gate)"
 	exit 0
 }
 
@@ -43,4 +49,4 @@ kubectl --context "$CONTEXT" cluster-info >/dev/null 2>&1 ||
 kubectl --context "$CONTEXT" -n flux-system get kustomization.kustomize.toolkit.fluxcd.io frontend >/dev/null 2>&1 ||
 	skip "the frontend Flux Kustomization is not reconciled (environments/local/flux/frontend.yaml)"
 
-exec chainsaw test --kube-context "$CONTEXT" --test-dir "$TESTS_DIR"
+exec chainsaw test --config "$REPO_ROOT/.chainsaw.yaml" --kube-context "$CONTEXT" --test-dir "$TESTS_DIR"

@@ -20,6 +20,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TESTS_DIR="$(cd "$SCRIPT_DIR/../tests/flux" && pwd)"
 CONTEXT="${TOOLBOX_FLUX_KUBE_CONTEXT:-orbstack}"
 
+# The repo-root chainsaw config (.chainsaw.yaml — namespace.fastDelete so a
+# loaded single-node cluster's slow ephemeral-namespace teardown does not
+# fail the run). Resolved by a marker walk, not a `../..` climb.
+REPO_ROOT="$SCRIPT_DIR"
+while [ "$REPO_ROOT" != / ] && [ ! -e "$REPO_ROOT/mise.toml" ]; do REPO_ROOT="$(dirname "$REPO_ROOT")"; done
+
 skip() {
 	echo "flux-chainsaw: $* — skipping ([k8s] gate)"
 	exit 0
@@ -57,4 +63,4 @@ else
 		"(ci-reconcile needs the T7c Increment 2 CRs on the synced ref)"
 fi
 
-exec chainsaw test --kube-context "$CONTEXT" "$target"
+exec chainsaw test --config "$REPO_ROOT/.chainsaw.yaml" --kube-context "$CONTEXT" "$target"
