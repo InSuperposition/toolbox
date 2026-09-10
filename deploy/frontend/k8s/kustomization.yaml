@@ -1,0 +1,12 @@
+# Explicit inventory for the deploy/frontend/k8s/ path — the `frontend`
+# Namespace, reconciled by the Flux `frontend-ns` Kustomization
+# (environments/local/flux/frontend.yaml). Explicit for the same reason as
+# ci/runtime/kustomization.yaml: an auto-generated recursive inventory would
+# slurp anything added here later.
+#
+# deploy/frontend/ owns this inventory; environments/local/flux/ owns the
+# deployment policy that points a Flux Kustomization at it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml

@@ -1,0 +1,64 @@
+# [k8s]-gated (environments/local/scripts/frontend-chainsaw.sh skips without
+# an orbstack cluster whose `frontend` Flux Kustomization has reconciled).
+# Server-side checks the static kubeconform-flux gate cannot do: the
+# rendered-manifest OCIRepository is Ready (its digest pull succeeded) and
+# the workload Kustomization only reconciled AFTER both dependsOn targets.
+#
+# Asserts the RUNNING state; does not bootstrap or tear down.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: frontend-reconcile
+spec:
+  steps:
+    - name: manifest-ocirepository-is-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: source.toolkit.fluxcd.io/v1
+              kind: OCIRepository
+              metadata:
+                name: frontend
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] | [0].status): "True"
+                (artifact.digest != null): true
+
+    - name: frontend-ns-kustomization-is-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: frontend-ns
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] | [0].status): "True"
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Namespace
+              metadata:
+                name: frontend
+                labels:
+                  toolbox.dev/cv-frontend: approval-enforced
+                  pod-security.kubernetes.io/enforce: restricted
+
+    - name: workload-kustomization-is-ready-and-depends-on-both
+      try:
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: frontend
+                namespace: flux-system
+              spec:
+                # runtime order is not ship order — the workload must not
+                # reconcile before K1's admission webhook is registered
+                (dependsOn[?name == 'frontend-ns'] | length(@)): 1
+                (dependsOn[?name == 'kyverno-policy'] | length(@)): 1
+                wait: false
+              status:
+                (conditions[?type == 'Ready'] | [0].status): "True"

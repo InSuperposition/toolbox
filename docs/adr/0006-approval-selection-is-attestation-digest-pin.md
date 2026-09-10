@@ -16,3 +16,5 @@ Status: accepted. Supersedes two earlier ideas — "latest `approvedAt` wins"
 (self-asserted timestamp, no trusted TA) and "reject is terminal"
 (conflates evidence-review with content-ban; a typo reject would kill a
 good digest forever). `approvedAt` is retained as an audit field only.
+
+**Plan B M3:** `mise run frontend:publish` (the in-cluster delivery path) reaches this same seam — it verifies the pinned attestation before rendering/pushing, so the contract holds for both the pitchfork and the k8s consumer.

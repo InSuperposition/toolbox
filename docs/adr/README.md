@@ -27,5 +27,6 @@ superseded.
 | [0018](0018-in-cluster-authoring-pipeline-and-tofu-kubernetes-ban.md) | In-cluster k8s objects go render (Timoni/CUE) → reconcile (Flux) → enforce (Kyverno) → provision (Crossplane, if activated); tofu `kubernetes_*` banned (amends 0015) |
 | [0019](0019-cv-frontend-timoni-module-and-k8s-target.md) | `cv_frontend` is a Timoni module delivered into the OrbStack cluster via Flux (amends 0009 — the demo app now also runs as a k8s Deployment; the pitchfork container is retained) |
 | [0020](0020-imagevalidatingpolicy-on-the-dev-reference-cluster.md) | One Kyverno `ImageValidatingPolicy` verifies the `cv_frontend` approval attestation at admission on the dev *reference* cluster (narrows the "production only" Kyverno deferral); pins Kyverno v1.19.1; `attestation-sign.sh` gains sigstore discovery annotations |
+| [0021](0021-cv-frontend-publish-is-a-host-operator-step.md) | `cv_frontend` manifest render+publish is a host `mise run frontend:publish` step (verify → `timoni build` → `flux push`), not a Tekton Task — matches the operator-boundary seam (ADR 0013), avoids authoring a `timoni` container image; delivery stays declarative Flux CRs |
 
 Architecture: `docs/designs/`. Open work: `TODOS.md`.

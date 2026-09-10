@@ -19,3 +19,4 @@ resources:
   - cert-manager-pki.yaml
   - kyverno-helmrelease.yaml
   - kyverno-policy.yaml
+  - frontend.yaml

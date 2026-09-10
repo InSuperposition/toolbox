@@ -1,0 +1,62 @@
+# [k8s]-gated (frontend-chainsaw.sh). Asserts DELIVERY, not app health:
+# cv_frontend has a known Remix v3 boot crash (deploy/frontend/README.md),
+# so this checks the rendered Deployment carries the approved image digest
+# and its pod's container actually started (pulled + ran, even though the
+# app then crashes) — NOT that the Deployment is Available or serving HTTP.
+# TODOS tracks adding the HTTP-200 assertion once cv_frontend is fixed.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: frontend-delivery
+spec:
+  timeouts:
+    assert: 120s
+  steps:
+    - name: deployment-runs-the-approved-image-digest
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: cv-frontend
+                namespace: frontend
+              spec:
+                template:
+                  spec:
+                    # the digest from deploy/frontend/timoni.lock (image_ref),
+                    # NOT the manifest-artifact digest
+                    (contains(containers[0].image, 'sha256:fd02f152c99b49ed0841857fcb7e75f64b664f72e69b073303dcfc4d789eb26d')): true
+
+    - name: the-pods-container-actually-started
+      try:
+        # `Scheduled` alone passes throughout ImagePullBackOff — assert the
+        # container reached a running OR terminated state (or restarted),
+        # which proves the approved image pulled and ran.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: frontend
+                labels:
+                  app.kubernetes.io/name: cv-frontend
+              (status.containerStatuses[0]):
+                (state.running != null || state.terminated != null || restartCount > `0`): true
+
+    - name: the-image-was-admitted-by-the-approval-policy
+      try:
+        # a Pod exists in ns `frontend` (PSA restricted + the approval label)
+        # running the cv_frontend image => K1's ImageValidatingPolicy, whose
+        # failurePolicy is Fail, evaluated and ADMITTED it. A denied image
+        # would leave the ReplicaSet unable to create any pod.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: frontend
+                labels:
+                  app.kubernetes.io/name: cv-frontend
+              spec:
+                (contains(containers[0].image, 'cv-frontend')): true

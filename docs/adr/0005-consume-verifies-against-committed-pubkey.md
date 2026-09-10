@@ -13,3 +13,5 @@ so a disk loss is a "resume signing" problem, not a "the gate is down"
 problem. Re-export and re-commit `attestation/cosign-approval.pub` after any
 Transit key rotation (`mise run attestation:export-pubkey`), or the consumer
 verifies new signatures against a stale key.
+
+**Plan B M3:** `mise run frontend:publish` (the in-cluster delivery path) reaches this same seam — it verifies the pinned attestation before rendering/pushing, so the contract holds for both the pitchfork and the k8s consumer.

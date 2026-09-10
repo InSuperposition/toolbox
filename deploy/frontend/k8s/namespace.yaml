@@ -1,0 +1,28 @@
+# The `frontend` namespace — the in-cluster cv_frontend delivery target
+# (Plan B M3, docs/adr/0019). Nothing else lives here; the workload comes
+# from the Flux `frontend` Kustomization (a Timoni-built OCI artifact),
+# never applied by hand.
+#
+# `toolbox.dev/cv-frontend: approval-enforced` — K1's `ImageValidatingPolicy`
+# (docs/adr/0020) matches this label, so every cv_frontend pod admitted here
+# is verified against the approval attestation. The label, not
+# `metadata.name`, is the match key so the policy's blast radius stays
+# scoped while an ephemeral-namespace chainsaw test can carry it.
+#
+# Pod Security Admission `restricted`: cv_frontend is a distroless-nonroot
+# image with a read-only root filesystem and all capabilities dropped (the
+# Timoni module's securityContext). Set explicitly, never inherited.
+#
+# `deploy/frontend/` owns this manifest (its own delivery target);
+# `environments/local/flux/frontend.yaml` owns the Flux Kustomization that
+# applies it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: frontend
+  labels:
+    app.kubernetes.io/part-of: toolbox-frontend
+    toolbox.dev/cv-frontend: approval-enforced
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

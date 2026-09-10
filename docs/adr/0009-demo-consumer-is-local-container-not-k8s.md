@@ -22,3 +22,5 @@ k8s namespace + `kubectl apply` gated by `mise run consume`). **Amended by
 now *also* runs as a Kubernetes Deployment (Timoni + Flux); the pitchfork
 container is retained as the path with full launch-time approval
 re-verification.
+
+**Plan B M3:** `mise run frontend:publish` (the in-cluster delivery path) reaches this same seam — it verifies the pinned attestation before rendering/pushing, so the contract holds for both the pitchfork and the k8s consumer.

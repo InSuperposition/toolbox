@@ -1,0 +1,83 @@
+# cv_frontend in-cluster delivery (Plan B M3, docs/adr/0019) — the Timoni
+# module rendered by `mise run frontend:publish`, pushed as an OCI artifact
+# to the local zot, and reconciled here.
+#
+# THREE Flux objects (all kept OUT of the flux-system inventory except the
+# OCIRepository, which is an always-known kind):
+#
+#   OCIRepository frontend   — pulls the rendered-manifest artifact (D_man,
+#                              deploy/frontend/timoni.lock) from the
+#                              in-cluster zot over plain HTTP (insecure: true;
+#                              credential-free). `ref.digest`, NO spec.verify
+#                              — the digest is the trust boundary (ADR 0001);
+#                              the cv_frontend IMAGE's approval attestation +
+#                              K1's ImageValidatingPolicy are the workload
+#                              trust gate, not this manifest wrapper. (An
+#                              OpenBao Transit manifest-signing key is an O4
+#                              follow-up.)
+#   frontend-ns Kustomization — applies ONLY deploy/frontend/k8s/ (the
+#                              `frontend` Namespace + its PSA + approval
+#                              label). Separate so a fresh cluster does not
+#                              deadlock the workload apply on a missing ns.
+#   frontend Kustomization    — applies the rendered workload from the
+#                              OCIRepository into ns `frontend`.
+#                              dependsOn BOTH frontend-ns (the target ns must
+#                              exist) AND kyverno-policy (the admission
+#                              webhook must be registered before the
+#                              Deployment reconciles — runtime order is not
+#                              ship order). wait: false — the cv_frontend app
+#                              has a known Remix v3 boot crash
+#                              (deploy/frontend/README.md), so `wait: true`
+#                              would health-check a Deployment that never goes
+#                              Available and this Kustomization would never
+#                              report Ready. Delivery-only is the honest
+#                              setting; chainsaw-frontend asserts delivery,
+#                              not app health.
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: frontend
+  namespace: flux-system
+spec:
+  interval: "10m"
+  url: "oci://zot.zot.svc.cluster.local:5000/cv-frontend-manifests"
+  insecure: true
+  ref:
+    digest: "sha256:48dc67f0f0cf3289a68c5297499048b443c8edd3232608bc911e3497ae828715"
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: frontend-ns
+  namespace: flux-system
+spec:
+  interval: "10m"
+  retryInterval: "30s"
+  timeout: "2m"
+  prune: true
+  wait: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: "./deploy/frontend/k8s"
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: frontend
+  namespace: flux-system
+spec:
+  interval: "10m"
+  retryInterval: "30s"
+  timeout: "5m"
+  prune: true
+  wait: false
+  dependsOn:
+    - name: frontend-ns
+    - name: kyverno-policy
+  targetNamespace: "frontend"
+  sourceRef:
+    kind: OCIRepository
+    name: frontend
+  path: "./"
