@@ -245,7 +245,7 @@ independently (Gall's Law). The full sequencing lives in `TODOS.md`.
   `attestation-sign.sh` / `attestation-verify.sh` / `frontend-deploy.sh`
   proven live against real GHCR; the demo consumer is a local `pitchfork`
   container ([ADR 0009](../adr/0009-demo-consumer-is-local-container-not-k8s.md));
-  `mise run local:openbao:snapshot` / `local:openbao:snapshot-restore` for backup.
+  `mise run local:openbao:snapshot` for backup, `mise run local:openbao:bootstrap` to restore.
   Registry is **GHCR** — hosted, zero-ops, unmetered on public repos.
 
 - **Phase 2 — Tekton (T7a ✓ + `ci/` skeleton ✓ 2026-09-08; T7b re-cut
@@ -411,7 +411,7 @@ GitHub Actions (public repo, unmetered)          Local (repo owner's machine)
 | `mise run frontend:deploy` / launch re-verify | attestation missing / bad sig / wrong subject / verdict rejected | `attestation-verify.sh` exit 1 — "attestation verification failed" (cosign's claim check) or "verdict: rejected" (CUE); cosign's own output in the log |
 | launch re-verify | GHCR transient failure | `attestation-verify.sh` exit 3 → `frontend-serve.sh` bounded retry + backoff → visible stopped state, never a hang |
 | `attestation-verify.sh` | OpenBao down | not applicable — verify never touches OpenBao |
-| OpenBao Transit | raft store lost | past approvals still verify (pubkey in-repo); `mise run local:openbao:snapshot-restore` restores signing ability |
+| OpenBao Transit | raft store lost | past approvals still verify (pubkey in-repo); re-run `mise run local:openbao:bootstrap` (key-preserving -force restore) restores signing ability |
 
 ---
 

@@ -1,5 +1,5 @@
 # Mocks helm / kubernetes / vault (no cluster) to assert the Phase-C
-# (Increment 4c) resource graph: the SOPS key is AES + locked down, the
+# resource graph: the SOPS key is AES + locked down, the
 # decrypt policy is decrypt-ONLY, the k8s-auth role is scoped to Flux's
 # kustomize-controller, and — the anti-rotation guard — `approval-key` can
 # never be tofu-managed through this unit.

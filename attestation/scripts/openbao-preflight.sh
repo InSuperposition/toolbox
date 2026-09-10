@@ -7,6 +7,9 @@ set -euo pipefail
 # says nothing about whether this caller can actually reach the Transit key,
 # so this also does a real authenticated read of the key.
 #
+# The local OpenBao runs in-cluster (ADR 0016); VAULT_ADDR / VAULT_CACERT /
+# VAULT_TOKEN come from mise.toml [env] (the bridge writes the token + CA).
+#
 # Exit 0  — reachable, unsealed, authorized, key present. Safe to sign.
 # Exit 3  — any of: unreachable / uninitialised / sealed / unauthorized /
 #           missing-key. stderr names which and the fix.
@@ -17,7 +20,7 @@ set -euo pipefail
 # Usage: openbao-preflight.sh [key-name]   (default: approval-key)
 
 KEY_NAME="${1:-approval-key}"
-: "${VAULT_ADDR:=http://127.0.0.1:8200}"
+: "${VAULT_ADDR:=https://openbao.openbao.svc.cluster.local:8200}"
 export VAULT_ADDR
 
 die() {
@@ -36,7 +39,7 @@ set -e
 
 if [ -z "$status_json" ]; then
 	die "cannot reach OpenBao at $VAULT_ADDR" \
-		"mise run local:openbao:start   (then: mise run local:openbao:bootstrap if never initialised)"
+		"mise run local:openbao:bootstrap"
 fi
 
 # --- initialised? ---
@@ -48,13 +51,13 @@ if [ "$(echo "$status_json" | jq -r '.initialized')" != "true" ]; then
 fi
 
 # --- sealed? ---
-# Static-seal auto-unseal (ADR 0010/0011): the daemon unseals itself from
-# $OPENBAO_STATE_DIR/seal.key on every start — there is NO printed unseal
-# key. A sealed initialised instance means seal.key is missing/unreadable
-# or the daemon has not restarted since it went away.
+# Static-seal auto-unseal (ADR 0016): the openbao-0 pod unseals itself from
+# the mounted openbao-seal Secret on every start — there is NO printed
+# unseal key. A sealed initialised instance means the Secret is
+# missing/wrong or the pod has not restarted since it went away.
 if [ "$status_rc" -eq 2 ] || [ "$(echo "$status_json" | jq -r '.sealed')" = "true" ]; then
 	die "OpenBao is sealed (static seal did not auto-unseal)" \
-		"check \$OPENBAO_STATE_DIR/seal.key exists and is readable, then: mise run local:openbao:start   (if seal.key is lost the raft data is unrecoverable — restore a snapshot bundle: mise run local:openbao:snapshot-restore)"
+		"re-run mise run local:openbao:bootstrap (it re-creates the openbao-seal Secret and re-does the key-preserving -force restore from the snapshots/ bundle)"
 fi
 
 # --- authorized + key present? ---

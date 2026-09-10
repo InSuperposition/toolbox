@@ -29,15 +29,20 @@ tekton-cli = "0.46.0"
 timoni = "0.34.0"
 trivy = "0.74.0"
 
-# The local OpenBao daemon (ADR 0010): fixed loopback address; its secrets
-# are 0600 files under $OPENBAO_STATE_DIR (ADR 0011 — no keychain, no fnox).
-# `mise` chains [env] vars and runs a shell for `exec()`, so VAULT_TOKEN is
-# injected into every `mise run` task (and the interactive shell) with no
-# shell hook. A missing root.token yields an empty VAULT_TOKEN, not an error;
+# The local OpenBao runs in-cluster (ADR 0016): a tofu-owned raft
+# StatefulSet the bootstrap bridge brings up, reached over TLS at the
+# ClusterIP DNS name (OrbStack routes the Mac host into the cluster
+# network). Its bootstrap secrets are 0600 files under $OPENBAO_STATE_DIR
+# (ADR 0011 — no keychain, no fnox); the bridge writes root.token + seal.key
+# (the restore bundle's) and tls/ca.crt (the live cert-manager CA) on every
+# successful run. `mise` chains [env] vars and runs a shell for `exec()`, so
+# VAULT_TOKEN / VAULT_CACERT reach every `mise run` task and the interactive
+# shell with no shell hook. Missing files yield empty values, not errors;
 # `openbao-preflight.sh` turns that into a clear "run mise run local:openbao:bootstrap".
 [env]
-VAULT_ADDR = "http://127.0.0.1:8200"
+VAULT_ADDR = "https://openbao.openbao.svc.cluster.local:8200"
 OPENBAO_STATE_DIR = "{{ exec(command='echo \"${XDG_STATE_HOME:-$HOME/.local/state}/toolbox/openbao\"') }}"
+VAULT_CACERT = "{{ exec(command='f=\"${XDG_STATE_HOME:-$HOME/.local/state}/toolbox/openbao/tls/ca.crt\"; [ -f \"$f\" ] && echo \"$f\" || true') }}"
 VAULT_TOKEN = "{{ exec(command='cat \"$OPENBAO_STATE_DIR/root.token\" 2>/dev/null || true') }}"
 
 # `mise install` is the only bootstrap step (CLAUDE.md § mise) — wire the
@@ -54,43 +59,20 @@ run = "hk check --all"
 description = "Apply the auto-fixable half of `mise run check` (formatters)."
 run = "hk fix --all"
 
-# OpenBao tasks are namespaced <environment>:<domain>:<verb> (Phase 3 of
-# the repo restructure, docs/designs/repo-structure.md § mise task map).
-# A future `local:bootstrap` aggregate fans out to these.
+# OpenBao tasks are namespaced <environment>:<domain>:<verb>
+# (docs/designs/repo-structure.md § mise task map). The in-cluster unit is
+# environments/local/openbao/ (ADR 0016).
+[tasks."local:openbao:verify"]
+description = "Assert environments/local/openbao/openbao.lock's chart_digest matches the pinned tag (the OpenTofu helm provider cannot pin a digest), then render the chart by digest and check the expected shape. Self-skips offline."
+run = "./environments/local/scripts/openbao-verify.sh"
+
 [tasks."local:openbao:bootstrap"]
-description = "One-time PER-MACHINE OpenBao bootstrap (render config, register the global pitchfork daemon, init, provision Transit, write the 0600 secret files) — see environments/local/README.md"
+description = "One-time per cluster (disaster-recovery re-run safe): bring the in-cluster OpenBao up — pick the source (a live host daemon, an off-machine restore bundle, or fail with the disaster runbook), create ns + seal Secret, tofu apply the helm_release, first `bao operator init`, key-preserving `raft snapshot restore -force`, hard-assert approval-key unchanged, tofu apply Phase C (sops key, k8s-auth). Needs Flux bootstrapped. See environments/local/README.md."
 run = "./environments/local/scripts/openbao-bootstrap.sh"
 
-[tasks."local:openbao:start"]
-description = "Start the machine-global OpenBao daemon (after a reboot, or if it was stopped). No-op if already running."
-run = "pitchfork start global/openbao"
-
-[tasks."local:openbao:stop"]
-description = "Stop the machine-global OpenBao daemon (leaves it registered — `local:openbao:start` brings it back)."
-run = "pitchfork stop global/openbao"
-
-[tasks."local:openbao:reset"]
-description = "Machine-wide: stop + unregister the global OpenBao daemon (waits for it to exit), wipe its raft store / config / seal.key / root.token / recovery.key / tofu state. snapshots/ (the restore bundle) is kept."
-run = "./environments/local/scripts/openbao-reset.sh"
-
 [tasks."local:openbao:snapshot"]
-description = "Save a COMPLETE restore bundle (raft snapshot + seal.key + root.token) to $OPENBAO_STATE_DIR/snapshots/. Copy that whole directory off-machine for real disaster recovery."
+description = "Save a COMPLETE restore bundle (raft snapshot + seal.key + root.token) from the in-cluster OpenBao to $OPENBAO_STATE_DIR/snapshots/. Copy that whole directory off-machine — after the host daemon's retirement it is the only genesis path (ADR 0016)."
 run = "./environments/local/scripts/openbao-snapshot.sh"
-
-[tasks."local:openbao:snapshot-restore"]
-description = "Restore the local OpenBao from a snapshot bundle — args: [-force] <snapshot-file>. The bundle's seal.key + root.token must be in $OPENBAO_STATE_DIR first (see environments/local/README.md § disaster). Use -force into a freshly bootstrapped instance."
-run = "bao operator raft snapshot restore"
-
-# T7c Increment 4 — the in-cluster OpenBao move (environments/local/openbao-
-# cluster/, docs/adr/0016). 4a is the pinned helm_release + its chart-pin
-# gate; the bootstrap bridge (local:openbao-cluster:bootstrap) lands in 4b.
-[tasks."local:openbao-cluster:helm-verify"]
-description = "Assert environments/local/openbao-cluster/openbao-cluster.lock's chart_digest matches the pinned tag (the OpenTofu helm provider cannot pin a digest), then render the chart by digest and check the Increment 4a shape. Self-skips offline."
-run = "./environments/local/scripts/openbao-cluster-verify.sh"
-
-[tasks."local:openbao-cluster:bootstrap"]
-description = "One-time per cluster (disaster-recovery re-run safe): move the local OpenBao into the OrbStack cluster — snapshot the host, create ns + seal Secret, tofu apply the helm_release, first `bao operator init`, key-preserving `raft snapshot restore -force`, hard-assert approval-key unchanged. Needs the host daemon up + Flux bootstrapped. Phase C (transit/keys/sops, k8s-auth) is Increment 4c."
-run = "./environments/local/scripts/openbao-cluster-bootstrap.sh"
 
 # The attestation sign/verify seam is its own concern (docs/designs/repo-
 # structure.md, ADR 0013) — tasks namespaced attestation:<verb>.

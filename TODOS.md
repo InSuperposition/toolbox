@@ -570,16 +570,16 @@ chainsaw harness → Flux reconciles `zot` + `ci/{runtime,tasks,pipelines}` from
 `main`. The build *run* stays operator-triggered (`frontend-build.sh`), **not**
 Flux-reconciled — Pipelines-as-Code is the eventual git-event trigger, still
 deferred.
-_Remaining T7c:_ **Increment 4 — in-cluster OpenBao.** 4a–4c SHIPPED
-(#23–#25, [ADR 0016](docs/adr/0016-local-openbao-in-cluster-statefulset.md)):
-the Phase-A `helm_release`, the `openbao-cluster-bootstrap.sh` bridge
-(key-preserving `raft snapshot restore -force`, `approval-key` never
+_Remaining T7c:_ **Increment 4 — in-cluster OpenBao.** SHIPPED
+([ADR 0016](docs/adr/0016-local-openbao-in-cluster-statefulset.md)):
+`environments/local/openbao/` is a tofu-owned raft StatefulSet — Phase-A
+`helm_release`, the `openbao-bootstrap.sh` bridge (source selection,
+key-preserving `raft snapshot restore -force`, `approval-key` never
 rotated), Phase-C `vault_*` (`sops` AES key + `flux_sops` k8s-auth role).
-`/plan-eng-review` (2026-09-10) split the rest — **Plan A:** `H1 → O1 → O0 →
-O2+O3` (retire the host daemon + pitchfork, rename `openbao-cluster` →
-`openbao`), unblocks T8; **Plan B** and **T-DR** are separate sections
-below. Until Plan A lands the host daemon keeps serving loopback and T8
-(Tekton Chains provenance) stays blocked. Plan:
+The host `pitchfork` daemon is retired. `/plan-eng-review` (2026-09-10)
+split the rest into **Plan B** and **T-DR** (separate sections below). T8
+(Tekton Chains provenance) is now unblocked — the in-cluster OpenBao serves
+pods over TLS. Plan:
 `~/.claude/plans/t7c-increment4-in-cluster-openbao.md` § "ENG REVIEW — PLAN
 SPLIT".
 _Observability (from the CI-log-visibility review):_ persist **failed-step
@@ -786,11 +786,13 @@ per build (`cosign verify-attestation --key <chains-pubkey>`).
 mechanically. `environments/local/openbao` already has an empty `policies`
 input for the scoped policy.
 
-**First task, real blocker:** Chains runs in a pod on OrbStack's k8s;
-OpenBao listens on `127.0.0.1:8200`. Pods reach the host at
-`host.orb.internal`, but only once OpenBao's listener is widened past
-loopback — which means `tls_disable = true` has to become real TLS at the
-same time.
+**First task — RESOLVED:** the loopback blocker is gone. The in-cluster
+OpenBao (ADR 0016) serves pods over TLS at
+`https://openbao.openbao.svc.cluster.local:8200` with k8s-ServiceAccount
+auth. Chains adds a `chains-provenance-key` Transit key + a scoped policy
+(deny `transit/sign` on `approval-key`) + a `chains` k8s-auth role — the
+`transit_keys` / `policies` extension points on `environments/local/openbao`
+are the seam.
 
 **Also in T8:** sign the `ci/` OCI bundles with a dedicated key
 ([ADR 0014](docs/adr/0014-tekton-defs-are-oci-bundles-in-ci.md)); land

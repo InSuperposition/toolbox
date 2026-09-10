@@ -40,12 +40,12 @@ setup() {
 	[[ "$output" == *"not a full digest reference"* ]]
 }
 
-@test "OpenBao unreachable => exit 3 with the 'mise run local:openbao:start' hint" {
+@test "OpenBao unreachable => exit 3 with the 'mise run local:openbao:bootstrap' hint" {
 	# no TOOLBOX_APPROVE_KEY => the real openbao-preflight runs; point it at a dead port
 	VAULT_ADDR="http://127.0.0.1:1" run "$SCRIPTS/attestation-sign.sh" "$IMAGE"
 	[ "$status" -eq 3 ]
 	[[ "$output" == *"cannot reach OpenBao"* ]]
-	[[ "$output" == *"mise run local:openbao:start"* ]]
+	[[ "$output" == *"mise run local:openbao:bootstrap"* ]]
 }
 
 @test "missing build evidence => exit 4, no attestation" {

@@ -1,14 +1,14 @@
 #!/usr/bin/env bats
 
-# environments/local/scripts/openbao-cluster-chainsaw.sh — the [k8s] skip
+# environments/local/scripts/openbao-chainsaw.sh — the [k8s] skip
 # gate. A fake kubectl on PATH drives the skip decision; these cover only
-# that. The real end-to-end chainsaw run is the hk `chainsaw-openbao-cluster`
+# that. The real end-to-end chainsaw run is the hk `chainsaw-openbao`
 # step (skips in CI, runs against the live cluster locally) and the
-# documented `mise run local:openbao-cluster:bootstrap` acceptance run.
+# documented `mise run local:openbao:bootstrap` acceptance run.
 
 setup() {
 	load helper
-	SW="$(toolbox_repo_root)/environments/local/scripts/openbao-cluster-chainsaw.sh"
+	SW="$(toolbox_repo_root)/environments/local/scripts/openbao-chainsaw.sh"
 
 	FAKEBIN="$BATS_TEST_TMPDIR/fakebin"
 	mkdir -p "$FAKEBIN"
@@ -28,11 +28,11 @@ setup() {
 	SH
 	chmod +x "$FAKEBIN/chainsaw"
 	PATH="$FAKEBIN:$PATH"
-	export TOOLBOX_OPENBAO_CLUSTER_KUBE_CONTEXT=orbstack
+	export TOOLBOX_OPENBAO_KUBE_CONTEXT=orbstack
 }
 
-@test "TOOLBOX_OPENBAO_CLUSTER_SKIP_CHAINSAW forces the skip path, exit 0" {
-	TOOLBOX_OPENBAO_CLUSTER_SKIP_CHAINSAW=1 run "$SW"
+@test "TOOLBOX_OPENBAO_SKIP_CHAINSAW forces the skip path, exit 0" {
+	TOOLBOX_OPENBAO_SKIP_CHAINSAW=1 run "$SW"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"skipping ([k8s] gate)"* ]]
 }
@@ -52,7 +52,7 @@ setup() {
 @test "cluster up but in-cluster OpenBao not deployed -> skip naming the bootstrap task" {
 	STUB_STS_RC=1 run "$SW"
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"local:openbao-cluster:bootstrap"* ]]
+	[[ "$output" == *"local:openbao:bootstrap"* ]]
 }
 
 @test "cluster + StatefulSet present -> runs chainsaw" {

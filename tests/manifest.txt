@@ -18,9 +18,6 @@ bats    deploy/frontend/scripts/tests/frontend-deploy.bats  4    # 2 [docker] ca
 bats    deploy/frontend/scripts/tests/frontend-serve.bats   6    # 1 [docker] case skips without docker
 bats    deploy/frontend/scripts/tests/dockerfile-pin.bats   2
 bats    deploy/frontend/scripts/tests/frontend-build.bats   24
-bats    environments/local/scripts/tests/openbao-bootstrap.bats  9
-bats    environments/local/scripts/tests/openbao-reset.bats      3
-bats    environments/local/scripts/tests/openbao-snapshot.bats   3
 bats    environments/local/scripts/tests/mise-env.bats           3
 bats    environments/local/scripts/tests/zot-manifests.bats      7
 bats    environments/local/scripts/tests/tekton-install.bats     5
@@ -28,16 +25,13 @@ bats    environments/local/scripts/tests/flux-bootstrap.bats     6
 bats    environments/local/scripts/tests/flux-kubeconform.bats   4
 bats    environments/local/scripts/tests/cert-manager-kubeconform.bats  4
 bats    environments/local/scripts/tests/flux-chainsaw.bats      4
-bats    environments/local/scripts/tests/openbao-cluster-verify.bats  8
-bats    environments/local/scripts/tests/openbao-cluster-bootstrap.bats  7
-bats    environments/local/scripts/tests/openbao-cluster-chainsaw.bats  5
+bats    environments/local/scripts/tests/openbao-verify.bats     8
+bats    environments/local/scripts/tests/openbao-bootstrap.bats  7
+bats    environments/local/scripts/tests/openbao-chainsaw.bats   5
 bats    ci/scripts/tests/chainsaw-test.bats                   3
 bats    ci/scripts/tests/kubeconform-scan.bats               3
 bats    ci/scripts/tests/registry-seed.bats                  6
 bats    tests/check-coverage.bats                           3
 
-tftest  environments/local/openbao/tests/config_render.tftest.hcl  4
-tftest  environments/local/openbao/tests/keys.tftest.hcl           3
-tftest  environments/local/openbao/tests/policies.tftest.hcl       2
-tftest  environments/local/openbao-cluster/tests/helm_values.tftest.hcl  5
-tftest  environments/local/openbao-cluster/tests/phase_c.tftest.hcl      6
+tftest  environments/local/openbao/tests/helm_values.tftest.hcl   5
+tftest  environments/local/openbao/tests/phase_c.tftest.hcl       6

@@ -2,188 +2,115 @@
 
 ## Abstract
 
-The repo's local, single-node reference composition. Today: the local
-OpenBao / Transit signing backend the digest-as-source-of-truth pipeline's
-approval gate uses, plus the interim **Tekton Pipelines** install the
-`ci/` concern's build TaskRun needs (`§ Tekton` below). This environment
-**owns** the OpenBao unit (`./openbao/`, `module "secret_openbao_local"`)
-and the scripts that bring it up (`scripts/openbao-*.sh`) — ADR 0012 — and
-owns vendored-upstream installs like Tekton's controller (never `ci/`,
-same split as OpenBao). Named `local` (not left at repo root) so
+The repo's local, single-node reference composition. Today: the in-cluster
+**OpenBao / Transit** signing backend the digest-as-source-of-truth
+pipeline's approval gate uses (`./openbao/`, ADR 0016), plus the interim
+**Tekton Pipelines** install the `ci/` concern's build TaskRun needs
+(`§ Tekton` below) and the **Flux** GitOps loop (`§ Flux`). This environment
+**owns** the OpenBao unit and the scripts that bring it up
+(`scripts/openbao-*.sh`) and owns vendored-upstream installs like Tekton's
+controller (never `ci/`). Named `local` (not left at repo root) so
 `environments/production/` can slot in later for real `secret-openbao` /
 `cluster-k0sctl` infra with zero rename.
 
-The OpenBao daemon is **machine-global** (one per developer machine, not
-one per git worktree — ADR 0010): a pitchfork *global* daemon
-(`~/.config/pitchfork/config.toml`, `--boot-start`), with its raft store,
-rendered config, secret files and tofu state under
-`$OPENBAO_STATE_DIR` = `${XDG_STATE_HOME:-~/.local/state}/toolbox/openbao/`.
+## OpenBao (in-cluster — ADR 0016)
 
-All of its secrets are `0600` files in that directory (ADR 0011): no
-keychain, no `fnox`.
+OpenBao runs in the OrbStack cluster as a single-replica tofu-owned raft
+StatefulSet in ns `openbao`, reached over TLS at
+`https://openbao.openbao.svc.cluster.local:8200` (OrbStack routes the Mac
+host into the cluster network, so the ClusterIP DNS name resolves from the
+host directly). The pod auto-unseals from a mounted `openbao-seal` Secret —
+**no `bao operator unseal` step, ever**. cert-manager issues the TLS server
+cert (`§ Flux`). It is **not** a Flux `HelmRelease` — the secret store must
+not sit behind the reconcile loop that later depends on it for SOPS
+(ADR 0015).
 
-| file | role |
+`$OPENBAO_STATE_DIR` = `${XDG_STATE_HOME:-~/.local/state}/toolbox/openbao/`
+holds the on-machine side, written by the bridge on every successful run
+(`0600`, no keychain, no `fnox` — ADR 0011):
+
+| path | role |
 |---|---|
-| `seal.key` | static-seal key — the daemon auto-unseals from it every start (`file://`) |
-| `root.token` | root token — `mise [env]` injects it as `VAULT_TOKEN` (no shell hook) |
-| `recovery.key` | break-glass only — `bao operator generate-root` if `root.token` is lost |
-| `data/` | raft store (encrypted by `seal.key`) |
-| `openbao.hcl` | rendered config |
-| `tofu.tfstate` | provisioning state |
-| `snapshots/` | restore bundles — kept across `local:openbao:reset` |
+| `snapshots/{latest.snap,seal.key,root.token}` | the restore bundle — the disaster / genesis source. Copy off-machine. |
+| `root.token` | the bundle's original root token — `mise [env]` → `VAULT_TOKEN` |
+| `seal.key` | the bundle's seal key — the on-machine copy for a re-run |
+| `tls/ca.crt` | the live cert-manager dev CA — `mise [env]` → `VAULT_CACERT` (public) |
+| `openbao.tfstate` | Phase-A/C provisioning state (backed up in `snapshots/`; the bridge migrates a legacy `openbao-cluster.tfstate` in place) |
 
-## Bootstrap (once per machine)
+### Bootstrap / recover (once per cluster — disaster-re-runnable)
 
 ```
 mise run local:openbao:bootstrap
 ```
 
-Renders `openbao.hcl`, generates `seal.key`, registers + starts the global
-pitchfork daemon, `bao operator init` (auto-unseals via the static seal —
-**no `bao operator unseal` step, ever**), writes `root.token` +
-`recovery.key`, provisions the Transit engine + `approval-key`, and calls
-`mise run attestation:export-pubkey` to write
-`attestation/cosign-approval.pub` (it never writes across the boundary
-itself — ADR 0013).
+`openbao-bootstrap.sh` — the one-time acyclic bridge (model
+`flux-bootstrap.sh`). It picks a **source**:
 
-`VAULT_TOKEN` reaches every `mise run` task and the interactive shell
-through one `mise.toml` line (`{{ exec(command='cat ".../root.token"') }}`).
-If your current shell was activated before the first bootstrap and shows an
-empty `VAULT_TOKEN`, open a new shell or run `mise env`.
+| Condition | Action |
+|---|---|
+| a live init+unsealed host daemon at `$TOOLBOX_OPENBAO_HOST_ADDR` | snapshot it, migrate from it |
+| no host, but a valid `snapshots/` bundle | restore from the bundle |
+| no host, no bundle | exit — the disaster case (restore an off-machine bundle, or the "resume signing" runbook) |
+
+then: create ns `openbao` + the seal Secret, wait for the cert-manager
+`openbao-tls` cert + read its CA, `tofu apply` the `helm_release`, run
+`bao operator init` once (throwaway tokens), do the key-preserving
+`bao operator raft snapshot restore -force`, **hard-fail** unless the
+in-cluster `approval-key` public half is byte-identical to
+`attestation/cosign-approval.pub`, then `tofu apply` Phase C (the `sops`
+`aes256-gcm96` key, a decrypt-only `flux_sops_decrypt` policy, the
+Kubernetes ServiceAccount auth method + a `flux_sops` role bound to
+`kustomize-controller`/`flux-system`). `approval-key` + the `transit` mount
+are **never** tofu-managed — restore-managed; `openbao-verify.sh` greps the
+`.tf` and fails closed. Finally it refreshes the `snapshots/` bundle from
+the now-authoritative cluster and repairs the `$STATE_DIR` client creds.
 
 Verify:
 ```
-bao status                       # Seal Type: static, Sealed: false, Storage: raft
-bao secrets list                 # transit/
-bao read transit/keys/approval-key
-pitchfork list | grep openbao    # global/openbao   running
+bao status                              # Seal Type: static, Sealed: false, Storage: raft
+bao secrets list                        # transit/
+bao list transit/keys                   # approval-key (preserved) + sops
+kubectl --context orbstack -n openbao get statefulset,pod,svc,certificate
 ```
 
-After a reboot the daemon boot-starts and auto-unseals. If it is stopped:
-`mise run local:openbao:start`.
+A pod restart or cluster return needs **no action** — the pod auto-unseals
+from the Secret. Cluster return = `orb start k8s` (a pre-existing human
+step, or the optional machine-global `orb-k8s` pitchfork daemon — § Tekton).
 
-## Reset (machine-wide)
-
-```
-mise run local:openbao:reset
-```
-
-Stops + unregisters the global daemon (**waiting until it has actually
-exited** — a `rm -rf data/` against a live raft node corrupts the bolt
-store), then wipes `data/`, `openbao.hcl`, `seal.key`, `root.token`,
-`recovery.key` and the tofu state. `snapshots/` is **kept** — it is the
-restore bundle. Confirms unless `TOOLBOX_OPENBAO_RESET_YES=1`.
-
-Reset rotates the Transit `approval-key`. Nothing about a credential-storage
-problem needs a reset — a lost/corrupt `root.token` is recovered with
-`recovery.key` (below), not by resetting.
-
-## Backup + restore
-
-OpenBao community has no snapshot scheduler
-([openbao#795](https://github.com/openbao/openbao/issues/795)) — backup is
-**on demand**, before anything risky (key rotation, OS upgrade, reset):
+### Backup
 
 ```
 mise run local:openbao:snapshot
 ```
 
-Writes a **complete bundle** to `$OPENBAO_STATE_DIR/snapshots/`:
-`latest.snap` + a copy of `seal.key` + a copy of `root.token`. A bare
-`.snap` cannot be restored — the three travel together. Copy the whole
-`snapshots/` directory somewhere durable (or off-machine) for real
-disaster recovery.
+Writes a **complete bundle** (`latest.snap` + `seal.key` + `root.token`) to
+`$OPENBAO_STATE_DIR/snapshots/` from the in-cluster instance. The three
+travel together — a bare `.snap` cannot be restored. Copy the whole
+`snapshots/` directory off-machine: after the host daemon's retirement it is
+the **only** genesis path (ADR 0016). Losing `data` does not invalidate past
+approvals — `attestation-verify.sh` checks against the committed
+`attestation/cosign-approval.pub`, not OpenBao; a snapshot lets you resume
+*signing* without minting a new `approval-key`.
 
-Losing `data/` does **not** invalidate past approvals —
-`attestation-verify.sh` / `mise run attestation:verify` check against the
-committed `attestation/cosign-approval.pub`, not OpenBao. A snapshot lets
-you resume *signing* without minting a new `approval-key`.
+### Disaster: lost bundle + no host daemon
 
-### Roll back a change (daemon up)
+`approval-key` is unrecoverable. Past approvals still verify (the pubkey is
+committed), so it is a **"resume signing"** problem, not a verification
+outage: fresh `bao operator init` → `mise run attestation:export-pubkey` +
+commit → re-sign the current image → `mise run frontend:deploy <image@digest>
+<attestation-digest>`. Blast radius: future signing only.
 
-```
-mise run local:openbao:snapshot-restore -- "$OPENBAO_STATE_DIR/snapshots/latest.snap"
-```
-Same `seal.key`, so the daemon auto-unseals straight after — no manual step.
+### The retired host daemon
 
-### Disaster restore (data directory lost)
-
-`bao operator raft snapshot restore` replaces *all* data including the seal
-config and token store, so after a `-force` restore the instance is sealed
-by the snapshot's **original** seal key and only its **original** root token
-is valid. That is why the bundle carries them.
+The machine-global `pitchfork` OpenBao daemon (ADR 0010) is retired. Any
+machine that still has it registered removes it once, out of band:
 
 ```
-mise run local:openbao:reset                                   # keeps snapshots/
-mise run local:openbao:bootstrap                               # fresh instance (its keys are throwaway)
-bao operator raft snapshot restore -force "$OPENBAO_STATE_DIR/snapshots/latest.snap"
-cp -f "$OPENBAO_STATE_DIR/snapshots/seal.key"  "$OPENBAO_STATE_DIR/seal.key"
-pitchfork restart global/openbao                         # re-reads the original seal.key -> auto-unseal
-# VAULT_TOKEN is now stale in your shell -> use the bundle's token:
-export VAULT_TOKEN="$(cat "$OPENBAO_STATE_DIR/snapshots/root.token")"
+pitchfork stop global/openbao && pitchfork daemons remove --global openbao
 ```
 
-`-force` is required (cluster ID / seal config won't match the fresh
-instance). `restore` prints `Error properly closing policy file: … file
-already closed` on success — cosmetic, exits 0. `snapshot.bats` exercises
-this exact path. Prefix `VAULT_CLIENT_TIMEOUT=120s` for a large store.
-
-### Corrupt `root.token`, daemon healthy
-
-Re-running bootstrap does **not** help (an initialised instance skips the
-init that would rewrite the token). Use the recovery key:
-
-```
-bao operator generate-root -init
-# follow the OTP prompts, supplying $OPENBAO_STATE_DIR/recovery.key as the
-# recovery-key share; write the new token:
-printf '%s' "<new root token>" > "$OPENBAO_STATE_DIR/root.token" && chmod 600 "$_"
-```
-
-## OpenBao in-cluster (T7c Increment 4 — in progress)
-
-The host daemon above cannot serve cluster pods (loopback listener) — the
-blocker in front of T8. Increment 4 moves OpenBao into the OrbStack cluster
-as a single-replica tofu-owned raft StatefulSet, **without rotating
-`approval-key`** (a fresh init breaks every past approval attestation).
-Design + sequencing: `~/.claude/plans/t7c-increment4-in-cluster-openbao.md`,
-ADR 0016.
-
-- **4a (shipped):** `environments/local/openbao-cluster/` — the pinned
-  `helm_release` (Phase A), HTTPS listener, `seal "static"` stanza,
-  single-replica values. cert-manager (`environments/local/flux/cert-manager-*`)
-  + the dev CA (`environments/local/cert-manager/`). `mise run local:openbao-cluster:helm-verify` is the chart-pin
-  gate (the OpenTofu helm provider cannot pin an OCI digest, so the digest is
-  enforced by the verify script + the bridge, not the resource).
-- **4b (shipped):** `mise run local:openbao-cluster:bootstrap` →
-  `openbao-cluster-bootstrap.sh` — the one-time acyclic bridge (model:
-  `flux-bootstrap.sh`). Snapshot the host daemon, create ns `openbao` + the
-  seal Secret (from the on-machine `0600` `seal.key`), wait for the
-  cert-manager `openbao-tls` cert, `tofu apply` the `helm_release`, first
-  `bao operator init` (throwaway tokens), key-preserving
-  `bao operator raft snapshot restore -force`, then HARD-fail if the
-  in-cluster `approval-key` public half is not byte-identical to
-  `attestation/cosign-approval.pub`. Idempotent / disaster-recovery
-  re-runnable. `[k8s]` chainsaw asserts the running post-migration state.
-- **4c (shipped):** the bridge's final `tofu apply` — Phase C against the
-  restored instance: a new `sops` Transit key (`aes256-gcm96`), a
-  decrypt-only `flux_sops_decrypt` policy, the Kubernetes ServiceAccount
-  auth method + a `flux_sops` role bound to `kustomize-controller` in
-  `flux-system`. `approval-key` + the `transit` mount are **never**
-  tofu-managed (restore-managed — `openbao-cluster-verify.sh` enforces it).
-  This UNBLOCKS Flux SOPS; wiring `--sops-vault-configmap` is 4e.
-- **4d:** retire the host daemon + its pitchfork registration, repoint
-  `provider.tf`, rename `openbao-cluster` → `openbao`.
-- **4e (deferred):** `--sops-vault-configmap` on the `FluxInstance` + the
-  ConfigMap + `spec.decryption` on Kustomizations — gated on a named secret
-  needing SOPS.
-
-The migration is a **trust migration**: `approval-key` is never rotated (a
-fresh `bao operator init` would strand every past approval attestation), so
-the bridge restores the host's raft store rather than initialising a fresh
-one. Between 4b and 4d the host daemon still runs and `provider.tf` still
-points at it — both instances hold the *same* key material, so attestation
-signing works against either.
+This touches only the daemon registration — never `seal.key` / `root.token`
+/ `snapshots/`, which the in-cluster instance needs.
 
 ## Tekton (controller install — a Flux prerequisite)
 
@@ -293,7 +220,7 @@ checks), `ci-defs` stays blocked on `dependsOn` and retries — no notification
 | `flux/cert-manager.lock` | pinned cert-manager chart + 4 image digests + the authoring-time `cosign verify --key` record (static-key signature, not keyless) — T7c Increment 4a |
 | `flux/cert-manager-helmrelease.yaml` | `OCIRepository` (digest pin, **no** `spec.verify` — the digest is the trust boundary, ADR 0001) + `HelmRelease` into ns `cert-manager` — installs cert-manager + its CRDs. In the flux-system Kustomization (always-known kinds). |
 | `flux/cert-manager-pki.yaml` | a Flux `Kustomization` CR (`cert-manager-pki`) → `./environments/local/cert-manager`. **Separate** from flux-system because the Issuer CRs are cert-manager.io/v1 custom kinds and a whole-Kustomization dry-run fails on an unknown CRD — keeping them in flux-system deadlocked it against the HelmRelease that installs those CRDs. `healthChecks` on the cert-manager Deployments; `retryInterval: 30s`. |
-| `../cert-manager/issuers.yaml` | selfSigned root `ClusterIssuer` → CA `Certificate` (key in-cluster) → CA `ClusterIssuer` → the `openbao-tls` leaf `Certificate` (ns `openbao`, applied once `openbao-cluster-bootstrap.sh` creates the namespace). Dev limitation: selfSigned root; production swaps it, CA + leaves unchanged. |
+| `../cert-manager/issuers.yaml` | selfSigned root `ClusterIssuer` → CA `Certificate` (key in-cluster) → CA `ClusterIssuer` → the `openbao-tls` leaf `Certificate` (ns `openbao`, applied once `openbao-bootstrap.sh` creates the namespace). Dev limitation: selfSigned root; production swaps it, CA + leaves unchanged. |
 | `../cert-manager/tests/crd-schemas/*.json` | vendored cert-manager `Certificate`/`ClusterIssuer` v1 schemas for the `kubeconform-cert-manager` gate (from `github.com/cert-manager/cert-manager/releases/download/v1.21.1/cert-manager.crds.yaml`) |
 | `flux/tests/crd-schemas/*.json` | v1/v2 CRD schemas vendored from Flux 2.9.5 + flux-operator v0.59.0 for the `kubeconform-flux` gate — **regenerate on a bump** (`crane digest` + `cosign verify` per the lock-file header; CRDs from `github.com/fluxcd/flux2/releases/download/v2.9.5/manifests.tar.gz`) |
 | `tests/flux/flux-reconcile/chainsaw-test.yaml` | `[k8s]`-gated server-side check (`flux-chainsaw.sh` — skips in CI and until `local:flux:bootstrap` has run): the operator accepted the FluxInstance, source-controller fetched an artifact from git, the OCIRepository is cosign-verified, the HelmRelease self-manages, the zot Kustomization applied. Asserts running state; does not bootstrap or tear down. |

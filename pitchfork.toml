@@ -1,12 +1,9 @@
-# The local OpenBao daemon is NOT defined here. It is a machine-global
-# pitchfork daemon (~/.config/pitchfork/config.toml), registered once by
-# `mise run local:openbao:bootstrap` — one `bao server` per developer machine,
-# not one per git worktree (ADR 0010). pitchfork namespaces project
-# daemons by directory, so an entry here would start a second `bao server`
-# per worktree and lock-conflict on the shared raft store.
-#
-#   mise run local:openbao:start        -> pitchfork start global/openbao
-#   pitchfork logs -g openbao  -> daemon logs
+# The local OpenBao is NOT a pitchfork daemon. It runs in-cluster as a
+# tofu-owned raft StatefulSet (ADR 0016 — supersedes the ADR 0010
+# machine-global `bao server` daemon). `mise run local:openbao:bootstrap`
+# brings it up in the OrbStack cluster. Any machine that still has the old
+# `global/openbao` pitchfork daemon registered removes it once, out of band:
+#   pitchfork stop global/openbao && pitchfork daemons remove --global openbao
 
 # Local cv_frontend demo deploy (docs/adr/0009-demo-consumer-is-local-
 # container-not-k8s.md). `scripts/frontend-serve.sh` is the indirection this

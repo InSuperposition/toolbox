@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 
-# environments/local/scripts/openbao-cluster-verify.sh — the Increment 4a
+# environments/local/scripts/openbao-verify.sh — the
 # chart-pin gate. The guard must FAIL closed on a mutated digest / broken
 # lock, not only pass on the committed one.
 #
@@ -15,11 +15,11 @@ setup() {
 	load helper
 	SCRATCH="$(mktemp -d)"
 	scratch_copy "$SCRATCH" \
-		"environments/local/openbao-cluster" \
-		"environments/local/scripts/openbao-cluster-verify.sh"
+		"environments/local/openbao" \
+		"environments/local/scripts/openbao-verify.sh"
 	: >"$SCRATCH/mise.toml"
-	SW="$SCRATCH/environments/local/scripts/openbao-cluster-verify.sh"
-	LOCK="$SCRATCH/environments/local/openbao-cluster/openbao-cluster.lock"
+	SW="$SCRATCH/environments/local/scripts/openbao-verify.sh"
+	LOCK="$SCRATCH/environments/local/openbao/openbao.lock"
 }
 
 teardown() {
@@ -80,7 +80,7 @@ online() {
 @test "anti-rotation guard: fails if the unit tofu-manages the transit mount" {
 	online || skip "the render step runs before the guard; needs the registry"
 	printf '\nresource "vault_mount" "x" { path = "transit" }\n' \
-		>>"$SCRATCH/environments/local/openbao-cluster/main.tf"
+		>>"$SCRATCH/environments/local/openbao/main.tf"
 	run "$SW"
 	[ "$status" -ne 0 ]
 	[[ "$output" == *"restore-managed"* ]]
@@ -89,7 +89,7 @@ online() {
 @test "anti-rotation guard: fails if the unit tofu-manages approval-key" {
 	online || skip "the render step runs before the guard; needs the registry"
 	printf '\nresource "vault_transit_secret_backend_key" "x" {\n  backend = "transit"\n  name    = "approval-key"\n  type    = "ecdsa-p256"\n}\n' \
-		>>"$SCRATCH/environments/local/openbao-cluster/main.tf"
+		>>"$SCRATCH/environments/local/openbao/main.tf"
 	run "$SW"
 	[ "$status" -ne 0 ]
 	[[ "$output" == *"restore-managed"* ]]

@@ -134,19 +134,19 @@ local heavy = new Mapping<String, Step> {
     workspace_indicator = "versions.tf"
     depends = "tofu-init"
   }
-  // T7c Increment 4a chart-pin gate for environments/local/openbao-cluster/.
-  // `crane digest <tag>` == openbao-cluster.lock's chart_digest (the
-  // OpenTofu helm provider cannot pin an OCI chart by digest —
+  // chart-pin gate for environments/local/openbao/ (ADR 0016).
+  // `crane digest <tag>` == openbao.lock's chart_digest (the OpenTofu helm
+  // provider cannot pin an OCI chart by digest —
   // hashicorp/terraform-provider-helm#1596), then `helm template` BY DIGEST
-  // and assert the 4a shape. Needs network (crane + helm pull) — like the
-  // bats OpenBao suites — and self-skips (exit 0) offline / registry-down,
-  // same as the [k8s] gates, so a flapping registry does not red the check.
-  ["openbao-cluster-verify"] {
+  // and assert the expected shape. Needs network (crane + helm pull) — like
+  // the bats OpenBao suites — and self-skips (exit 0) offline /
+  // registry-down, so a flapping registry does not red the check.
+  ["openbao-verify"] {
     glob = List(
-      "environments/local/openbao-cluster/**",
-      "environments/local/scripts/openbao-cluster-verify.sh"
+      "environments/local/openbao/**",
+      "environments/local/scripts/openbao-verify.sh"
     )
-    check = "./environments/local/scripts/openbao-cluster-verify.sh"
+    check = "./environments/local/scripts/openbao-verify.sh"
   }
   ["bats"] {
     // *.bash (helper.bash) is a fixture, not a suite - excluded
@@ -172,19 +172,19 @@ local heavy = new Mapping<String, Step> {
     glob = List("environments/local/tests/flux/**/*.yaml", "environments/local/flux/**/*.yaml", "environments/local/scripts/flux-chainsaw.sh")
     check = "./environments/local/scripts/flux-chainsaw.sh"
   }
-  // The in-cluster OpenBao running state (T7c Increment 4b). Same [k8s] gate
-  // as chainsaw-flux — skips in CI (no OrbStack) and skips locally until
-  // `mise run local:openbao-cluster:bootstrap` has deployed it (probe: the
-  // `openbao` StatefulSet). Asserts the post-migration state; does not run
-  // the bridge or tear down.
-  ["chainsaw-openbao-cluster"] {
+  // The in-cluster OpenBao running state (ADR 0016). Same [k8s] gate as
+  // chainsaw-flux — skips in CI (no OrbStack) and skips locally until
+  // `mise run local:openbao:bootstrap` has deployed it (probe: the
+  // `openbao` StatefulSet). Asserts the running state; does not run the
+  // bridge or tear down.
+  ["chainsaw-openbao"] {
     glob = List(
-      "environments/local/tests/openbao-cluster/**/*.yaml",
-      "environments/local/openbao-cluster/**",
+      "environments/local/tests/openbao/**/*.yaml",
+      "environments/local/openbao/**",
       "environments/local/cert-manager/**/*.yaml",
-      "environments/local/scripts/openbao-cluster-chainsaw.sh"
+      "environments/local/scripts/openbao-chainsaw.sh"
     )
-    check = "./environments/local/scripts/openbao-cluster-chainsaw.sh"
+    check = "./environments/local/scripts/openbao-chainsaw.sh"
   }
   // Silent-coverage-drop guard (F5). Diffs the suites on disk, the
   // committed tests/manifest.txt, and what hk schedules — a mismatch fails

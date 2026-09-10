@@ -1,8 +1,7 @@
-# cert-manager — in-cluster PKI for the local dev cluster (T7c Increment 4a,
-# docs/adr/0016). Issues the TLS server cert the in-cluster OpenBao listener
-# needs (environments/local/openbao-cluster/); the loopback listener of
-# environments/local/openbao/ cannot serve pods, and TLS on a ClusterIP
-# listener is not optional (plan § B4).
+# cert-manager — in-cluster PKI for the local dev cluster (docs/adr/0016).
+# Issues the TLS server cert the in-cluster OpenBao listener needs
+# (environments/local/openbao/); TLS on a ClusterIP listener is not
+# optional.
 #
 # Reconciled by helm-controller (already in FluxInstance.spec.components) —
 # cert-manager is a HELPER component, not the secret store, so unlike OpenBao

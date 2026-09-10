@@ -2,7 +2,7 @@
 # assert the Phase-A helm_release's shape — the values that decide whether
 # the single replica schedules and whether the listener is TLS. The deep
 # structural check (against the real rendered chart) is
-# openbao-cluster-verify.sh; this is the fast offline guard that a future
+# openbao-verify.sh; this is the fast offline guard that a future
 # edit does not quietly flip tlsDisable back on, re-enable the PDB, or let
 # tofu start owning the namespace.
 
@@ -15,7 +15,7 @@ run "release_pins_the_locked_chart_version" {
 
   assert {
     condition     = helm_release.openbao.version == "0.29.4"
-    error_message = "helm_release.version must equal openbao-cluster.lock's chart_version (the digest-equality gate keys off this tag)"
+    error_message = "helm_release.version must equal openbao.lock's chart_version (the digest-equality gate keys off this tag)"
   }
 
   assert {
@@ -29,7 +29,7 @@ run "tofu_never_owns_the_namespace" {
 
   assert {
     condition     = helm_release.openbao.create_namespace == false
-    error_message = "create_namespace must be false — the bootstrap bridge (4b) creates ns openbao before this applies; tofu owning a namespace another actor manages is the dependency inversion plan § B1/B5 rejects"
+    error_message = "create_namespace must be false — the bootstrap bridge creates ns openbao before this applies; tofu owning a namespace another actor manages is a dependency inversion"
   }
 }
 

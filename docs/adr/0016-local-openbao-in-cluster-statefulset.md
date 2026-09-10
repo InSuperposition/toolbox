@@ -1,9 +1,8 @@
 # The local OpenBao runs in-cluster as an OpenTofu-owned raft StatefulSet, moved without rotating `approval-key`
 
-The local dev OpenBao now runs in the OrbStack cluster as a single-replica
-raft StatefulSet (`environments/local/openbao-cluster/`, renamed to
-`environments/local/openbao/` once the host daemon retires), deployed by
-`openbao-cluster-bootstrap.sh` — a one-time imperative bridge, model
+The local dev OpenBao runs in the OrbStack cluster as a single-replica raft
+StatefulSet (`environments/local/openbao/`), deployed by
+`openbao-bootstrap.sh` — a one-time imperative bridge, model
 `flux-bootstrap.sh` — then left steady-state. **Phase A** is a tofu
 `helm_release` (chart `openbao/openbao` 0.29.4, image `v2.6.2`, both
 digest-pinned out of band because the helm provider cannot pin an OCI chart
@@ -27,7 +26,7 @@ mints a new key and strands every past attestation. The bridge restores the
 host's raft store into the cluster instance and **hard-fails unless the
 in-cluster `approval-key` public half is byte-identical to the committed
 file**. `approval-key` and the `transit` mount are never tofu-managed
-(`openbao-cluster-verify.sh` greps the `.tf`).
+(`openbao-verify.sh` greps the `.tf`).
 
 Static-seal auto-unseal carries over from [ADR 0010](0010-local-openbao-machine-global-static-seal.md)
 — a 32-byte `file://` key, now delivered as a `0600`-file-sourced Kubernetes
@@ -36,10 +35,11 @@ trust boundary" model carries over from
 [ADR 0011](0011-local-openbao-secrets-are-files-no-fnox.md); custody is
 unchanged.
 
-Genesis and disaster: once the host daemon retires there is no from-scratch
-bootstrap — `openbao-cluster-bootstrap.sh` always restores from the
-off-machine `snapshots/` bundle. Losing both the bundle and the host store
-makes `approval-key` unrecoverable; past approvals still verify against the
+Genesis and disaster: with the host daemon retired there is no from-scratch
+bootstrap — `openbao-bootstrap.sh` restores from the off-machine
+`snapshots/` bundle (a live pre-migration host daemon is still accepted as a
+source when one is present). Losing the bundle with no host daemon makes
+`approval-key` unrecoverable; past approvals still verify against the
 committed pubkey (ADR 0005), so it is a "resume signing" disaster — fresh
 init → re-export pubkey → re-sign the current image → re-record
 `current-image.txt`
@@ -53,10 +53,9 @@ Status: accepted. **Supersedes
 machine-global pitchfork daemon is retired for the in-cluster StatefulSet;
 static-seal auto-unseal survives. **Amends
 [ADR 0011](0011-local-openbao-secrets-are-files-no-fnox.md)** — the seal key
-is now also a Kubernetes Secret, sourced from the same `0600` file. T7c
-Increment 4a–4c shipped (#23–#25); the host-daemon retirement and the
-`openbao-cluster` → `openbao` rename are the remaining Plan-A work
-(`~/.claude/plans/t7c-increment4-in-cluster-openbao.md`). Does not touch
+is now also a Kubernetes Secret, sourced from the same `0600` file. The
+host `pitchfork` daemon and its `environments/local/openbao/` tofu unit are
+retired; the in-cluster unit took the bare `openbao` name. Does not touch
 [ADR 0012](0012-local-openbao-is-environment-nested.md) (the `modules/`
 question — a later ADR revisits that) or
 [ADR 0015](0015-flux-precedes-in-cluster-openbao-gitrepository-plain-yaml.md).

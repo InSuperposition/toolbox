@@ -1,24 +1,33 @@
+# Phase C. The `helm_release` (Phase A) is terminal and has no outputs;
+# these expose the restored instance's API surface for the bridge's summary
+# and the deferred Flux SOPS wiring.
+
+output "openbao_endpoint" {
+  description = "HTTPS URL clients (host bao/cosign, Phase-C provider, later kustomize-controller) reach the in-cluster OpenBao at."
+  value       = var.openbao_endpoint
+}
+
 output "transit_mount_path" {
-  description = "Transit secrets engine mount path (used by cosign's openbao://<key> KMS scheme)."
-  value       = vault_mount.transit.path
+  description = "Transit secrets engine mount path (restore-managed, not tofu-managed) — cosign's openbao://<key> scheme + `transit/decrypt/<key>` for SOPS."
+  value       = "transit"
 }
 
-output "transit_key_names" {
-  description = "Names of the Transit keys this module created."
-  value       = [for k in vault_transit_secret_backend_key.keys : k.name]
+output "sops_key_name" {
+  description = "Transit key name for Flux SOPS decryption (aes256-gcm96)."
+  value       = vault_transit_secret_backend_key.sops.name
 }
 
-output "policy_names" {
-  description = "Names of the OpenBao access policies this module created."
-  value       = [for p in vault_policy.policies : p.name]
+output "kubernetes_auth_path" {
+  description = "Mount path of the Kubernetes ServiceAccount auth method (e.g. `kubernetes` → login at `auth/kubernetes/login`)."
+  value       = vault_auth_backend.kubernetes.path
 }
 
-output "openbao_config_path" {
-  description = "Path the rendered openbao.hcl was written to — pass this to the pitchfork daemon's `run` command."
-  value       = local_file.openbao_config.filename
+output "flux_sops_role" {
+  description = "k8s-auth role name kustomize-controller logs in as to get a decrypt-only token."
+  value       = vault_kubernetes_auth_backend_role.flux_sops.role_name
 }
 
-output "openbao_snapshot_dir" {
-  description = "Directory `mise run local:openbao:snapshot` writes raft snapshots to (T6 backup)."
-  value       = var.openbao_snapshot_path
+output "extra_transit_key_names" {
+  description = "Names of the ADDITIONAL Transit keys created from var.transit_keys (the extension point — approval-key is never here)."
+  value       = [for k in vault_transit_secret_backend_key.extra : k.name]
 }
