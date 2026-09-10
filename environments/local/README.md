@@ -143,6 +143,16 @@ auto = ["start"]
 `chainsaw-test.sh` always run their own `kubectl` readiness check and fail /
 skip with a clear message — the daemon is a convenience, not a guarantee.
 
+Every chainsaw wrapper (`{flux,openbao,kyverno,frontend}-chainsaw.sh`,
+`ci/scripts/chainsaw-test.sh`) passes `--config <repo-root>/.chainsaw.yaml`.
+That config sets `namespace.fastDelete: true`: on a load-contended
+single-node cluster (concurrent `chainsaw-*` hk steps) the ephemeral test
+namespace's *termination* routinely lags past chainsaw's default 30s cleanup
+timeout, failing the run with `context deadline exceeded` even though every
+assert passed. `fastDelete` issues the namespace DELETE and does not wait —
+these are running-state assert suites, so a slow empty-namespace teardown
+carries zero signal (investigated 2026-09-10).
+
 Pinned in `environments/local/tekton/release.lock` (`version` + `sha256`) to
 **Tekton Pipelines v1.6.0**. The GCS bucket path uses the pipeline COMPONENT
 version, not the GitHub release-train tag (`previous/v1.15.1/` 404s). To

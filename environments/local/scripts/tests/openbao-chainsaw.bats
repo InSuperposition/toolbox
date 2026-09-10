@@ -60,4 +60,7 @@ setup() {
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"fake chainsaw ran"* ]]
 	[[ "$output" == *"--test-dir"* ]]
+	# the repo-root chainsaw config (namespace.fastDelete) is passed
+	[[ "$output" == *"--config"* ]]
+	[[ "$output" == *".chainsaw.yaml"* ]]
 }

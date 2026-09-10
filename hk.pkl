@@ -203,14 +203,14 @@ local heavy = new Mapping<String, Step> {
   // OrbStack, so this must not be fatal in CI, unlike [docker]). The glob
   // only gates whether the step runs; the wrapper globs ci/tests/ itself.
   ["chainsaw"] {
-    glob = List("ci/tests/**/*.yaml", "ci/tasks/**/*.yaml", "ci/runtime/**/*.yaml", "ci/scripts/chainsaw-test.sh", "ci/scripts/lib/ci.sh")
+    glob = List(".chainsaw.yaml", "ci/tests/**/*.yaml", "ci/tasks/**/*.yaml", "ci/runtime/**/*.yaml", "ci/scripts/chainsaw-test.sh", "ci/scripts/lib/ci.sh")
     check = "./ci/scripts/chainsaw-test.sh"
   }
   // The environments/local/ Flux setup, server-side. Same [k8s] gate — skips
   // in CI (no OrbStack) and skips locally until `mise run local:flux:bootstrap`
   // has run. Asserts the RUNNING Flux state; does not bootstrap or tear down.
   ["chainsaw-flux"] {
-    glob = List("environments/local/tests/flux/**/*.yaml", "environments/local/flux/**/*.yaml", "environments/local/scripts/flux-chainsaw.sh")
+    glob = List(".chainsaw.yaml", "environments/local/tests/flux/**/*.yaml", "environments/local/flux/**/*.yaml", "environments/local/scripts/flux-chainsaw.sh")
     check = "./environments/local/scripts/flux-chainsaw.sh"
   }
   // The in-cluster OpenBao running state (ADR 0016). Same [k8s] gate as
@@ -220,6 +220,7 @@ local heavy = new Mapping<String, Step> {
   // bridge or tear down.
   ["chainsaw-openbao"] {
     glob = List(
+      ".chainsaw.yaml",
       "environments/local/tests/openbao/**/*.yaml",
       "environments/local/openbao/**",
       "environments/local/cert-manager/**/*.yaml",
@@ -235,6 +236,7 @@ local heavy = new Mapping<String, Step> {
   // real GHCR fixtures; does not install Kyverno or tear down.
   ["chainsaw-kyverno"] {
     glob = List(
+      ".chainsaw.yaml",
       "environments/local/tests/kyverno/**/*.yaml",
       "environments/local/kyverno/**/*.yaml",
       "environments/local/flux/kyverno-policy.yaml",
@@ -250,10 +252,10 @@ local heavy = new Mapping<String, Step> {
   // health — cv_frontend has a known boot crash.
   ["chainsaw-frontend"] {
     glob = List(
+      ".chainsaw.yaml",
       "environments/local/tests/frontend/**/*.yaml",
       "environments/local/flux/frontend.yaml",
       "deploy/frontend/k8s/**/*.yaml",
-      "deploy/frontend/timoni/**/*.cue",
       "deploy/frontend/timoni.lock",
       "environments/local/scripts/frontend-chainsaw.sh"
     )

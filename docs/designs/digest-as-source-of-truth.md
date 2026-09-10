@@ -230,6 +230,8 @@ environments/local/                  # the ONE deployment target — owns its Op
 modules/                             # reusable, versioned, URL-consumed OpenTofu modules only — README today
                                      # (the deferred production secret-openbao is the first candidate; Tekton
                                      #  defs are NOT here — they are OCI bundles in ci/, see ADR 0014)
+
+.chainsaw.yaml                       # repo-root chainsaw Configuration — every wrapper passes --config; namespace.fastDelete: true so a loaded single-node cluster's slow ephemeral-ns teardown never fails `mise run check` (investigated 2026-09-10)
 ```
 
 OpenBao/Transit is not per-consumer: `approval-key` and a future

@@ -1,0 +1,33 @@
+# chainsaw (kyverno/chainsaw 0.2.15) global test configuration — auto-loaded
+# from the repo root by every `chainsaw test` invocation (the wrappers cd
+# here first).
+#
+# WHY: every chainsaw Test allocates an ephemeral namespace and, at cleanup,
+# DELETEs it and BLOCKS until the object is gone. On the single-node OrbStack
+# cluster, namespace *termination* (async ns-controller GC + the `kubernetes`
+# finalizer) routinely lags past chainsaw's default 30s `cleanup` timeout
+# whenever `hk` runs the `chainsaw-*` steps concurrently — the DELETE request
+# succeeds instantly, then the wait times out with "context deadline
+# exceeded". Every assert passes; only teardown fails. `mise run check` then
+# goes red on a non-signal. Reproduced 100% under 3 parallel wrappers;
+# `fastDelete` fixes it (0.4s vs a 30s timeout) — investigated 2026-09-10.
+#
+# `namespace.fastDelete: true` — issue the namespace DELETE, do NOT wait for
+# termination (the `--fast-namespace-deletion` flag). These are running-state
+# assert suites; a slow empty-namespace teardown carries zero signal, and the
+# ns-controller finishes the GC regardless.
+#
+# The timeout bumps are headroom for the same contention on the assert/error
+# paths (a Ready condition that takes >30s to observe when the apiserver is
+# busy is still a pass, just slow).
+apiVersion: chainsaw.kyverno.io/v1alpha2
+kind: Configuration
+metadata:
+  name: toolbox
+spec:
+  namespace:
+    fastDelete: true
+  timeouts:
+    cleanup: 2m
+    assert: 2m
+    error: 2m
