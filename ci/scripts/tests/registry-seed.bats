@@ -3,10 +3,14 @@
 # ci/scripts/registry-seed.sh — host-seeds the local zot with the digest-
 # pinned base images a Dockerfile references, so an in-cluster BuildKit build
 # never reaches docker.io / gcr.io (TODOS.md T7b1-followup, the OrbStack
-# IPv6-egress defect). A fake `crane` on PATH captures the copy args, so
+# IPv6-egress defect). A fake `oras` on PATH captures the cp args, so
 # these cases cover argument handling + the ref -> zot-path mapping without
 # a network. The real copy is proven by `mise run frontend:seed` (recorded
-# in TODOS.md T7b1-followup).
+# in TODOS.md T7b1-followup). `oras`, not `crane` (R1b-ii-c pre-plan): the
+# darwin/Go toolchain gives `crane` no CA-file override at all, so it can
+# never make the plain-HTTP -> HTTPS-with-dev-CA swap R1b-ii-c needs;
+# `oras --to-ca-file`/`--from-ca-file` are independently scoped per
+# endpoint and confirmed digest-preserving against this script's own pins.
 
 setup() {
 	load helper
@@ -14,12 +18,12 @@ setup() {
 
 	FAKEBIN="$BATS_TEST_TMPDIR/fakebin"
 	mkdir -p "$FAKEBIN"
-	cat >"$FAKEBIN/crane" <<-'SH'
+	cat >"$FAKEBIN/oras" <<-'SH'
 		#!/usr/bin/env bash
-		echo "crane $*"
-		exit "${STUB_CRANE_RC:-0}"
+		echo "oras $*"
+		exit "${STUB_ORAS_RC:-0}"
 	SH
-	chmod +x "$FAKEBIN/crane"
+	chmod +x "$FAKEBIN/oras"
 	PATH="$FAKEBIN:$PATH"
 
 	DF="$BATS_TEST_TMPDIR/Dockerfile"
@@ -57,7 +61,7 @@ setup() {
 	[[ "$output" == *"reg.example:5000/docker/dockerfile:1"* ]]
 	# gcr.io -> host stripped
 	[[ "$output" == *"reg.example:5000/distroless/nodejs26-debian13:nonroot"* ]]
-	# the source ref carries its digest into `crane copy`
+	# the source ref carries its digest into `oras cp`
 	[[ "$output" == *"@sha256:c0753125"* ]]
 }
 
@@ -68,9 +72,36 @@ setup() {
 }
 
 @test "a failed copy -> exit 4, other copies still attempted" {
-	STUB_CRANE_RC=1 run "$SW" "$DF"
+	STUB_ORAS_RC=1 run "$SW" "$DF"
 	[ "$status" -eq 4 ]
 	[[ "$output" == *"copy failed"* ]]
 	# all three refs were attempted despite the first failing
-	[ "$(grep -c 'crane copy' <<<"$output")" -eq 3 ]
+	[ "$(grep -c 'oras cp' <<<"$output")" -eq 3 ]
+}
+
+@test "uses --to-plain-http (zot is plain-HTTP pre-cutover), never --insecure" {
+	run "$SW" "$DF"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"--to-plain-http"* ]]
+	[[ "$output" != *"--insecure"* ]]
+}
+
+@test "docker.io-implicit source refs are fully qualified for oras (crane defaulted these, oras does not)" {
+	# Live-caught (2026-09-11): oras has no implicit docker.io default the
+	# way `docker pull`/`crane` do. A bare "node:tag@sha256" errors "missing
+	# registry or repository"; a 2-segment "docker/dockerfile:1@sha256"
+	# resolves oras to host "docker" (a real DNS lookup failure). Both must
+	# reach oras as an explicit `docker.io/...` ref.
+	run "$SW" "$DF"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"oras cp docker.io/library/node:26-trixie-slim@sha256:c0753125"* ]]
+	[[ "$output" == *"oras cp docker.io/docker/dockerfile:1@sha256:ecfaec9e"* ]]
+}
+
+@test "an already host-qualified source ref (gcr.io) passes through unchanged" {
+	run "$SW" "$DF"
+	[ "$status" -eq 0 ]
+	[[ "$output" == *"oras cp gcr.io/distroless/nodejs26-debian13:nonroot@sha256:10ec8cb9"* ]]
+	# never double-qualified
+	[[ "$output" != *"docker.io/gcr.io"* ]]
 }

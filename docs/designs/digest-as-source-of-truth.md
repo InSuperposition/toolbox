@@ -209,7 +209,7 @@ ci/                                  # reusable Tekton defs — Flux-reconciled 
   runtime/namespace.yaml               #   T7a ✓ — the `ci` namespace (no RBAC — the build SA needs none)
   runtime/buildkitd-mirror.yaml        #   T7b1-followup — buildkitd.toml ConfigMap: mirror docker.io + gcr.io → in-cluster zot (interim; OrbStack IPv6-egress defect)
   runtime/kustomization.yaml          #   T7c Inc.2 — per-path inventory (namespace + mirror CM only)
-  scripts/registry-seed.sh             #   T7b1-followup — host crane-copy of a Dockerfile's base images into zot (mise run frontend:seed)
+  scripts/registry-seed.sh             #   T7b1-followup — host `oras cp` of a Dockerfile's base images into zot (mise run frontend:seed; not crane, R1b-ii-c pre-plan)
   scripts/kubeconform-scan.sh + chainsaw-test.sh + lib/ci.sh + tests/   # T7a ✓ (tekton-taskrun.sh deleted in T7b1)
   tests/crd-schemas/{task,pipeline,pipelinerun}_v1.json  #   Tekton v1 CRD schemas (vendored from the pinned release) for kubeconform
   tests/build-pipeline/chainsaw-test.yaml    #   [k8s]-gated: webhook accepts the 5 defs; no script:; posture + full DAG + G1 standalone gate TaskRun

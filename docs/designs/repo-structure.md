@@ -288,7 +288,7 @@ toolbox/
 │   │   └── buildkitd-mirror.yaml                      T7b1-followup — buildkitd.toml ConfigMap: mirror docker.io + gcr.io → in-cluster zot (interim; OrbStack IPv6-egress defect)
 │   ├── scripts/
 │   │   ├── kubeconform-scan.sh  chainsaw-test.sh      the static + [k8s] hk gates
-│   │   ├── registry-seed.sh                           T7b1-followup — host-side crane copy of a Dockerfile's base images into zot (mise run frontend:seed)
+│   │   ├── registry-seed.sh                           T7b1-followup — host-side oras cp of a Dockerfile's base images into zot (mise run frontend:seed; not crane — R1b-ii-c pre-plan, no CA-file override)
 │   │   ├── lib/ci.sh                                  repo-root, strict sha256 digest guard, kube-context guard
 │   │   └── tests/*.bats + helper.bash                 gate-script skip/fail cases (no [k8s] bats)
 │   └── tests/
