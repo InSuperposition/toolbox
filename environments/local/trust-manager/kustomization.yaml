@@ -1,0 +1,11 @@
+# The trust-manager Bundle for the local dev reference cluster — its own
+# kustomize root so it gets a dedicated Flux `trust-manager-bundles`
+# Kustomization (T7c R1b-ii-a): `trust.cert-manager.io` is a custom kind
+# from a CRD trust-manager's OWN HelmRelease installs, so it cannot sit in
+# the flux-system inventory (same unknown-CRD whole-set dry-run failure as
+# cert-manager-pki.yaml / kyverno-policy.yaml).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - bundle.yaml

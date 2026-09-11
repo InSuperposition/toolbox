@@ -26,10 +26,11 @@ teardown() {
 	# + ci-runtime (1) + ci-defs ci-tasks/ci-pipelines (2) + cert-manager
 	# OCIRepository+HelmRelease (2) + cert-manager-pki Flux Kustomization (1)
 	# + trust-manager OCIRepository+HelmRelease (2 — T7c R1b-i, ADR 0022)
+	# + trust-manager-bundles Flux Kustomization (1 — T7c R1b-ii)
 	# + kyverno OCIRepository+HelmRelease (2) + kyverno-policy Flux
 	# Kustomization (1) + frontend OCIRepository + frontend-ns/frontend Flux
-	# Kustomizations (3) = 18.
-	[[ "$output" == *"Valid: 18"* ]]
+	# Kustomizations (3) = 19.
+	[[ "$output" == *"Valid: 19"* ]]
 }
 
 @test "nothing skipped (the vendored Flux CRD schemas are all used)" {

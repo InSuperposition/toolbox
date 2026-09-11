@@ -1,12 +1,13 @@
-# Dev PKI for the in-cluster OpenBao TLS listener (T7c Increment 4).
+# Dev PKI for the in-cluster OpenBao TLS listener (T7c Increment 4) and,
+# since T7c R1b-ii, the zot registry's HTTPS listener.
 #
 # Chain: a selfSigned root ClusterIssuer -> a CA Certificate (its key
 # generated IN-CLUSTER, never in repo or tofu state) -> a CA ClusterIssuer
-# -> the `openbao-tls` leaf Certificate. The selfSigned root is the
-# acknowledged DEV limitation; PRODUCTION swaps it for a real backend (ACME
-# / an org intermediate CA / an OpenBao PKI engine) and the CA ClusterIssuer
-# + every leaf stay unchanged, only the root moves (cert-manager.lock § DEV
-# vs PROD).
+# -> a leaf Certificate per consumer (`openbao-tls`, `zot-tls`). The
+# selfSigned root is the acknowledged DEV limitation; PRODUCTION swaps it
+# for a real backend (ACME / an org intermediate CA / an OpenBao PKI
+# engine) and the CA ClusterIssuer + every leaf stay unchanged, only the
+# root moves (cert-manager.lock § DEV vs PROD).
 #
 # Reconciled by its OWN Flux Kustomization (environments/local/flux/
 # cert-manager-pki.yaml -> path ./environments/local/cert-manager), NOT the
@@ -27,6 +28,11 @@
 # and Flux retries — the same one-time-bridge-then-declarative shape as
 # flux-instance.yaml. The bridge waits for the leaf to go Ready; it does not
 # create it (the bridge owns only the namespace — the acyclic anchor, § B1).
+#
+# `zot-tls` follows the identical shape, but its namespace `zot` is created
+# declaratively by the `zot` Flux Kustomization (environments/local/zot/),
+# not an imperative bridge — so it needs no bridge wait at all, only Flux's
+# own retry until that Kustomization lands the namespace.
 ---
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
@@ -84,6 +90,32 @@ spec:
     - localhost
   ipAddresses:
     - 127.0.0.1
+  issuerRef:
+    name: toolbox-dev-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: zot-tls
+  namespace: zot
+spec:
+  secretName: zot-tls
+  duration: 8760h # 1y — cert-manager auto-renews at 2/3 life
+  renewBefore: 720h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  # T7c R1b-ii A3: zot's Service is ClusterIP only (the NodePort is
+  # dropped) — every consumer (host tools via OrbStack's host->cluster
+  # routing, in-cluster Pipeline steps) resolves the same cluster DNS
+  # name, so ONE cert SAN set covers all of them. No `localhost` /
+  # 127.0.0.1 — unlike openbao-tls, nothing here falls back to a
+  # `kubectl port-forward` loopback path.
+  dnsNames:
+    - zot.zot.svc.cluster.local
+    - zot.zot.svc
   issuerRef:
     name: toolbox-dev-ca
     kind: ClusterIssuer

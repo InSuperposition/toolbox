@@ -64,6 +64,47 @@ spec:
     # reference deployment, not a resilient one.
     admissionController:
       replicas: 1
+      # T7c R1b-ii: trusts the dev CA (bundled with the public roots into
+      # ConfigMap `toolbox-ca-bundle`, ns `kyverno`, by the trust-manager
+      # `toolbox-ca-bundle` Bundle) so IVPol referrer verification can pull
+      # from the HTTPS zot.
+      #
+      # NOT `caCertificates.volume`: live-verified that path fails closed.
+      # The chart's deployment template applies `subPath: ca-certificates.crt`
+      # to the volumeMount ONLY on the `.data` branch (an inline PEM string,
+      # which the chart writes into its OWN generated single-key ConfigMap);
+      # the `.volume` branch mounts whatever Volume you give it at
+      # /etc/ssl/certs/ca-certificates.crt with NO subPath — the chart's own
+      # values.yaml example is a `hostPath: {type: File}`, i.e. a Volume that
+      # already presents as one file at its source. A ConfigMap volume is
+      # always directory-shaped at its source (even narrowed to one `items`
+      # entry), so binding it straight onto that file path fails at the
+      # container runtime: "mount ... not a directory: are you trying to
+      # mount a directory onto a file". Confirmed live: the admission
+      # controller pod CrashLoopBackOff'd on exactly that OCI runtime error.
+      #
+      # `extraVolumes`/`extraVolumeMounts` are a raw pass-through instead —
+      # WE set `subPath` on the mount ourselves, which is generic k8s
+      # behavior independent of which chart branch it's wired through, so it
+      # narrows our own ConfigMap-backed volume to the single needed file
+      # without duplicating the ~150 KB PEM blob into this HelmRelease
+      # (avoiding `.data` was the whole point — ADR 0022).
+      #
+      # Acknowledged limitation: the container reads this file once at
+      # process start, so a CA *rotation* needs a pod roll to pick up the
+      # new bundle (no live reload). Moot today — `toolbox-dev-ca`'s
+      # `duration: 87600h` (10y) means the cluster is rebuilt long before a
+      # renewal is due (TODOS.md "Dev CA rotation runbook" tracks the real
+      # answer for when that stops being true).
+      extraVolumes:
+        - name: toolbox-ca-bundle
+          configMap:
+            name: toolbox-ca-bundle
+      extraVolumeMounts:
+        - name: toolbox-ca-bundle
+          mountPath: /etc/ssl/certs/ca-certificates.crt
+          subPath: ca-certificates.crt
+          readOnly: true
       initContainer:
         image:
           registry: "ghcr.io"

@@ -118,7 +118,7 @@ local fast = new Mapping<String, Step> {
   // environments/local/flux/cert-manager-pki.yaml. Wrapper script for the
   // same -schema-location templating reason as kubeconform-flux.
   ["kubeconform-cert-manager"] {
-    glob = List("environments/local/cert-manager/**/*.yaml", "environments/local/cert-manager/tests/crd-schemas/**/*.json", "environments/local/scripts/cert-manager-kubeconform.sh")
+    glob = List("environments/local/cert-manager/**/*.yaml", "environments/local/cert-manager/tests/crd-schemas/**/*.json", "environments/local/trust-manager/**/*.yaml", "environments/local/scripts/cert-manager-kubeconform.sh")
     check = "./environments/local/scripts/cert-manager-kubeconform.sh"
   }
   // The Kyverno ImageValidatingPolicy (policies.kyverno.io/v1) + its

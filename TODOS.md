@@ -636,13 +636,24 @@ first:
   controller can trust the dev CA for the HTTPS zot pull via chart values
   (`caCertificates`), `allowInsecureRegistry=false`. The mount replaces the
   whole trust store → need a merged bundle → trust-manager (ADR 0022).
-- **R1b-i** — trust-manager install (Flux `HelmRelease` + `trust-manager.lock`
-  + `trust-manager-reconcile` chainsaw + ADR 0022). Eng-reviewed 2026-09-10.
-  _(this branch)_
-- **R1b-ii** — `zot-tls` leaf + a trust-manager `Bundle` → the Kyverno CA
-  ConfigMap; zot HTTPS-only; `OCIRepository frontend` `insecure: false`;
-  buildkitd registry CA; `TOOLBOX_ZOT_CACERT` mise `[env]`; delete the
-  `--plain-http` paths + `attestation_is_local_registry`.
+- **R1b-i** — ✅ DONE 2026-09-10, PR #36 (`c12760e`). trust-manager install
+  (Flux `HelmRelease` + `trust-manager.lock` + `trust-manager-reconcile`
+  chainsaw + ADR 0022).
+- **R1b-ii** — eng-reviewed 2026-09-10, split 4 ways
+  (`~/.claude/plans/t7c-distribution-t7d.md` § "R1b-ii ENG REVIEW"):
+  - **R1b-ii-a** — PR #37 open (branch `t7c-r1b-ii-a-trust-plumbing`).
+    `zot-tls` leaf + the trust-manager `toolbox-ca-bundle` Bundle → the
+    Kyverno/`ci` CA ConfigMap. Chainsaw-verified live (GitRepository
+    temporarily repointed at the branch). Found + fixed a live bug along
+    the way: the chart's `admissionController.caCertificates.volume` path
+    crash-loops (a ConfigMap volume can't bind onto an existing file
+    without `subPath`, and that branch never adds one) — fixed via
+    `extraVolumes`/`extraVolumeMounts` with an explicit `subPath` instead.
+  - **R1b-ii-b** — host trust install (`zot-trust.sh`, `mise run
+    local:zot:trust`, `SSL_CERT_FILE` `[env]`, the per-binary honor probe).
+  - **R1b-ii-c** — zot HTTPS-only cutover; `OCIRepository frontend`
+    `insecure: false`; buildkitd registry CA; drop `--plain-http` +
+    `attestation_is_local_registry`.
 - **R2** — repoint `current-image.txt` / `timoni.lock` / `pipelinerun.cue`
   `#image` / the IVPol glob to `zot.zot.svc:5000/cv-frontend*`; re-sign.
 - **R3** — one documented end-to-end acceptance run (zot only), each hop +
