@@ -36,7 +36,7 @@ bats    environments/local/scripts/tests/openbao-bootstrap.bats  7
 bats    environments/local/scripts/tests/openbao-chainsaw.bats   5
 bats    ci/scripts/tests/chainsaw-test.bats                   3
 bats    ci/scripts/tests/kubeconform-scan.bats               3
-bats    ci/scripts/tests/registry-seed.bats                  6
+bats    ci/scripts/tests/registry-seed.bats                  9
 bats    tests/chainsaw-config.bats                          5
 bats    tests/check-coverage.bats                           3
 bats    tests/check-tf-boundary.bats                        4

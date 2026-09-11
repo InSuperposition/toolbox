@@ -641,15 +641,15 @@ first:
   chainsaw + ADR 0022).
 - **R1b-ii** — eng-reviewed 2026-09-10, split 4 ways
   (`~/.claude/plans/t7c-distribution-t7d.md` § "R1b-ii ENG REVIEW"):
-  - **R1b-ii-a** — PR #37 open (branch `t7c-r1b-ii-a-trust-plumbing`).
-    `zot-tls` leaf + the trust-manager `toolbox-ca-bundle` Bundle → the
-    Kyverno/`ci` CA ConfigMap. Chainsaw-verified live (GitRepository
-    temporarily repointed at the branch). Found + fixed a live bug along
-    the way: the chart's `admissionController.caCertificates.volume` path
-    crash-loops (a ConfigMap volume can't bind onto an existing file
-    without `subPath`, and that branch never adds one) — fixed via
+  - **R1b-ii-a** — ✅ MERGED (#37, `4e6e073`). `zot-tls` leaf + the
+    trust-manager `toolbox-ca-bundle` Bundle → the Kyverno/`ci` CA
+    ConfigMap. Chainsaw-verified live (GitRepository temporarily
+    repointed at the branch). Found + fixed a live bug along the way: the
+    chart's `admissionController.caCertificates.volume` path crash-loops
+    (a ConfigMap volume can't bind onto an existing file without
+    `subPath`, and that branch never adds one) — fixed via
     `extraVolumes`/`extraVolumeMounts` with an explicit `subPath` instead.
-  - **R1b-ii-b** — ✅ DONE 2026-09-11. Host trust install: `zot-trust.sh` +
+  - **R1b-ii-b** — ✅ MERGED (#38). Host trust install: `zot-trust.sh` +
     `mise run local:zot:trust` (node dockerd file + a PEM-validated,
     atomic, idempotent concat `zot-bundle.crt`) + `SSL_CERT_FILE` `[env]`.
     Honor-matrix probed live (ephemeral HTTPS zot): `curl` honors
@@ -660,16 +660,34 @@ first:
     reads the System keychain, not `SSL_CERT_FILE`, and neither tool
     exposes an override (only `--insecure`, which skips verification
     entirely). Full matrix + the crane gap in
-    `~/.claude/plans/t7c-distribution-t7d.md` § R1b-ii-b. **Carries into
-    R1b-ii-c:** `crane` is what `registry-seed.sh` / `frontend-build.sh` /
-    `frontend-publish.sh` use against the real HTTPS zot — R1b-ii-c must
-    pick (a) macOS keychain trust (bigger, its own lifecycle trace), (b)
-    swap those calls to `oras` equivalents, or (c) `--insecure` with the
-    risk documented. `attestation-{sign,verify}.sh` are unaffected — every
-    registry call there already goes through `oras`.
-  - **R1b-ii-c** — zot HTTPS-only cutover; `OCIRepository frontend`
-    `insecure: false`; buildkitd registry CA; drop `--plain-http` +
-    `attestation_is_local_registry`.
+    `~/.claude/plans/t7c-distribution-t7d.md` § R1b-ii-b.
+  - **R1b-ii-c** — the honor probe found `crane` and `flux push artifact`
+    honor neither `SSL_CERT_FILE` nor any CA-file flag (only `--insecure`,
+    Go's darwin x509 reads the System keychain). Deep-researched
+    (`~/.claude/plans/t7c-distribution-t7d.md` § "R1b-ii-c PRE-PLAN",
+    2026-09-11) rather than guessed — a Go 1.27 bump alone does **not**
+    fix it (GODEBUG defaults key off go-containerregistry's own `go.mod`,
+    pinned at `go 1.25.0`).
+    - **✅ SHIPPED** — the one `crane copy` in `registry-seed.sh` swapped
+      for `oras cp` (`--to-plain-http` today, becomes `--to-ca-file`
+      unchanged elsewhere when zot flips to HTTPS — one flag, no new
+      script). `oras`'s CA scoping is per-endpoint (confirmed from
+      `oras-project/oras` source), so the public docker.io/gcr.io source
+      keeps system trust while only zot gets the dev CA later. `crane`
+      stays pinned for `openbao-verify.sh` (public registries only,
+      unaffected).
+    - **Still open — `flux push artifact`.** No fix found (flux2 can't be
+      source-built — a `replace` directive blocks `go install`; `oras
+      push` would mean hand-building flux's OCI layer, adding scripting
+      against the "reduce scripting" steer). **Decision (2026-09-11):**
+      keep `--insecure-registry` on that one call as a time-boxed interim
+      — **not** a permanent accept. macOS/login-keychain trust would fix
+      it but is explicitly declined for now (DX cost — a password prompt
+      on every install/rotation; a CA-file approach is cleaner). See the
+      three new planning-session items below.
+    - Remaining R1b-ii-c scope unchanged: zot HTTPS-only cutover;
+      `OCIRepository frontend` `insecure: false`; buildkitd registry CA;
+      drop `--plain-http` + `attestation_is_local_registry`.
 - **R2** — repoint `current-image.txt` / `timoni.lock` / `pipelinerun.cue`
   `#image` / the IVPol glob to `zot.zot.svc:5000/cv-frontend*`; re-sign.
 - **R3** — one documented end-to-end acceptance run (zot only), each hop +
@@ -771,6 +789,72 @@ zot's OIDC/LDAP, an OpenBao-issued short-lived credential. **First step:** decid
 whether this folds into the deferred "Auth + multi-member DX" session (likely) or
 stays separate. **Depends on:** T7b0 (zot exists). **Triggers with:** a 2nd
 operator, a shared cluster, or `environments/production/`.
+
+### Remove `crane` from the stack entirely — planning session — P3
+
+**What:** `crane`'s zot-facing use is gone (R1b-ii-c swapped `registry-seed.sh`
+to `oras cp`); the one remaining call is `openbao-verify.sh`'s `crane digest`
+against a public chart registry (quay.io/ghcr.io — real HTTPS, system trust,
+unaffected by the CA-file gap). Investigate whether that call can move to
+`oras` (or `helm show chart`/`helm pull --digest`, since it's specifically a
+Helm OCI chart digest check) so `google/go-containerregistry` drops out of
+`mise.toml` altogether — one fewer pinned tool, one fewer thing with its own
+Go-toolchain/CA quirks to reason about.
+
+**Why:** every pinned tool is a maintenance surface (CLAUDE.md § Tool
+Boundaries — one job per tool); if `oras` already covers the one remaining
+job, keeping `crane` around too is redundant coverage the repo's own
+constraints call out as a smell, not a strict-overlap violation to ignore.
+
+**Also fold in:** a broader look at where else a dedicated single-purpose
+CLI could collapse into an already-pinned tool the same way — OpenBao's own
+tooling surface (`bao` CLI vs. direct API calls the scripts already make in
+places) is the other candidate worth the same question in the same session.
+
+**First step:** confirm `oras`/`helm` can do a digest-only chart-pin check
+without pulling the full chart (matching `openbao-verify.sh`'s current
+cheap-check shape) before committing to the swap.
+
+**Depends on:** R1b-ii-c (crane's zot use) landed. **Triggers with:** the
+next chart-pin gate touch, or a dedicated tooling-consolidation session.
+
+### Flux / registry CA trust — could a mesh or another pinned tool solve this structurally? — planning session — P2
+
+**What:** R1b-ii-c hit a real wall: `flux push artifact` has no CA-file
+override for a private registry CA (`~/.claude/plans/t7c-distribution-t7d.md`
+§ "R1b-ii-c PRE-PLAN"), and the interim (`--insecure-registry`, scoped to one
+call) is accepted only as time-boxed, not a destination. The per-CLI-flag
+approach (this session's fix) treats each tool as its own trust boundary —
+worth a dedicated session asking whether a **structural** fix moves the trust
+decision below the application layer entirely, so individual CLIs stop
+needing to know about the dev CA at all.
+
+**Why:** a mesh sidecar/ztunnel terminating and re-establishing mTLS between
+workloads (and potentially between the host and cluster) could make
+in-cluster registry traffic trusted by construction, independent of whether
+`flux push`/`crane`/whatever-comes-next happens to expose a CA flag — closes
+this whole class of gap instead of solving it once per tool.
+
+**Candidates to research (real sources, not pattern-matching from training
+data — same discipline as the R1b-ii-c pre-plan):**
+- **Cilium's newer service-mesh / ztunnel-style mTLS features** — Cilium is
+  already pinned+deferred in this stack (CLAUDE.md § Tool Boundaries); check
+  its current (not historical) docs for what it actually does today re:
+  transparent mTLS between pods, and whether that extends to a *host→pod*
+  path (registry-seed/flux-publish run on the Mac host, not in-cluster) or
+  only pod↔pod.
+- **Kyverno** — anything beyond admission policy (already scoped, ADR
+  0020/0022) relevant to registry trust distribution.
+- **Crossplane** — pinned/inactive (ADR 0018); check if the "provision"
+  stage has any real bearing on this (likely not — flag if so, don't force
+  it if not).
+- Whatever else the research surfaces — this is explicitly open, not scoped
+  to only those three.
+
+**Depends on:** R1b-ii-c's per-tool fixes landing first (this session)
+— they're needed regardless of whether a mesh answer ever ships, and prove
+the problem is real before reaching for a bigger structural tool.
+**Triggers with:** a dedicated planning/research session, not blocking R2–R4.
 
 ### Pin-drift guard: host `mise.toml` vs `ci/tasks/*` step images — P3
 

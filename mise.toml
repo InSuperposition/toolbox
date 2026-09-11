@@ -1,6 +1,6 @@
 [tools]
 "aqua:ast-grep/ast-grep" = "0.45.3"
-"aqua:google/go-containerregistry" = "0.22.1"   # `crane` — digest-preserving registry copy; the T7b1-followup zot seed (TODOS.md T7)
+"aqua:google/go-containerregistry" = "0.22.1"   # `crane` — digest gate for public registries only (openbao-verify.sh); the zot seed path moved to `oras cp` (R1b-ii-c pre-plan — crane has no CA-file override on this darwin/Go toolchain)
 "aqua:jdx/mise" = "2026.9.1"
 "aqua:kyverno/chainsaw" = "0.2.15"
 "aqua:loeffel-io/ls-lint" = "2.3.1"
