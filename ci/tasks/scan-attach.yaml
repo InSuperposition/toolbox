@@ -25,9 +25,13 @@
 # ONE trivy DB pull: both trivy steps share `--cache-dir
 # $(workspaces.shared.path)/trivy-cache`; step 1 populates it, step 2 reuses.
 #
-# Insecure registry: the T7b0 zot is loopback HTTP, no auth. `TRIVY_INSECURE`
-# (env, from the param) and `oras --plain-http=` carry `$(params.REGISTRY_INSECURE)`.
-# A real HTTPS registry sets it `false`.
+# Registry TLS (T7c R1b-ii-c — zot is HTTPS-only, cert-manager dev CA):
+# `TRIVY_INSECURE` (env, from the param) still carries `$(params.REGISTRY_INSECURE)`
+# for a genuinely insecure target, but the real steady state here is
+# `false` + `--cacert`/`TRIVY_CACERT` — the `ca-bundle` workspace mounts the
+# trust-manager `toolbox-ca-bundle` ConfigMap (already reconciled into ns
+# `ci` for exactly this, T7c R1b-ii-a/ADR 0022), never a second committed
+# copy of the CA.
 #
 # Steps run as root (`stepTemplate`, like git-clone): the OrbStack
 # `local-path` PVC is not reliably group-writable under `fsGroup`, so
@@ -66,15 +70,22 @@ spec:
       description: The app's git commit SHA — the tag the build pushed.
     - name: REGISTRY_INSECURE
       type: string
-      default: "true"
+      default: "false"
       description: >-
-        "true" for the loopback HTTP zot (T7b0): sets TRIVY_INSECURE and
-        `oras --plain-http`. "false" for a real HTTPS registry.
+        Sets TRIVY_INSECURE (skip TLS verification entirely). "false" — the
+        steady state — trusts the target via `ca-bundle` instead; "true" is
+        for a genuinely-insecure registry, not this one.
   workspaces:
     - name: shared
       description: >-
         The per-run PVC. trivy writes scan.json + sbom.cdx.json to its root
         and caches the vuln DB in trivy-cache/; oras reads the two files.
+    - name: ca-bundle
+      mountPath: /ca
+      description: >-
+        A ConfigMap with a `ca-certificates.crt` key — the merged system +
+        dev-CA bundle (trust-manager's `toolbox-ca-bundle`, T7c R1b-ii-a).
+        Bound by the PipelineRun, same ConfigMap `buildkit-build` uses.
   stepTemplate:
     securityContext:
       runAsUser: 0
@@ -97,6 +108,8 @@ spec:
       env:
         - name: TRIVY_INSECURE
           value: $(params.REGISTRY_INSECURE)
+        - name: TRIVY_CACERT
+          value: $(workspaces.ca-bundle.path)/ca-certificates.crt
       command: ["trivy"]
       args:
         - image
@@ -111,6 +124,8 @@ spec:
       env:
         - name: TRIVY_INSECURE
           value: $(params.REGISTRY_INSECURE)
+        - name: TRIVY_CACERT
+          value: $(workspaces.ca-bundle.path)/ca-certificates.crt
       command: ["trivy"]
       args:
         - image
@@ -126,7 +141,7 @@ spec:
       command: ["oras"]
       args:
         - attach
-        - --plain-http=$(params.REGISTRY_INSECURE)
+        - --ca-file=$(workspaces.ca-bundle.path)/ca-certificates.crt
         - --artifact-type=application/vnd.trivy.report+json
         - $(params.IMAGE):$(params.APP_REVISION)
         - scan.json:application/vnd.trivy.report+json
@@ -136,7 +151,7 @@ spec:
       command: ["oras"]
       args:
         - attach
-        - --plain-http=$(params.REGISTRY_INSECURE)
+        - --ca-file=$(workspaces.ca-bundle.path)/ca-certificates.crt
         - --artifact-type=application/vnd.cyclonedx+json
         - $(params.IMAGE):$(params.APP_REVISION)
         - sbom.cdx.json:application/vnd.cyclonedx+json

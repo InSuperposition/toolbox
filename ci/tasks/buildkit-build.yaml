@@ -17,9 +17,13 @@
 #     pipeline. ADR 0001 holds: the tag is a convenience alias, the signed
 #     chain still pins the digest. (`~/.claude/plans/t7b-pipeline-recut.md`,
 #     `TODOS.md` T7b.)
-#   * `registry.insecure=$(params.REGISTRY_INSECURE)` — the T7b0 zot is
-#     loopback HTTP with no auth (default `true`). A real HTTPS registry
-#     sets it `false`; no `dockerconfig` workspace either way (zot is
+#   * `registry.insecure=$(params.REGISTRY_INSECURE)` — governs the OUTPUT
+#     (push) leg only; the zot MIRROR entry's own trust is set separately in
+#     `buildkitd.toml` (`ci/runtime/buildkitd-mirror.yaml`). T7c R1b-ii-c:
+#     zot is HTTPS with a cert-manager dev CA, so the default is `false` and
+#     that same buildkitd.toml `ca = [...]` entry covers both directions
+#     (buildkitd resolves push and mirror-pull trust by hostname, not by
+#     direction). No `dockerconfig` workspace either way (zot is
 #     credential-free; `TODOS.md` § "zot registry auth" is the P2 follow-up).
 #   * The build CONTEXT is the `source` workspace (the app checkout, staged
 #     by the `git-clone` Task). The DOCKERFILE is `$(params.DOCKERFILE_DIR)`
@@ -83,10 +87,12 @@ spec:
         Build-context directory relative to the source workspace root.
     - name: REGISTRY_INSECURE
       type: string
-      default: "true"
+      default: "false"
       description: >-
-        Passed to buildctl as registry.insecure — true for the loopback
-        HTTP zot (T7b0), false for a real HTTPS registry.
+        Passed to buildctl as registry.insecure. "false" — the steady state
+        (T7c R1b-ii-c) — trusts zot's HTTPS listener via `ca-bundle` +
+        `buildkitd.toml`'s `ca = [...]` entry; "true" is for a genuinely
+        insecure registry, not this one.
     - name: BUILDKITD_FLAGS
       type: string
       default: "--oci-worker-no-process-sandbox"
@@ -108,6 +114,13 @@ spec:
         `--config`. Used for the registry mirror that keeps the build off
         external registries (ci/runtime/buildkitd-mirror.yaml; TODOS.md
         T7b1-followup). Bound by the PipelineRun.
+    - name: ca-bundle
+      mountPath: /ca
+      description: >-
+        A ConfigMap with a `ca-certificates.crt` key — the merged system +
+        dev-CA bundle (trust-manager's `toolbox-ca-bundle`, T7c R1b-ii-a).
+        `buildkitd.toml`'s zot entry points its `ca = [...]` field at this
+        mount. Bound by the PipelineRun.
   steps:
     # Step 0: this OrbStack cluster gives pods a working AF_INET6 stack +
     # AAAA DNS but no routable v6 egress — buildkitd's registry resolver can

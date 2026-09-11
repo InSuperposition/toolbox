@@ -5,6 +5,12 @@
 # DNS but no routable v6 egress, so external registry fetches fail ~50% of
 # the time). `mise run frontend:seed` populates zot from the host first.
 #
+# The zot entry's `ca` path (`/ca/ca-certificates.crt`, T7c R1b-ii-c) is
+# NOT baked into this ConfigMap — it's the `ca-bundle` workspace, bound by
+# the PipelineRun to the trust-manager `toolbox-ca-bundle` ConfigMap
+# (already reconciled into ns `ci`, T7c R1b-ii-a/ADR 0022) so a CA
+# rotation flows through without touching this file.
+#
 # INTERIM + LOCAL-SPECIFIC. The mirror target (`zot.zot.svc.cluster.local:5000`)
 # is this dev cluster's zot; a production pipeline binds its own ConfigMap to
 # the build Task's `buildkitd-config` workspace. Once the Cilium module's
@@ -25,4 +31,4 @@ data:
     [registry."gcr.io"]
       mirrors = ["zot.zot.svc.cluster.local:5000"]
     [registry."zot.zot.svc.cluster.local:5000"]
-      http = true
+      ca = ["/ca/ca-certificates.crt"]

@@ -228,7 +228,7 @@ build_fakebin() {
 		#!/usr/bin/env bash
 		set -eu
 		case "$*" in
-		*"localhost:30500/v2/"*) exit "${STUB_ZOT_RC:-0}" ;;
+		*"zot.zot.svc.cluster.local:5000/v2/"*) exit "${STUB_ZOT_RC:-0}" ;;
 		*) exit 0 ;;
 		esac
 	SH

@@ -98,13 +98,17 @@ frontend_kube get configmap buildkitd-mirror >/dev/null 2>&1 ||
   mise run local:flux:bootstrap   # once per cluster
   # then wait for the reconcile: mise run local:flux:status"
 
-curl -sf -o /dev/null http://localhost:30500/v2/ ||
-	miss "zot is not answering on localhost:30500 — Flux reconciles it (the zot Kustomization):
+# curl honors SSL_CERT_FILE (T7c R1b-ii-b's mise [env] wiring) — no
+# explicit --cacert needed when run via `mise run frontend:build`.
+curl -sf -o /dev/null https://zot.zot.svc.cluster.local:5000/v2/ ||
+	miss "zot is not answering HTTPS on zot.zot.svc.cluster.local:5000 — either
+  Flux hasn't reconciled it yet (the zot Kustomization):
   mise run local:tekton:install   # once — Flux cannot install an absent Tekton
   mise run local:flux:bootstrap   # once per cluster
-  # then wait for the reconcile: mise run local:flux:status"
+  # then wait for the reconcile: mise run local:flux:status
+  or the host doesn't trust the dev CA yet: mise run local:zot:trust"
 
-# Base images: reseed is idempotent (crane copy skips manifests already
+# Base images: reseed is idempotent (oras cp skips manifests already
 # present), so just run it. Uses the WORKING-TREE Dockerfile — the dirty
 # check below warns when that differs from the ref the pipeline will clone.
 echo "frontend-build: ensuring cv_frontend base images are in zot (mise run frontend:seed)"
@@ -154,11 +158,12 @@ reason="$(frontend_kube get pipelinerun "$name" \
 if [ "$status" = "True" ]; then
 	host_image="$(frontend_host_image)"
 
-	scan_refs="$(oras discover --plain-http --format json "${host_image}:${REV}" 2>/dev/null |
+	zot_ca="$(frontend_zot_ca)"
+	scan_refs="$(oras discover --ca-file "$zot_ca" --format json "${host_image}:${REV}" 2>/dev/null |
 		jq -r '(.referrers // .manifests // [])[]
 		       | select(.artifactType == "application/vnd.trivy.report+json") | .digest' || true)"
 
-	digest="$(oras resolve --plain-http "${host_image}:${REV}")" ||
+	digest="$(oras resolve --ca-file "$zot_ca" "${host_image}:${REV}")" ||
 		die "oras resolve failed for ${host_image}:${REV}"
 	frontend_strict_digest "$digest" ||
 		{

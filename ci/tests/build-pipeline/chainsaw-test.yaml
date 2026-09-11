@@ -191,6 +191,7 @@ spec:
                 workspaces:
                   - name: shared
                   - name: buildkitd-config
+                  - name: ca-bundle
                 tasks:
                   - name: clone-app
                     retries: 2
@@ -214,6 +215,8 @@ spec:
                         subPath: defs
                       - name: buildkitd-config
                         workspace: buildkitd-config
+                      - name: ca-bundle
+                        workspace: ca-bundle
                   - name: scan-attach
                     runAfter: [build]
                     taskRef:
@@ -221,6 +224,8 @@ spec:
                     workspaces:
                       - name: shared
                         workspace: shared
+                      - name: ca-bundle
+                        workspace: ca-bundle
                   - name: gate
                     runAfter: [scan-attach]
                     taskRef:

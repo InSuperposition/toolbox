@@ -685,9 +685,38 @@ first:
       it but is explicitly declined for now (DX cost — a password prompt
       on every install/rotation; a CA-file approach is cleaner). See the
       three new planning-session items below.
-    - Remaining R1b-ii-c scope unchanged: zot HTTPS-only cutover;
-      `OCIRepository frontend` `insecure: false`; buildkitd registry CA;
-      drop `--plain-http` + `attestation_is_local_registry`.
+    - **✅ SHIPPED 2026-09-11 — the HTTPS cutover.** `environments/local/zot/zot.yaml`:
+      `http.tls` off the `zot-tls` leaf (R1b-ii-a), BOTH probes `scheme:
+      HTTPS`, Service `ClusterIP` (NodePort dropped — one name everywhere,
+      `zot.zot.svc.cluster.local:5000`, host included via OrbStack's
+      direct routing). `OCIRepository frontend`: `insecure: false` +
+      `certSecretRef` → a CA-only `zot-flux-ca` Secret
+      (`environments/local/flux/kustomization.yaml` `secretGenerator` off
+      a **committed** `toolbox-dev-ca-public.crt` (named `-public` — an
+      X.509 cert is public-key material, no secrecy lost; the private key
+      never left the in-cluster `toolbox-dev-ca` Secret) — trust-manager
+      only emits
+      ConfigMaps without widening its RBAC via `secretTargets`, "grant
+      read access to all secrets in the cluster" per its own chart values;
+      not worth that for one Secret. Same accepted trade-off as ADR 0022's
+      committed-copy-goes-stale-on-a-key-rotation case — moot given the
+      10y CA duration). `build-scan-approve` Pipeline: new `ca-bundle`
+      workspace (the trust-manager `toolbox-ca-bundle` ConfigMap already
+      in ns `ci`, R1b-ii-a) bound into BOTH `build` (buildkitd.toml's zot
+      entry: `ca = [...]` replaces `http = true`) and `scan-attach`
+      (`TRIVY_CACERT` + `oras --ca-file`); `REGISTRY_INSECURE` default
+      flipped to `false`. `registry-seed.sh` + `frontend-build.sh`'s host
+      `oras discover`/`resolve` calls: `--to-ca-file`/`--ca-file` pointed
+      at `zot-trust.sh`'s already-written CA (no second fetch).
+      `flux push artifact` keeps `--insecure-registry` — confirmed live it
+      skip-verifies over real TLS rather than forcing plain HTTP, so the
+      earlier interim decision holds functionally, not just as an accepted
+      risk. **Live-verified end to end, not just `mise run check`**: a
+      real `mise run frontend:build` ran build → scan → attach → gate →
+      resolve clean through the new CA wiring against the real cv_frontend
+      repo; `OCIRepository frontend` re-fetched over HTTPS with
+      `certSecretRef` trust; reverted to `main` afterward, zot back to
+      plain-HTTP/NodePort confirmed clean.
 - **R2** — repoint `current-image.txt` / `timoni.lock` / `pipelinerun.cue`
   `#image` / the IVPol glob to `zot.zot.svc:5000/cv-frontend*`; re-sign.
 - **R3** — one documented end-to-end acceptance run (zot only), each hop +
@@ -712,7 +741,8 @@ T7d = a `TODOS.md` checklist next to O4/O5, no estimate.
 
 **Priority:** P2 · **Depends on:** ~~T5 + T5b~~ done. **T7b0–T7b3** ✓ →
 **T7c pre-plan + Increments 0/1a/1b/2** ✓ → Increment 4 (in-cluster OpenBao) ✓
-→ distribution tail `R1a ✓ → R1b-i → R1b-ii → R2 → R3 → R4`; R5 + T7d deferred.
+→ distribution tail `R1a ✓ → R1b-i ✓ → R1b-ii ✓ (flux push's --insecure-registry
+interim accepted, not blocking) → R2 → R3 → R4`; R5 + T7d deferred.
 
 ### T-DR — declarative disaster recovery for the in-cluster OpenBao — P2, planning session
 
