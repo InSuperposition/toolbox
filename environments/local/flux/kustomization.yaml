@@ -18,6 +18,7 @@ resources:
   - cert-manager-helmrelease.yaml
   - cert-manager-pki.yaml
   - trust-manager-helmrelease.yaml
+  - trust-manager-bundles.yaml
   - kyverno-helmrelease.yaml
   - kyverno-policy.yaml
   - frontend.yaml

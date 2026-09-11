@@ -1,0 +1,46 @@
+# Flux Kustomization — reconciles the trust-manager Bundle
+# (environments/local/trust-manager/) from the flux-system GitRepository.
+#
+# A SEPARATE Kustomization, not part of flux-system's inventory, for the
+# same reason as cert-manager-pki.yaml / kyverno-policy.yaml:
+# `trust.cert-manager.io/v1alpha1` `Bundle` is a custom kind installed by
+# the trust-manager HelmRelease (still in flux-system — HelmRelease +
+# OCIRepository are always-known kinds). Isolating it here means the
+# transient "no matches for kind Bundle" on a fresh cluster retries instead
+# of failing flux-system's whole-set server-side dry-run.
+#
+# healthChecks gate on BOTH the Secret the CA leaf issues (so the Bundle
+# has a live `toolbox-dev-ca` source to read) and the target ConfigMap it
+# produces in each consumer namespace — kstatus reports a Secret/ConfigMap
+# `Current` as soon as it exists, so this is an existence check: this
+# Kustomization goes Ready only once every consumer namespace actually has
+# the merged CA bundle, not merely once the Bundle CR itself is applied.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: trust-manager-bundles
+  namespace: flux-system
+spec:
+  interval: "10m"
+  retryInterval: "30s"
+  timeout: "5m"
+  prune: true
+  deletionPolicy: "Orphan"
+  wait: false
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: "./environments/local/trust-manager"
+  healthChecks:
+    - apiVersion: v1
+      kind: Secret
+      name: toolbox-dev-ca
+      namespace: cert-manager
+    - apiVersion: v1
+      kind: ConfigMap
+      name: toolbox-ca-bundle
+      namespace: kyverno
+    - apiVersion: v1
+      kind: ConfigMap
+      name: toolbox-ca-bundle
+      namespace: ci

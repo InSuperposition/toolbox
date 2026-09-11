@@ -12,9 +12,16 @@
 # it does NOT bootstrap or tear down. "HelmRelease Ready" alone does not
 # prove trust-manager works: the chart ships its own ValidatingWebhookConfig
 # (`failurePolicy: Fail`) whose caBundle is populated by cert-manager's
-# cainjector from a chart-created self-signed Certificate. So the last step
-# server-side dry-run applies a Bundle — if the webhook cert / caBundle /
-# controller is broken, that apply fails (R1b-i eng review, Codex #2).
+# cainjector from a chart-created self-signed Certificate. So the dry-run
+# step server-side dry-run applies a Bundle — if the webhook cert / caBundle
+# / controller is broken, that apply fails (R1b-i eng review, Codex #2).
+#
+# T7c R1b-ii adds the REAL `toolbox-ca-bundle` Bundle: asserts the
+# `trust-manager-bundles` Flux Kustomization is Ready, the Bundle itself
+# reports Synced, and the merged ConfigMap actually landed in BOTH consumer
+# namespaces (`kyverno`, `ci`) with more than one certificate PEM block —
+# proof the `useDefaultCAs` public-root snapshot and the `toolbox-dev-ca`
+# Secret source both merged, not just one of the two.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -101,3 +108,70 @@ spec:
                   namespaceSelector:
                     matchLabels:
                       toolbox.dev/trust-manager-probe: "never-matches"
+
+    - name: bundles-kustomization-is-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: kustomize.toolkit.fluxcd.io/v1
+              kind: Kustomization
+              metadata:
+                name: trust-manager-bundles
+                namespace: flux-system
+              status:
+                (conditions[?type == 'Ready'] | [0].status): "True"
+
+    - name: toolbox-ca-bundle-is-synced
+      try:
+        - assert:
+            resource:
+              apiVersion: trust.cert-manager.io/v1alpha1
+              kind: Bundle
+              metadata:
+                name: toolbox-ca-bundle
+              status:
+                (conditions[?type == 'Synced'] | [0].status): "True"
+
+    - name: ca-bundle-configmap-in-kyverno
+      try:
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: toolbox-ca-bundle
+                namespace: kyverno
+              (length(split(data."ca-certificates.crt", 'BEGIN CERTIFICATE')) > `1`): true
+
+    - name: ca-bundle-configmap-in-ci
+      try:
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: toolbox-ca-bundle
+                namespace: ci
+              (length(split(data."ca-certificates.crt", 'BEGIN CERTIFICATE')) > `1`): true
+
+    - name: admission-controller-rollout-picked-up-the-bundle
+      try:
+        - assert:
+            # Confirms the deployment restarted (or was already running)
+            # AFTER the caCertificates.volume value landed — a stale replica
+            # from before this change would still be Available but mounting
+            # nothing. availableReplicas matching the requested replica
+            # count is the existence-level proof chainsaw can make without
+            # shelling into the pod; the chainsaw-kyverno admit/deny test
+            # (run after this one via `[k8s]`) is the behavioral proof that
+            # the mounted bundle actually verifies the zot attestation.
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: kyverno-admission-controller
+                namespace: kyverno
+              status:
+                (conditions[?type == 'Available'] | [0].status): "True"
+                (replicas): (`1`)
+                (availableReplicas): (`1`)

@@ -57,6 +57,13 @@ what is one consumer today.
   key mid-rotation briefly leaves old and new roots mutually non-validating
   for every leaf and every distributed bundle. That runbook is an open
   `TODOS.md` item, not covered here.
+- **Acknowledged limitation (R1b-ii, resolved):** no hot reload — the
+  admission controller reads `/etc/ssl/certs/ca-certificates.crt` once at
+  process start, so a rotated `toolbox-ca-bundle` ConfigMap needs a pod
+  roll before Kyverno trusts the new content, exactly like the "no subPath
+  live-update" behavior this ADR already flagged. Moot in practice:
+  `toolbox-dev-ca`'s `duration: 87600h` (10y) means the dev cluster gets
+  rebuilt long before a renewal would ever need that roll.
 - The trust-manager chart is not cosign-signed (same as OpenBao /
   cert-manager / Kyverno), so the `OCIRepository` pins `ref.digest` with no
   `spec.verify`. The component images are keyless-signed (Fulcio) but pinned

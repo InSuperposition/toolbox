@@ -1,0 +1,36 @@
+# The one Bundle CR trust-manager reconciles for the local dev reference
+# cluster (T7c R1b-ii-a, ADR 0022 follow-up). Merges the public-root
+# snapshot trust-manager ships (`useDefaultCAs: true`, pinned per
+# trust-manager.lock — the package image, not auto-refreshing) with the
+# live `toolbox-dev-ca` Secret (tracked dynamically — a CA renewal flows
+# through without a manual re-sync) into one `ca-certificates.crt`
+# ConfigMap, synced into every namespace the `namespaceSelector` matches.
+#
+# Two consumers today, both added by R1b-ii: the Kyverno admission
+# controller (ns `kyverno`, verifying the HTTPS zot's attestation
+# referrers) and the `ci` namespace (buildkitd + the scan/attach Tekton
+# steps pulling from / pushing to the same HTTPS zot). `secretTargets` is
+# deliberately omitted — every consumer here reads the CA as a public
+# ConfigMap, never as a Secret (Codex R1b-ii #9: `OCIRepository frontend`'s
+# CA-only Secret is built separately, by a scoped `secretTargets` entry
+# added if/when that's needed — not this Bundle).
+apiVersion: trust.cert-manager.io/v1alpha1
+kind: Bundle
+metadata:
+  name: toolbox-ca-bundle
+spec:
+  sources:
+    - useDefaultCAs: true
+    - secret:
+        name: toolbox-dev-ca
+        key: ca.crt
+  target:
+    configMap:
+      key: ca-certificates.crt
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values:
+            - kyverno
+            - ci
