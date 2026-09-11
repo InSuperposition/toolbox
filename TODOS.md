@@ -649,8 +649,24 @@ first:
     crash-loops (a ConfigMap volume can't bind onto an existing file
     without `subPath`, and that branch never adds one) — fixed via
     `extraVolumes`/`extraVolumeMounts` with an explicit `subPath` instead.
-  - **R1b-ii-b** — host trust install (`zot-trust.sh`, `mise run
-    local:zot:trust`, `SSL_CERT_FILE` `[env]`, the per-binary honor probe).
+  - **R1b-ii-b** — ✅ DONE 2026-09-11. Host trust install: `zot-trust.sh` +
+    `mise run local:zot:trust` (node dockerd file + a PEM-validated,
+    atomic, idempotent concat `zot-bundle.crt`) + `SSL_CERT_FILE` `[env]`.
+    Honor-matrix probed live (ephemeral HTTPS zot): `curl` honors
+    `SSL_CERT_FILE`; `oras` doesn't but has `--ca-file`; `cosign attest`
+    doesn't but has `--registry-cacert` (`cosign verify-blob-attestation`
+    never touches a registry — n/a); **`crane` and `flux push artifact`
+    honor neither the env var nor any CA-file flag** — Go's darwin x509
+    reads the System keychain, not `SSL_CERT_FILE`, and neither tool
+    exposes an override (only `--insecure`, which skips verification
+    entirely). Full matrix + the crane gap in
+    `~/.claude/plans/t7c-distribution-t7d.md` § R1b-ii-b. **Carries into
+    R1b-ii-c:** `crane` is what `registry-seed.sh` / `frontend-build.sh` /
+    `frontend-publish.sh` use against the real HTTPS zot — R1b-ii-c must
+    pick (a) macOS keychain trust (bigger, its own lifecycle trace), (b)
+    swap those calls to `oras` equivalents, or (c) `--insecure` with the
+    risk documented. `attestation-{sign,verify}.sh` are unaffected — every
+    registry call there already goes through `oras`.
   - **R1b-ii-c** — zot HTTPS-only cutover; `OCIRepository frontend`
     `insecure: false`; buildkitd registry CA; drop `--plain-http` +
     `attestation_is_local_registry`.

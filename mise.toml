@@ -45,6 +45,27 @@ OPENBAO_STATE_DIR = "{{ exec(command='echo \"${XDG_STATE_HOME:-$HOME/.local/stat
 VAULT_CACERT = "{{ exec(command='f=\"${XDG_STATE_HOME:-$HOME/.local/state}/toolbox/openbao/tls/ca.crt\"; [ -f \"$f\" ] && echo \"$f\" || true') }}"
 VAULT_TOKEN = "{{ exec(command='cat \"$OPENBAO_STATE_DIR/root.token\" 2>/dev/null || true') }}"
 
+# T7c R1b-ii-b — the host-CLI half of zot-trust.sh's output (the node/
+# dockerd half is a separate file the node reads directly, no env needed).
+# `curl` honors this out of the box; several pinned Go tools do not on this
+# darwin toolchain and need a per-call CA flag instead (R1b-ii-c wires
+# those; the honor-matrix is in ~/.claude/plans/t7c-distribution-t7d.md).
+#
+# mise ALWAYS exports a key declared in [env], even when its templated
+# value is an empty string — unlike VAULT_CACERT/VAULT_TOKEN above, that
+# matters here: SSL_CERT_FILE is a convention several tools actively probe
+# (not just the ones we target), and `hk` itself crashes outright — "Error
+# loading CA root certificate: ... at ''" — the moment it needs to build an
+# HTTP client with SSL_CERT_FILE set to "" (found live: broke `hk check`
+# entirely before `zot-trust.sh` had ever run once on a machine). So this
+# NEVER falls through to an empty string: before the dev-CA bundle exists,
+# it falls back to the plain OS trust-store snapshot (still a real,
+# non-empty PEM — a safe default, never a regression below system trust),
+# tried in descending order for portability; only if none of those exist
+# either does it fall back to empty (a machine with no OS trust store at
+# all has bigger problems than this one).
+SSL_CERT_FILE = "{{ exec(command='b=\"${XDG_STATE_HOME:-$HOME/.local/state}/toolbox/zot/zot-bundle.crt\"; [ -f \"$b\" ] && { echo \"$b\"; exit; }; for s in /etc/ssl/cert.pem /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt; do [ -f \"$s\" ] && { echo \"$s\"; exit; }; done; true') }}"
+
 # `mise install` is the only bootstrap step (CLAUDE.md § mise) — wire the
 # hk git hooks as part of it so a fresh clone is gated without a separate
 # manual `hk install`.
@@ -73,6 +94,10 @@ run = "./environments/local/scripts/openbao-bootstrap.sh"
 [tasks."local:openbao:snapshot"]
 description = "Save a COMPLETE restore bundle (raft snapshot + seal.key + root.token) from the in-cluster OpenBao to $OPENBAO_STATE_DIR/snapshots/. Copy that whole directory off-machine — after the host daemon's retirement it is the only genesis path (ADR 0016)."
 run = "./environments/local/scripts/openbao-snapshot.sh"
+
+[tasks."local:zot:trust"]
+description = "T7c R1b-ii-b: (re)generate host CA trust for the zot registry from the live toolbox-dev-ca Secret — the node dockerd file (~/.docker/certs.d/zot.zot.svc.cluster.local:5000/ca.crt) and the host-CLI concat bundle ($XDG_STATE_HOME/toolbox/zot/zot-bundle.crt, injected as SSL_CERT_FILE by mise.toml [env]). Idempotent, safe to re-run any time (e.g. after a dev CA rotation). Needs the cluster up + cert-manager-pki reconciled."
+run = "./environments/local/scripts/zot-trust.sh"
 
 # The attestation sign/verify seam is its own concern (docs/designs/repo-
 # structure.md, ADR 0013) — tasks namespaced attestation:<verb>.

@@ -20,7 +20,8 @@ bats    deploy/frontend/scripts/tests/frontend-serve.bats   6    # 1 [docker] ca
 bats    deploy/frontend/scripts/tests/dockerfile-pin.bats   2
 bats    deploy/frontend/scripts/tests/frontend-build.bats   24
 bats    deploy/frontend/scripts/tests/timoni-vet.bats       2
-bats    environments/local/scripts/tests/mise-env.bats           3
+bats    environments/local/scripts/tests/mise-env.bats           5
+bats    environments/local/scripts/tests/zot-trust.bats          9
 bats    environments/local/scripts/tests/zot-manifests.bats      7
 bats    environments/local/scripts/tests/tekton-install.bats     5
 bats    environments/local/scripts/tests/flux-bootstrap.bats     6
