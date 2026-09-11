@@ -72,9 +72,17 @@ frontend_strict_digest() {
 	esac
 }
 
-# frontend_host_image — cv_frontend's loopback registry ref (no tag), read
-# from the ONE place both hostnames live (deploy/frontend/pipelinerun.cue).
+# frontend_host_image — cv_frontend's registry ref (no tag), read from the
+# ONE place both hostnames live (deploy/frontend/pipelinerun.cue).
 frontend_host_image() {
 	cue export "$(frontend_repo_root)/deploy/frontend/pipelinerun.cue" \
 		-e image.host --out text
+}
+
+# frontend_zot_ca — the dev CA `mise run local:zot:trust` (T7c R1b-ii-b)
+# writes for the node's dockerd trust — reused here for host-side `oras`
+# calls against zot's HTTPS listener (T7c R1b-ii-c), same as
+# ci/scripts/registry-seed.sh. Test seam: $TOOLBOX_ZOT_CA.
+frontend_zot_ca() {
+	printf '%s\n' "${TOOLBOX_ZOT_CA:-$HOME/.docker/certs.d/zot.zot.svc.cluster.local:5000/ca.crt}"
 }

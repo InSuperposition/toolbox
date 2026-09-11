@@ -17,7 +17,11 @@
 # Workspace `buildkitd-config` is a ConfigMap (not a PVC — no coschedule
 # constraint); the PipelineRun binds it to `ci/runtime/buildkitd-mirror.yaml`
 # so the build talks only to the in-cluster zot (TODOS.md T7b1-followup —
-# the OrbStack IPv6-egress defect).
+# the OrbStack IPv6-egress defect). Workspace `ca-bundle` is the
+# trust-manager `toolbox-ca-bundle` ConfigMap (T7c R1b-ii-a/ADR 0022,
+# already reconciled into ns `ci`) — the dev CA for zot's HTTPS listener
+# (T7c R1b-ii-c), shared by `build` and `scan-attach` rather than a second
+# committed copy.
 #
 # `retries: 2` on the clone tasks: the same OrbStack cluster intermittently
 # fails DNS on an external host (`git`'s resolver, ~10% — an OrbStack DNS
@@ -64,10 +68,11 @@ spec:
         (e.g. deploy/frontend — the build Task subPaths build-defs to defs/).
     - name: REGISTRY_INSECURE
       type: string
-      default: "true"
+      default: "false"
   workspaces:
     - name: shared
     - name: buildkitd-config
+    - name: ca-bundle
   tasks:
     - name: clone-app
       retries: 2
@@ -103,6 +108,7 @@ spec:
         - { name: source, workspace: shared, subPath: app }
         - { name: build-defs, workspace: shared, subPath: defs }
         - { name: buildkitd-config, workspace: buildkitd-config }
+        - { name: ca-bundle, workspace: ca-bundle }
     - name: scan-attach
       runAfter: [build]
       taskRef:
@@ -113,6 +119,7 @@ spec:
         - { name: REGISTRY_INSECURE, value: $(params.REGISTRY_INSECURE) }
       workspaces:
         - { name: shared, workspace: shared }
+        - { name: ca-bundle, workspace: ca-bundle }
     - name: gate
       runAfter: [scan-attach]
       taskRef:

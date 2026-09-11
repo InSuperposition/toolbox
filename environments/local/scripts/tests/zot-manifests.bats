@@ -35,11 +35,25 @@ setup() {
 	[ "$status" -eq 0 ]
 }
 
-@test "the Service is NodePort, never LoadBalancer (the exposure boundary is one host port)" {
-	run grep -nE 'type:\s*NodePort' "$ZOT"
+@test "the Service is ClusterIP, never NodePort or LoadBalancer (T7c R1b-ii-c drops the exposed port)" {
+	run grep -nE 'type:\s*ClusterIP' "$ZOT"
 	[ "$status" -eq 0 ]
+	run grep -nE 'type:\s*NodePort' "$ZOT"
+	[ "$status" -ne 0 ]
 	run grep -nE 'type:\s*LoadBalancer' "$ZOT"
 	[ "$status" -ne 0 ]
+}
+
+@test "HTTPS-only: http.tls block present, zot-tls secret mounted at /certs" {
+	run grep -n '"tls"' "$ZOT"
+	[ "$status" -eq 0 ]
+	run grep -nE 'secretName:\s*zot-tls' "$ZOT"
+	[ "$status" -eq 0 ]
+}
+
+@test "BOTH probes are HTTPS (a readiness-only fix means ready-then-killed)" {
+	run bash -c "grep -c 'scheme: HTTPS' '$ZOT'"
+	[ "$output" -eq 2 ]
 }
 
 @test "the pod mounts no ServiceAccount token" {

@@ -7,13 +7,16 @@
 #
 #   OCIRepository frontend   — pulls the rendered-manifest artifact (D_man,
 #                              deploy/frontend/timoni.lock) from the
-#                              in-cluster zot over plain HTTP (insecure: true;
-#                              credential-free). `ref.digest`, NO spec.verify
-#                              — the digest is the trust boundary (ADR 0001);
-#                              the cv_frontend IMAGE's approval attestation +
-#                              K1's ImageValidatingPolicy are the workload
-#                              trust gate, not this manifest wrapper. (An
-#                              OpenBao Transit manifest-signing key is an O4
+#                              in-cluster zot over HTTPS (T7c R1b-ii-c;
+#                              credential-free — `certSecretRef` trusts the
+#                              dev CA via the CA-only `zot-flux-ca` Secret,
+#                              `environments/local/flux/kustomization.yaml`).
+#                              `ref.digest`, NO spec.verify — the digest is
+#                              the trust boundary (ADR 0001); the cv_frontend
+#                              IMAGE's approval attestation + K1's
+#                              ImageValidatingPolicy are the workload trust
+#                              gate, not this manifest wrapper. (An OpenBao
+#                              Transit manifest-signing key is an O4
 #                              follow-up.)
 #   frontend-ns Kustomization — applies ONLY deploy/frontend/k8s/ (the
 #                              `frontend` Namespace + its PSA + approval
@@ -42,7 +45,9 @@ metadata:
 spec:
   interval: "10m"
   url: "oci://zot.zot.svc.cluster.local:5000/cv-frontend-manifests"
-  insecure: true
+  insecure: false
+  certSecretRef:
+    name: zot-flux-ca
   ref:
     digest: "sha256:48dc67f0f0cf3289a68c5297499048b443c8edd3232608bc911e3497ae828715"
 ---

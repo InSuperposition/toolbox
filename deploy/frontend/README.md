@@ -43,10 +43,11 @@ build/scan/gate pipeline:
 
 1. Preflights the cluster prerequisites — a reachable `${TOOLBOX_KUBE_CONTEXT:-orbstack}`
    context, the `build-scan-approve` Pipeline present **and carrying the
-   `gate` task**, the `buildkitd-mirror` ConfigMap in `ns ci`, zot on
-   `localhost:30500`, and (idempotently, via `mise run frontend:seed`) the
-   Dockerfile's base images in zot. Each missing prerequisite names its fix
-   and exits 3.
+   `gate` task**, the `buildkitd-mirror` ConfigMap in `ns ci`, zot answering
+   HTTPS on `zot.zot.svc.cluster.local:5000` (T7c R1b-ii-c; needs `mise run
+   local:zot:trust` for the host to trust it), and (idempotently, via
+   `mise run frontend:seed`) the Dockerfile's base images in zot. Each
+   missing prerequisite names its fix and exits 3.
 2. Renders `pipelinerun.cue` with `cue export -t rev=<sha> -t defsRev=<toolbox-ref>`
    — a missing or non-hex SHA fails the render closed. `TOOLBOX_DEFS_REF`
    overrides the toolbox ref (default: `HEAD`); a Dockerfile that differs
@@ -58,7 +59,7 @@ build/scan/gate pipeline:
    canonical `sha256:<64hex>` — exit 5), print this run's
    `vnd.trivy.report+json` referrer digest for the operator to eyeball,
    delete the run, and print the exact next line:
-   `mise run attestation:sign -- localhost:30500/cv-frontend@<digest>`.
+   `mise run attestation:sign -- zot.zot.svc.cluster.local:5000/cv-frontend@<digest>`.
 5. **Failed** → the run + pods are kept. If the `gate` step is what failed,
    its terminated exitCode classifies the message: `2` → the loud
    "CRITICAL found, signing is a deliberate override" box; `1` → "gate
@@ -66,10 +67,11 @@ build/scan/gate pipeline:
    the gate ran.
 
 The manifest digest is resolved once, here, by the operator — never a
-Tekton result (ADR 0001). `pipelinerun.cue` is the single source of both
-registry hostnames: the pipeline pushes/scans over
-`zot.zot.svc.cluster.local:5000/cv-frontend`, every host-side tool uses
-`localhost:30500/cv-frontend`, the digest is the same.
+Tekton result (ADR 0001). `pipelinerun.cue` is the single source of the
+registry hostname: `zot.zot.svc.cluster.local:5000/cv-frontend` for both
+the in-cluster pipeline and every host-side tool (T7c R1b-ii-c dropped
+zot's NodePort — OrbStack routes the host into the cluster network
+directly, so there's no separate loopback form anymore).
 
 ## Consume + deploy (T5b)
 

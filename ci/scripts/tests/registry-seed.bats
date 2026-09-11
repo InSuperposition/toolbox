@@ -7,10 +7,9 @@
 # these cases cover argument handling + the ref -> zot-path mapping without
 # a network. The real copy is proven by `mise run frontend:seed` (recorded
 # in TODOS.md T7b1-followup). `oras`, not `crane` (R1b-ii-c pre-plan): the
-# darwin/Go toolchain gives `crane` no CA-file override at all, so it can
-# never make the plain-HTTP -> HTTPS-with-dev-CA swap R1b-ii-c needs;
-# `oras --to-ca-file`/`--from-ca-file` are independently scoped per
-# endpoint and confirmed digest-preserving against this script's own pins.
+# darwin/Go toolchain gives `crane` no CA-file override at all; `oras
+# --to-ca-file`/`--from-ca-file` are independently scoped per endpoint and
+# confirmed digest-preserving against this script's own pins.
 
 setup() {
 	load helper
@@ -25,6 +24,10 @@ setup() {
 	SH
 	chmod +x "$FAKEBIN/oras"
 	PATH="$FAKEBIN:$PATH"
+
+	# zot-trust.sh's output — a fixture cert, not the real dev CA.
+	export TOOLBOX_ZOT_CA="$BATS_TEST_TMPDIR/zot-ca.crt"
+	printf -- '-----BEGIN CERTIFICATE-----\nfixture\n-----END CERTIFICATE-----\n' >"$TOOLBOX_ZOT_CA"
 
 	DF="$BATS_TEST_TMPDIR/Dockerfile"
 	cat >"$DF" <<-'EOF'
@@ -46,6 +49,13 @@ setup() {
 	[ "$status" -eq 2 ]
 }
 
+@test "missing zot CA -> exit 2, points at the trust task" {
+	rm -f "$TOOLBOX_ZOT_CA"
+	run "$SW" "$DF"
+	[ "$status" -eq 2 ]
+	[[ "$output" == *"local:zot:trust"* ]]
+}
+
 @test "Dockerfile with no digest-pinned image -> exit 3" {
 	printf 'FROM alpine:3.20\n' >"$BATS_TEST_TMPDIR/plain"
 	run "$SW" "$BATS_TEST_TMPDIR/plain"
@@ -65,10 +75,10 @@ setup() {
 	[[ "$output" == *"@sha256:c0753125"* ]]
 }
 
-@test "defaults the registry to localhost:30500" {
+@test "defaults the registry to zot.zot.svc.cluster.local:5000" {
 	run "$SW" "$DF"
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"localhost:30500/library/node"* ]]
+	[[ "$output" == *"zot.zot.svc.cluster.local:5000/library/node"* ]]
 }
 
 @test "a failed copy -> exit 4, other copies still attempted" {
@@ -79,11 +89,12 @@ setup() {
 	[ "$(grep -c 'oras cp' <<<"$output")" -eq 3 ]
 }
 
-@test "uses --to-plain-http (zot is plain-HTTP pre-cutover), never --insecure" {
+@test "uses --to-ca-file (zot is HTTPS, T7c R1b-ii-c), never --insecure or --to-plain-http" {
 	run "$SW" "$DF"
 	[ "$status" -eq 0 ]
-	[[ "$output" == *"--to-plain-http"* ]]
+	[[ "$output" == *"--to-ca-file $TOOLBOX_ZOT_CA"* ]]
 	[[ "$output" != *"--insecure"* ]]
+	[[ "$output" != *"--to-plain-http"* ]]
 }
 
 @test "docker.io-implicit source refs are fully qualified for oras (crane defaulted these, oras does not)" {

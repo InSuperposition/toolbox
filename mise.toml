@@ -140,7 +140,7 @@ run = "./deploy/frontend/scripts/frontend-publish.sh"
 # reaches docker.io / gcr.io (the OrbStack IPv6-egress defect — TODOS.md T7,
 # /investigate 2026-09-08). Runs on the host, where IPv4 works. Idempotent.
 [tasks."frontend:seed"]
-description = "Seed the local zot with cv_frontend's digest-pinned base images so the in-cluster build is hermetic (TODOS.md T7b1-followup) — arg: [zot-registry] (default localhost:30500)."
+description = "Seed the local zot with cv_frontend's digest-pinned base images so the in-cluster build is hermetic (TODOS.md T7b1-followup) — arg: [zot-registry] (default zot.zot.svc.cluster.local:5000). Needs `mise run local:zot:trust` first (T7c R1b-ii-c — zot is HTTPS)."
 run = "./ci/scripts/registry-seed.sh deploy/frontend/Dockerfile"
 
 # T7b3 — the operator entrypoint for the in-cluster build/scan/gate pipeline.

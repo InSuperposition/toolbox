@@ -11,12 +11,19 @@
 # the stored images; the Kustomization's `deletionPolicy: Orphan` keeps zot
 # running if that CR is deleted. A real teardown is a manual `kubectl delete`.
 #
-# Credential-free on the single-user OrbStack VM: no `auth` block, HTTP only,
-# loopback / cluster-internal. Stated threat model + the P2 "zot registry auth"
-# planning session: TODOS.md. Reachable two ways:
-#   - `zot.zot.svc.cluster.local:5000`  — in-cluster build / scan / attach pods
-#   - `localhost:30500`                 — the host (NodePort), for the operator's
-#                                         `oras` / `docker` in the consume demo
+# Credential-free on the single-user OrbStack VM: no `auth` block. Stated
+# threat model + the P2 "zot registry auth" planning session: TODOS.md.
+#
+# T7c R1b-ii-c: HTTPS-only, the `zot-tls` leaf Certificate (T7c R1b-ii-a,
+# `environments/local/cert-manager/issuers.yaml`) off `toolbox-dev-ca`.
+# ClusterIP, not NodePort (A3, the R1b-ii ENG REVIEW — one cert SAN set, one
+# name everywhere): `zot.zot.svc.cluster.local:5000` for both in-cluster
+# pods AND the host, since OrbStack routes the Mac host into the cluster
+# network directly (the same routing the `openbao-tls` / `toolbox-dev-ca`
+# leaves already rely on — no port-forward). Host tools trust the dev CA via
+# `mise run local:zot:trust` (T7c R1b-ii-b, `SSL_CERT_FILE` / per-tool
+# `--ca-file`); in-cluster pods via the trust-manager `toolbox-ca-bundle`
+# ConfigMap (T7c R1b-ii-a).
 #
 # GC is OFF: this is a throwaway dev store, nothing is ever deleted, which
 # subsumes the `deleteUntagged: false` / `deleteReferrers: false` intent
@@ -68,7 +75,11 @@ data:
       },
       "http": {
         "address": "0.0.0.0",
-        "port": "5000"
+        "port": "5000",
+        "tls": {
+          "cert": "/certs/tls.crt",
+          "key": "/certs/tls.key"
+        }
       },
       "log": {
         "level": "info"
@@ -125,12 +136,14 @@ spec:
             httpGet:
               path: /v2/
               port: http
+              scheme: HTTPS
             initialDelaySeconds: 3
             periodSeconds: 5
           livenessProbe:
             httpGet:
               path: /v2/
               port: http
+              scheme: HTTPS
             initialDelaySeconds: 10
             periodSeconds: 15
           resources:
@@ -143,6 +156,9 @@ spec:
             - name: config
               mountPath: /etc/zot
               readOnly: true
+            - name: certs
+              mountPath: /certs
+              readOnly: true
             - name: data
               mountPath: /var/lib/registry
             - name: tmp
@@ -151,6 +167,9 @@ spec:
         - name: config
           configMap:
             name: zot-config
+        - name: certs
+          secret:
+            secretName: zot-tls
         - name: data
           persistentVolumeClaim:
             claimName: zot-data
@@ -165,13 +184,14 @@ metadata:
   labels:
     app.kubernetes.io/part-of: toolbox-ci
 spec:
-  # NodePort, NOT LoadBalancer: the exposure boundary is exactly one host port
-  # (localhost:30500 on OrbStack). zot-manifests.bats guards this.
-  type: NodePort
+  # ClusterIP, not NodePort (T7c R1b-ii-c A3 — one cert SAN set, one name
+  # everywhere: OrbStack routes the Mac host into the cluster network
+  # directly, the same as `openbao-tls`, so no host-exposed port is needed).
+  # zot-manifests.bats guards this.
+  type: ClusterIP
   selector:
     app.kubernetes.io/name: zot
   ports:
     - name: http
       port: 5000
       targetPort: http
-      nodePort: 30500

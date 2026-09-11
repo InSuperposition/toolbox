@@ -26,9 +26,18 @@ set -euo pipefail
 #           environments/local/flux/frontend.yaml in the reviewed PR — the
 #           git pin is the reviewed artifact (ADR 0001). Never auto-committed.
 #
-# The push is to the loopback NodePort (plain HTTP, credential-free zot,
-# `--insecure-registry`); the Flux `OCIRepository frontend` pulls the
-# identical digest over the in-cluster Service DNS.
+# The push targets zot's HTTPS listener (T7c R1b-ii-c) via `flux push
+# artifact`, which has no CA-file override (only `--insecure-registry` —
+# researched, `~/.claude/plans/t7c-distribution-t7d.md` § "R1b-ii-c
+# PRE-PLAN": flux2 can't be source-built, `oras push` would mean
+# hand-building its OCI layer). `--insecure-registry` is a named,
+# time-boxed interim, not a permanent accept (TODOS.md § R1b-ii-c) —
+# live-verified it skip-verifies over TLS rather than forcing plain HTTP,
+# so this still talks real HTTPS to zot, just without checking the cert.
+# The Flux `OCIRepository frontend` pulls the identical digest over the
+# same in-cluster Service DNS, WITH real verification (`certSecretRef` →
+# the dev CA) — the interim is scoped to this one operator-boundary push,
+# not the thing that actually matters for the running cluster.
 #
 # Exit: 0 published · 1 verification failed (nothing rendered or pushed) ·
 #       2 bad args · 5 timoni render failed · 6 flux push failed

@@ -30,18 +30,22 @@ _defsRev: =~"^[0-9a-f]{7,40}$" @tag(defsRev)
 // cv_frontend's registry facts — the ONE place these hostnames live.
 // The pipeline pushes/scans over the in-cluster service DNS; every
 // host-side tool (`oras resolve`, `attestation:sign`, `frontend:deploy`,
-// `frontend:publish`) addresses the same repo over the loopback NodePort.
-// The digest is identical either way. `cue export -e image.host` hands the
-// operator the loopback form; `-e image.manifests.inCluster` the form the
-// Flux `OCIRepository frontend` pulls (Plan B M3, ADR 0019).
+// `frontend:publish`) addresses the SAME name (T7c R1b-ii-c — zot's NodePort
+// is gone; OrbStack routes the Mac host into the cluster network directly,
+// same as `openbao-tls`, so `.host` and `.inCluster` are now identical —
+// kept as two fields, not collapsed to one, so every existing
+// `-e image.host` / `-e image.manifests.host` call site keeps working
+// unchanged). `cue export -e image.host` hands the operator that name;
+// `-e image.manifests.inCluster` the form the Flux `OCIRepository frontend`
+// pulls (Plan B M3, ADR 0019).
 #image: {
 	inCluster: "zot.zot.svc.cluster.local:5000/cv-frontend"
-	host:      "localhost:30500/cv-frontend"
+	host:      "zot.zot.svc.cluster.local:5000/cv-frontend"
 	// The rendered-manifest OCI artifact (D_man) — `frontend:publish`
 	// `flux push`es it to `.host`, the Flux `OCIRepository` pulls `.inCluster`.
 	manifests: {
 		inCluster: "zot.zot.svc.cluster.local:5000/cv-frontend-manifests"
-		host:      "localhost:30500/cv-frontend-manifests"
+		host:      "zot.zot.svc.cluster.local:5000/cv-frontend-manifests"
 	}
 }
 image: #image
@@ -80,6 +84,13 @@ image: #image
 			{
 				name: "buildkitd-config"
 				configMap: name: "buildkitd-mirror"
+			},
+			{
+				// T7c R1b-ii-c: zot is HTTPS-only — the trust-manager
+				// toolbox-ca-bundle ConfigMap (already in ns `ci`, R1b-ii-a)
+				// gives `build`/`scan-attach` the dev CA.
+				name: "ca-bundle"
+				configMap: name: "toolbox-ca-bundle"
 			},
 		]
 	}

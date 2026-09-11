@@ -18,15 +18,15 @@ set -euo pipefail
 # a literal deploy/ path. `oras cp` is idempotent (skips manifests already
 # present) and digest-preserving (the seeded manifest keeps its sha256, so the
 # Dockerfile's `@sha256:` pins still resolve through the mirror; live-verified
-# against this script's own three real pins). `--to-plain-http` matches zot's
-# current plain-HTTP listener; R1b-ii-c's HTTPS cutover swaps that one flag
-# for `--to-ca-file "$ZOT_CA"` — no further script change. Not `crane`:
-# `crane` has no CA-file override at all on this darwin/Go toolchain (only a
-# global `--insecure`), so it can never make that swap; `oras`'s
+# against this script's own three real pins). `--to-ca-file "$ZOT_CA"` trusts
+# zot's HTTPS listener (T7c R1b-ii-c) — `$ZOT_CA` defaults to the SAME file
+# `mise run local:zot:trust` (T7c R1b-ii-b) already writes for the node
+# dockerd, no second fetch. Not `crane`: `crane` has no CA-file override at
+# all on this darwin/Go toolchain (only a global `--insecure`); `oras`'s
 # `--to-ca-file`/`--from-ca-file` are independently scoped per endpoint
 # (confirmed from `oras-project/oras` source), so the public docker.io/gcr.io
 # source keeps ordinary system trust while only the zot destination gets the
-# dev CA later.
+# dev CA.
 #
 # One real behavior gap `crane` papered over: unlike `crane`/`docker pull`,
 # `oras` has NO implicit docker.io default for a bare or 2-segment ref —
@@ -43,11 +43,13 @@ set -euo pipefail
 # Exit: 0 ok · 2 bad args · 3 no digest-pinned image found · 4 a copy failed.
 
 DOCKERFILE="${1:-}"
-ZOT="${2:-localhost:30500}"
+ZOT="${2:-zot.zot.svc.cluster.local:5000}"
+ZOT_CA="${TOOLBOX_ZOT_CA:-$HOME/.docker/certs.d/zot.zot.svc.cluster.local:5000/ca.crt}"
 
 [ -n "$DOCKERFILE" ] || { echo "usage: registry-seed.sh <dockerfile> [zot-registry]" >&2; exit 2; }
 [ -f "$DOCKERFILE" ] || { echo "registry-seed: no such file: $DOCKERFILE" >&2; exit 2; }
 command -v oras >/dev/null || { echo "registry-seed: oras not on PATH — run \`mise install\`" >&2; exit 2; }
+[ -f "$ZOT_CA" ] || { echo "registry-seed: $ZOT_CA not found — run \`mise run local:zot:trust\` first" >&2; exit 2; }
 
 # Every `<ref>@sha256:<64 hex>` on a `# syntax=` or `FROM` line.
 mapfile -t refs < <(
@@ -113,7 +115,7 @@ for src in "${refs[@]}"; do
 	dst="$(src_to_zot_dst "$src")"
 	echo "==> seed  $src"
 	echo "     ->  $dst"
-	if ! oras cp "$fq_src" "$dst" --to-plain-http; then
+	if ! oras cp "$fq_src" "$dst" --to-ca-file "$ZOT_CA"; then
 		echo "registry-seed: copy failed: $src -> $dst" >&2
 		rc=4
 	fi

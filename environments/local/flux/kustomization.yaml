@@ -8,6 +8,24 @@
 # override within one reconcile — so iterating Flux config on a branch fights
 # the self-heal — and (b) make the object that configures the reconciler a
 # product of that reconciler. The bridge owns it; git owns everything below.
+#
+# `zot-flux-ca` (T7c R1b-ii-c): a CA-ONLY Secret for `OCIRepository
+# frontend`'s `certSecretRef` (source-controller needs a Secret, not a
+# ConfigMap; trust-manager only emits ConfigMaps without widening its RBAC
+# via `secretTargets` — "grant read access to all secrets in the cluster"
+# per its own chart values — not worth it for one Secret). Deliberately a
+# `secretGenerator` off the COMMITTED `toolbox-dev-ca-public.crt` (the
+# `-public` suffix is deliberate — an X.509 cert is public-key material
+# only, no secrecy lost by committing it; the private key was generated
+# IN-CLUSTER by cert-manager and has never left the `toolbox-dev-ca`
+# Secret, never touched git or tofu state), not a live cluster fetch: no
+# new script, no RBAC widening. Trade-off, same one already accepted for
+# the Kyverno admission controller's CA mount (ADR 0022): a committed copy
+# goes stale on a KEY rotation, not a same-key renewal — moot today given
+# `toolbox-dev-ca`'s `duration: 87600h` (10y). See TODOS.md "Dev CA
+# rotation runbook" for the real answer if that stops being true.
+# `disableNameSuffixHash` keeps the name stable for `certSecretRef` to
+# reference deterministically.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
@@ -22,3 +40,13 @@ resources:
   - kyverno-helmrelease.yaml
   - kyverno-policy.yaml
   - frontend.yaml
+
+secretGenerator:
+  - name: zot-flux-ca
+    namespace: flux-system
+    type: Opaque
+    files:
+      - ca.crt=toolbox-dev-ca-public.crt
+
+generatorOptions:
+  disableNameSuffixHash: true

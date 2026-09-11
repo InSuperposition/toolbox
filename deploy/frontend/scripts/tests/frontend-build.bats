@@ -133,8 +133,8 @@ setup() {
 	run "$SCRIPTS/frontend-build.sh" "$REV"
 	[ "$status" -eq 0 ]
 	a64="$(printf 'a%.0s' {1..64})"
-	[[ "$output" == *"BUILT  localhost:30500/cv-frontend@sha256:$a64"* ]]
-	[[ "$output" == *"mise run attestation:sign -- localhost:30500/cv-frontend@sha256:$a64"* ]]
+	[[ "$output" == *"BUILT  zot.zot.svc.cluster.local:5000/cv-frontend@sha256:$a64"* ]]
+	[[ "$output" == *"mise run attestation:sign -- zot.zot.svc.cluster.local:5000/cv-frontend@sha256:$a64"* ]]
 	grep -q 'delete pipelinerun' "$KLOG"
 }
 
