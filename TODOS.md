@@ -26,8 +26,9 @@ open work):
 - *tofu modules*
   - `Retrofit vm-orbstack, cluster-k0sctl, secret-openbao to digest-pinning`
 - *Tekton/CI*
-  - `Promotion boundary for build-scan-approve` — new, surfaced by T8's
-    eng review (Codex outside voice)
+  - `Run-scoped build digest identity` — surfaced reviewing "Promotion
+    boundary" (below); a live correctness gap in scan-attach's evidence
+    attachment, not hypothetical
 - *Kyverno/Cilium*
   - `Cilium — planning session needed`
   - `Plan B — Timoni + Kyverno + Crossplane boundary` — shipped M1→X1→K1→M3,
@@ -62,6 +63,22 @@ open work):
 
 Newest first. Git-log density — commit/PR references, not a transcript.
 Full detail lives in the referenced PRs, ADRs, and commit messages.
+
+- **Promotion boundary for build-scan-approve — RESOLVED, documentation-only**
+  (`/plan-eng-review`, Codex outside voice). Rejected a real registry-level
+  promotion boundary (no zot-native feature; this repo's zero-trust model
+  already enforces trust at consumption time — Kyverno admission +
+  `frontend:publish`'s verify-first, never registry presence). Also
+  rejected a narrower `-REJECTED` marker-tag `finally:` Task Codex found
+  structurally unsound: no run-scoped digest identity means it can tag the
+  wrong build on a rerun/concurrent-run collision, and even correct it
+  doesn't address the stated risk (a `docker pull` shows nothing
+  different). Shipped instead: `ci/README.md` § Trust boundary documents
+  the direct-pull risk and corrects an overclaim (not "only a human"
+  bypasses enforcement — automation outside the designated delivery path
+  does too). No code, no new Task. Surfaced its own follow-up, tracked
+  separately: `Run-scoped build digest identity` (above) — the same
+  mutable-tag identity gap already affects `scan-attach`'s evidence today.
 
 - **T8 — build provenance — DONE** (PR #51; reshaped by PR #49/#50 —
   `/plan-eng-review`, 2 Codex outside-voice passes, live spikes). Rejected
@@ -499,33 +516,38 @@ the digest-equivalent for git-sourced modules.
 **Priority:** P2
 **Depends on:** digest-as-source-of-truth Phase 1-2 landing and proving out
 
-### Promotion boundary for build-scan-approve — P2, planning session
+### Run-scoped build digest identity — P2, planning session
 
-**What:** design a real promotion boundary for the `build-scan-approve`
-Pipeline — today `buildkit-build` pushes the image
-(`ci/tasks/buildkit-build.yaml`) before `scan-attach`, `gate`, or T8's new
-provenance-sign Task even run. A CRITICAL-vuln or unsigned image is
-briefly (or, on a failed run, indefinitely) present in the registry
-regardless of what any gate later decides.
+**What:** the `build-scan-approve` Pipeline has no run-scoped digest
+identity — `scan-attach`, `provenance-sign`, and `gate` all address the
+image by the mutable `$(APP_REVISION)` git-SHA tag
+(`ci/pipelines/build-scan-approve.yaml:39`), not a digest resolved and
+pinned once per run. Design a mechanism (a Tekton result carrying the
+resolved digest, propagated to every downstream Task; or something else)
+so concurrent/rerun collisions can't attach one run's evidence to
+another run's image.
 
-**Why:** closes a real zero-trust gap this repo's design doc doesn't
-currently claim to have. `gate.yaml`'s blocking exit code stops the
-*PipelineRun*, not the image's registry presence — a distinction the repo
-has not stated plainly anywhere until this review.
+**Why — this is a live correctness gap, not hypothetical:** surfaced by
+Codex's outside-voice review of the "Promotion boundary" item (above),
+which found it while reviewing a different, narrower proposal. Two
+overlapping `build-scan-approve` PipelineRuns (a rerun after a failed
+clone, or two runs started close together) can result in `scan-attach`
+attaching a scan report or SBOM for the WRONG image, since every Task
+just re-resolves the same mutable tag independently — sequential Tasks
+*within* one run don't serialize *across* runs. Signing the resulting
+digest (T8) doesn't repair evidence that was already mismatched.
 
-**Candidates to weigh:** a staging repo path the image lands in first,
-promoted (re-tagged/re-pushed, or a manifest-list flip) to the real path
-only after every gate passes; a registry-side quarantine/retention policy;
-zot-native support for this pattern (worth checking before building one).
+**Context:** `ADR 0001` (digest is the trust boundary) and the pipeline's
+own stated design ("the build digest is never a Tekton result... `oras
+resolve` produces the immutable digest once at the operator boundary")
+were written assuming a SINGLE run's timeline, not concurrent/rerun
+collision — that assumption is the actual gap.
 
-**Context:** surfaced by Codex's outside-voice review of the T8 plan-eng-
-review (2026-09-14) — not a new defect, a pre-existing gap in the shipped
-`scan-attach`/`gate` design that T8's review happened to notice while
-checking a related claim.
-
-**Depends on:** nothing blocking. **Priority:** P2 — affects the existing
-scan gate, not just T8; should land before or alongside T8's provenance
-work since it's the same pipeline.
+**Depends on:** nothing blocking. **Priority:** P2 — blocks trusting any
+future registry-side marking mechanism (the "Promotion boundary" item,
+above, explicitly deferred pending this); also worth fixing on its own
+merits since it's a correctness gap in already-shipped evidence
+attachment.
 
 ### Build reproducibility (SOURCE_DATE_EPOCH, independent rebuild verification) — P3
 
