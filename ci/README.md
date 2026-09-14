@@ -72,7 +72,7 @@ Ordering is `runAfter`. The one consumer of the digest-as-a-value,
 call, at the operator boundary. A Tekton result would need embedded shell
 or `enable-api-fields: alpha` and buys nothing the tag doesn't. ADR 0001
 holds: the tag is a convenience alias; the signed chain
-(`attestation-sign.sh` → `frontend-deploy.sh`) still pins the digest, which
+(`attestation-sign.sh` → `frontend-publish.sh`) still pins the digest, which
 never leaves the human boundary. (`~/.claude/plans/t7b-pipeline-recut.md`,
 `TODOS.md` T7b.)
 

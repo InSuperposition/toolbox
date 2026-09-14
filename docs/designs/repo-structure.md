@@ -87,7 +87,7 @@ FORBIDDEN:
 
 Runtime-only edges (env vars / mise-task calls, not file paths — allowed, not "dependencies"):
   attestation/scripts/openbao-preflight.sh       ··▶  OpenBao daemon        via $VAULT_ADDR
-  deploy/frontend/scripts/frontend-serve.sh      ··▶  attestation-verify    via $TOOLBOX_ATTESTATION_VERIFY
+  deploy/frontend/scripts/frontend-publish.sh    ··▶  attestation-verify    via $TOOLBOX_ATTESTATION_VERIFY
   environments/local/scripts/openbao-bootstrap.sh ··▶ `mise run attestation:export-pubkey`  (task call, not a file write)
 
 Deployment-composition edge (a manifest-ref, not a shell path — select + target-namespace + order + reconciliation policy; ownership stays with the target):
@@ -110,7 +110,7 @@ they stay in `environments/local/flux/`.
 |---|---|---|
 | `tests/` | repo-level shared test support (`lib/`, the coverage guard) | nothing — leaf; concern-agnostic (helpers take paths as args) |
 | `attestation/` | the sign + verify + preflight seam, `verdict-approved.cue`, `cosign-approval.pub` | `tests/lib` |
-| `deploy/frontend/` | one consumer of an approved image: build, deploy (pitchfork), serve, **publish** (the Timoni module `timoni/`, the `k8s/` namespace, `frontend-publish.sh` — ADR 0019/0021) | `attestation` (the verify seam, via env), `tests/lib` |
+| `deploy/frontend/` | one consumer of an approved image: build, **publish** (the Timoni module `timoni/`, the `k8s/` namespace, `frontend-publish.sh` — ADR 0019/0021) | `attestation` (the verify seam, via env), `tests/lib` |
 | `environments/local/` | one deployment target: the tofu composition, the Flux deployment policy (`flux/`), the `kyverno/` policy set (ADR 0020), the orchestration scripts that bring its units up | its own `openbao/` unit, `tests/lib`; calls `attestation:export-pubkey` as a task; reads the committed public `attestation/cosign-approval.pub` (kyverno `configMapGenerator`, `openbao-bootstrap.sh`) |
 | `environments/local/openbao/` | the local-OpenBao **tofu unit** only (host pitchfork daemon — retires at T7c Increment 4d) | `tests/lib` (for its `.tftest.hcl`) — leaf |
 | `environments/local/openbao/` | the **in-cluster** local-OpenBao tofu unit (ADR 0016 — Phase A `helm_release` + Phase C `vault_*`) | `tests/lib` — leaf |
@@ -133,13 +133,12 @@ they stay in `environments/local/flux/`.
   (`ports.bash` first — `registry.bash` needs `free_port`). A `.bats` file
   reaches the lib with the standard `load helper`. Anything concern-specific
   stays in that same `helper.bash`.
-- **Parallel-safe suites:** a suite that binds a network port or names a
-  container takes a fresh one per test — `free_port` for the OpenBao
-  listener, `frontend_isolation` for the docker deploy (a free host port
-  mapped to the fixed container port 44100, plus a unique container name).
-  Teardown is scoped to the test's own daemon/container — never a
-  machine-wide `pitchfork clean` or a fixed `docker rm`. Two `mise run
-  check` in separate worktrees run without collision.
+- **Parallel-safe suites:** a suite that binds a network port takes a fresh
+  one per test — `free_port` (`tests/lib/ports.bash`), e.g. for the OpenBao
+  listener or a throwaway zot fixture. Teardown is scoped to the test's own
+  daemon/container — never a machine-wide `pitchfork clean` or a fixed
+  `docker rm`. Two `mise run check` in separate worktrees run without
+  collision.
 - **Runtime shared shell:** `<concern>/scripts/lib/<domain>.sh` — a single
   lowercase word (not `<verb>`-bearing); `.ls-lint.yml` relaxes the stem
   rule under `**/scripts/lib`. Self-contained, no repo-level runtime lib.
@@ -194,7 +193,7 @@ toolbox/
 │       ├── scratch.bash        toolbox_repo_root + scratch_copy — caller names the paths to copy (Phase 1b)
 │       ├── registry.bash       free_port + a throwaway zot registry / cosign key / fake image (Phase 1b)
 │       ├── assert.bash         assert_exit / assert_file_mode … — added when a suite first needs it
-│       └── ports.bash          free_port + frontend_isolation (per-run host port + container name)  (Phase 1d)
+│       └── ports.bash          free_port (per-run host port)  (Phase 1d)
 │
 ├── attestation/                                      consumer-agnostic sign + verify seam
 │   ├── verdict-approved.cue
@@ -222,13 +221,12 @@ toolbox/
 │       │   └── cue.mod/{gen,pkg}/                    vendored k8s + timoni.sh/core CUE schemas (committed, `.gitattributes` linguist-generated; `timoni mod vendor k8s`)
 │       └── scripts/
 │           ├── frontend-build.sh                     T7b3 — `mise run frontend:build` — render + create + watch the pipeline, print the digest + attestation:sign line
-│           ├── frontend-deploy.sh                    (was consume.sh)
-│           ├── frontend-serve.sh                     (was run.sh — pitchfork entrypoint)
+│           ├── frontend-publish.sh                   Plan B M3 (ADR 0019/0021) — `mise run frontend:publish` — verify → render the Timoni module → `flux push`
 │           ├── lib/frontend.sh
 │           └── tests/
 │               ├── frontend-build.bats               fake cluster/registry/git/mise; real cue renders pipelinerun.cue
-│               ├── frontend-deploy.bats
-│               ├── frontend-serve.bats               (one case uses the DEFAULT verify path)
+│               ├── frontend-publish.bats              stubs TOOLBOX_ATTESTATION_VERIFY — argument validation + the verify gate
+│               ├── dockerfile-pin.bats
 │               ├── timoni-vet.bats                   Plan B M1 — `timoni mod vet` passes clean + rejects the negative fixture
 │               └── fixtures/
 │

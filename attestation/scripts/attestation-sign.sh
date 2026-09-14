@@ -17,9 +17,10 @@ set -euo pipefail
 # empty), which writes nothing.
 #
 # Selection model: this prints the new attestation's own digest. A consumer
-# pins THAT digest — `mise run frontend:deploy -- <ref> <attestation-digest>`
-# for the local demo — so a later reject, or a signed reject sitting next to
-# this approval, does not change what an already-pinned consumer sees.
+# pins THAT digest — `mise run frontend:publish -- <ref> <attestation-digest>
+# <revision>` for the in-cluster path — so a later reject, or a signed
+# reject sitting next to this approval, does not change what an
+# already-pinned consumer sees.
 #
 # Interim auth (a per-member authn/authz design is a separate deferred task,
 # no trigger yet — TODOS.md "Auth + multi-member DX"): signing authenticates to OpenBao with
@@ -252,4 +253,4 @@ else
 fi
 echo "attestation digest: $ATT_DIGEST"
 echo
-echo "record it:  mise run frontend:deploy -- $IMAGE_REF $ATT_DIGEST"
+echo "record it:  mise run frontend:publish -- $IMAGE_REF $ATT_DIGEST <revision>"

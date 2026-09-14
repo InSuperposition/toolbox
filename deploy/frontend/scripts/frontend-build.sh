@@ -22,7 +22,7 @@ set -euo pipefail
 #
 # The digest is resolved once, here, by the operator — never a Tekton
 # result (ADR 0001, the tag-addressed flow). Human approval
-# (`attestation:sign`) and consumption (`frontend:deploy`) stay outside.
+# (`attestation:sign`) and consumption (`frontend:publish`) stay outside.
 #
 # deploy/frontend may NOT depend on ci/ (repo-structure.md § concerns): the
 # Pipeline is referenced by NAME (cluster-side resolution), the strict-digest

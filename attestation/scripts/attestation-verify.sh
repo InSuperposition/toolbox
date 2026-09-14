@@ -3,11 +3,10 @@ set -euo pipefail
 
 # The consumer-side gate — and the one shared seam every consumer goes
 # through (docs/designs/digest-as-source-of-truth.md § Architecture; ADR
-# 0013): the local demo's `mise run frontend:deploy`, the frontend daemon's
-# launch re-verify, and T10's VEX check all call this. Given an image digest
-# and the digest of a specific approval attestation, it answers one
-# question: is THIS attestation a valid "approved" decision, signed by the
-# approval key, for THIS image?
+# 0013): the in-cluster path's `mise run frontend:publish` and T10's VEX
+# check both call this. Given an image digest and the digest of a specific
+# approval attestation, it answers one question: is THIS attestation a
+# valid "approved" decision, signed by the approval key, for THIS image?
 #
 #   attestation-verify.sh <registry/repo@sha256:<image>> <sha256:<attestation>>
 #

@@ -41,16 +41,19 @@ tag-only reference is rejected by `timoni mod vet` — not at reconcile time.
 `tests/invalid-image-digest.cue` is the negative fixture proving it
 (`deploy/frontend/scripts/tests/timoni-vet.bats`).
 
-The real digest comes from `deploy/frontend/current-image.txt` (the approved
-image, ADR 0009) at publish time; `images.cue` carries a valid-format
-placeholder so `timoni mod vet` resolves with defaults.
+The real digest is a CLI arg the operator supplies to
+`mise run frontend:publish` at publish time — printed by `attestation:sign`
+or `frontend:build`'s own next-step line; `images.cue` carries a
+valid-format placeholder so `timoni mod vet` resolves with defaults.
 
 ## Delivery-only
 
 The k8s Deployment is the Timoni/Flux *delivery* exercise. It does **not**
-carry the launch-time approval re-verify that `frontend-serve.sh` does for
-the pitchfork path (ADR 0009, retained) — in-cluster admission-time approval
-enforcement is Kyverno's `ImageValidatingPolicy` (chunk K1). And
+carry a launch-time approval re-verify — the ADR-0009 pitchfork path that
+did this is retired ([ADR 0023](../../../docs/adr/0023-retire-adr-0009-pitchfork-demo.md));
+no path in this repo re-verifies after admission now. In-cluster
+admission-time approval enforcement is Kyverno's `ImageValidatingPolicy`
+(chunk K1). And
 `cv_frontend` has an unresolved Remix v3 boot crash
 (`deploy/frontend/README.md`), so the container probes are lenient and
 `chainsaw-frontend` asserts "container started + correct image digest +

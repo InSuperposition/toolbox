@@ -16,7 +16,7 @@ superseded.
 | [0006](0006-approval-selection-is-attestation-digest-pin.md) | The consumer pins one approval attestation by digest (supersedes "latest wins") |
 | [0007](0007-distroless-dockerfile-not-buildpacks.md) | Distroless Node image from a hand-authored Dockerfile (supersedes Paketo buildpacks) |
 | [0008](0008-arm64-only.md) | `linux/arm64` only (supersedes the amd64 constraint) |
-| [0009](0009-demo-consumer-is-local-container-not-k8s.md) | The demo consumer is a local pitchfork container, not a k8s Deployment |
+| [0009](0009-demo-consumer-is-local-container-not-k8s.md) | The demo consumer is a local pitchfork container, not a k8s Deployment (superseded by 0023) |
 | [0010](0010-local-openbao-machine-global-static-seal.md) | Local OpenBao is one machine-global pitchfork daemon that auto-unseals from a static `file://` seal key (superseded by 0016) |
 | [0011](0011-local-openbao-secrets-are-files-no-fnox.md) | Local OpenBao's secrets are 0600 files beside its data — no fnox, no keychain (supersedes T3; amended by 0016) |
 | [0012](0012-local-openbao-is-environment-nested.md) | The local-OpenBao tofu unit lives under `environments/local/`, not `modules/` (breaks the sibling symmetry deliberately) |
@@ -25,9 +25,10 @@ superseded.
 | [0015](0015-flux-precedes-in-cluster-openbao-gitrepository-plain-yaml.md) | T7c order: Flux precedes the in-cluster OpenBao move; Flux reconciles plain YAML from a `GitRepository` (Crossplane not sequenced; does not supersede 0003/0014) |
 | [0016](0016-local-openbao-in-cluster-statefulset.md) | The local OpenBao runs in-cluster as an OpenTofu-owned raft StatefulSet, moved via key-preserving snapshot restore (supersedes 0010; amends 0011) |
 | [0018](0018-in-cluster-authoring-pipeline-and-tofu-kubernetes-ban.md) | In-cluster k8s objects go render (Timoni/CUE) → reconcile (Flux) → enforce (Kyverno) → provision (Crossplane, if activated); tofu `kubernetes_*` banned (amends 0015) |
-| [0019](0019-cv-frontend-timoni-module-and-k8s-target.md) | `cv_frontend` is a Timoni module delivered into the OrbStack cluster via Flux (amends 0009 — the demo app now also runs as a k8s Deployment; the pitchfork container is retained) |
+| [0019](0019-cv-frontend-timoni-module-and-k8s-target.md) | `cv_frontend` is a Timoni module delivered into the OrbStack cluster via Flux (amends 0009 — the demo app now also runs as a k8s Deployment; pitchfork-retention clause narrowed by 0023) |
 | [0020](0020-imagevalidatingpolicy-on-the-dev-reference-cluster.md) | One Kyverno `ImageValidatingPolicy` verifies the `cv_frontend` approval attestation at admission on the dev *reference* cluster (narrows the "production only" Kyverno deferral); pins Kyverno v1.19.1; `attestation-sign.sh` gains sigstore discovery annotations |
 | [0021](0021-cv-frontend-publish-is-a-host-operator-step.md) | `cv_frontend` manifest render+publish is a host `mise run frontend:publish` step (verify → `timoni build` → `flux push`), not a Tekton Task — matches the operator-boundary seam (ADR 0013), avoids authoring a `timoni` container image; delivery stays declarative Flux CRs |
 | [0022](0022-trust-manager-distributes-the-kyverno-ca-bundle.md) | trust-manager (a Flux HelmRelease) merges the pinned public-root snapshot + the live `toolbox-dev-ca` Secret into the ConfigMap Kyverno mounts for the HTTPS zot pull (T7c R1b); scoped to that one consumer — buildkitd / source-controller routing deferred to R1b-ii; R1b-i installs the tool only |
+| [0023](0023-retire-adr-0009-pitchfork-demo.md) | The ADR-0009 pitchfork demo consumer is retired (supersedes 0009, narrows 0019) — the in-cluster Flux path is the only delivery path now; the launch-time re-verify property it gave up is not replaced |
 
 Architecture: `docs/designs/`. Open work: `TODOS.md`.

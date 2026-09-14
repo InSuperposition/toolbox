@@ -112,9 +112,9 @@ build ─▶ scan+gate ─▶ evidence referrers ─▶ human approval ─▶ co
    digest is the selection key ([ADR 0006](../adr/0006-approval-selection-is-attestation-digest-pin.md)).
 
 5. **Consume gate** —
-   `mise run frontend:deploy -- <ref> <attestation-digest>`
-   (`deploy/frontend/scripts/frontend-deploy.sh`) reaches the shared
-   `attestation/scripts/attestation-verify.sh` through the
+   `mise run frontend:publish -- <ref> <attestation-digest> <rev>`
+   (`deploy/frontend/scripts/frontend-publish.sh`, ADR 0021) reaches the
+   shared `attestation/scripts/attestation-verify.sh` through the
    `TOOLBOX_ATTESTATION_VERIFY` env seam (`lib/frontend.sh`; the one allowed
    `deploy/frontend ▶ attestation` edge, ADR 0013). It fetches *that specific
    attestation*, verifies its signature against the committed
@@ -132,16 +132,17 @@ build ─▶ scan+gate ─▶ evidence referrers ─▶ human approval ─▶ co
    used — it fails if *any* attestation of the type on the image fails the
    policy, which the digest pin avoids.
 
-   The **in-cluster** consumer reaches the same seam:
-   `mise run frontend:publish -- <ref> <attestation-digest> <rev>`
-   (`deploy/frontend/scripts/frontend-publish.sh`, ADR 0021) verifies the
-   pinned attestation the identical way, then renders the Timoni module
-   (ADR 0019) and `flux push`es the manifests for Flux to reconcile into ns
-   `frontend` — where Kyverno's `ImageValidatingPolicy` re-verifies the
-   approval attestation at pod admission (Plan B K1,
+   Verify FIRST — nothing renders or pushes unless it holds. On success,
+   `frontend-publish.sh` renders the Timoni module (ADR 0019) and
+   `flux push`es the manifests for Flux to reconcile into ns `frontend` —
+   where Kyverno's `ImageValidatingPolicy` re-verifies the approval
+   attestation at pod admission (Plan B K1,
    [ADR 0020](../adr/0020-imagevalidatingpolicy-on-the-dev-reference-cluster.md)).
    Two gates, one contract: the operator step and the admission webhook both
    demand a digest-pinned "approved" attestation signed by the approval key.
+   ([ADR 0023](../adr/0023-retire-adr-0009-pitchfork-demo.md) retired the
+   earlier local-pitchfork consumer this section used to describe — this is
+   now the only consume gate, and neither gate re-verifies after admission.)
 
 ### The approval schema
 
@@ -199,9 +200,7 @@ deploy/frontend/                     # the per-consumer instantiation for cv_fro
   timoni.lock                           #   M3 — D_img + D_att + D_man (the rendered-manifest artifact digest); re-pinned in a PR per publish
   k8s/namespace.yaml                    #   M3 — the `frontend` namespace: PSA restricted + the `toolbox.dev/cv-frontend: approval-enforced` label K1's policy matches
   scripts/frontend-build.sh            #   T7b3 — mise run frontend:build — render pipelinerun.cue + create + watch + print digest + attestation:sign line
-  scripts/frontend-deploy.sh            #   mise run frontend:deploy — verify + record + restart + readiness check (the pitchfork path, ADR 0009)
-  scripts/frontend-publish.sh           #   M3/ADR 0021 — mise run frontend:publish — verify + timoni build + flux push (the k8s path)
-  scripts/frontend-serve.sh            #   pitchfork frontend daemon entrypoint (ADR 0009)
+  scripts/frontend-publish.sh           #   M3/ADR 0021 — mise run frontend:publish — verify + timoni build + flux push (the only consume gate, ADR 0023)
   scripts/lib/frontend.sh               #   frontend_repo_root + TOOLBOX_ATTESTATION_VERIFY seam + frontend_kube/tkn/strict_digest/host_image (T7b3)
   scripts/tests/*.bats + helper.bash
 
@@ -364,8 +363,9 @@ independently (Gall's Law). The full sequencing lives in `TODOS.md`.
   (`TODOS.md`). Narrowed by [ADR 0020](../adr/0020-imagevalidatingpolicy-on-the-dev-reference-cluster.md):
   one `ImageValidatingPolicy` DOES run on the **dev reference cluster**,
   verifying the approval attestation at admission for the in-cluster
-  `cv_frontend` — the declarative equal of `frontend-serve.sh`'s launch
-  re-verify (Plan B K1).
+  `cv_frontend` (Plan B K1) — the only re-verify point in the repo now
+  that the ADR-0009 pitchfork path's launch-time re-verify is retired
+  ([ADR 0023](../adr/0023-retire-adr-0009-pitchfork-demo.md)).
 - **Paketo buildpacks** — removed ([ADR 0007](../adr/0007-distroless-dockerfile-not-buildpacks.md)).
 - **apko / melange** — fully declarative image build; an innovation-token
   overspend for one npm app.
@@ -445,8 +445,7 @@ GitHub Actions (public repo, unmetered)          Local (repo owner's machine)
 | `mise run attestation:sign` | OpenBao unreachable / uninitialised / sealed / unauthorized / missing-key | `openbao-preflight.sh` distinguishes all five, exit 3, names the fix |
 | `mise run attestation:sign` | Ctrl-C / EOF / empty at the prompt | no signed record written, clean abort |
 | `mise run attestation:sign` | `cosign attest` signs but the registry push fails | read-back check fails loudly, non-zero; no false "approved" |
-| `mise run frontend:deploy` / launch re-verify | attestation missing / bad sig / wrong subject / verdict rejected | `attestation-verify.sh` exit 1 — "attestation verification failed" (cosign's claim check) or "verdict: rejected" (CUE); cosign's own output in the log |
-| launch re-verify | GHCR transient failure | `attestation-verify.sh` exit 3 → `frontend-serve.sh` bounded retry + backoff → visible stopped state, never a hang |
+| `mise run frontend:publish` | attestation missing / bad sig / wrong subject / verdict rejected | `attestation-verify.sh` exit 1 — "attestation verification failed" (cosign's claim check) or "verdict: rejected" (CUE); cosign's own output in the log; nothing rendered or pushed |
 | `attestation-verify.sh` | OpenBao down | not applicable — verify never touches OpenBao |
 | OpenBao Transit | raft store lost | past approvals still verify (pubkey in-repo); re-run `mise run local:openbao:bootstrap` (key-preserving -force restore) restores signing ability |
 

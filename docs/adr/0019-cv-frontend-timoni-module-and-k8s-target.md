@@ -43,3 +43,8 @@ reversed: the pitchfork container is retained as the path with full
 launch-time approval enforcement; the k8s Deployment is delivery-plus-admission.
 Folds in the earlier "M2" decision (the k8s delivery target) — no separate
 unnumbered ADR.
+
+**[ADR 0023](0023-retire-adr-0009-pitchfork-demo.md) narrows this**: the
+pitchfork container is no longer retained. The k8s Deployment is now the
+only delivery path, and the launch-time re-verify property this ADR named
+as the pitchfork path's distinguishing strength has no replacement.
