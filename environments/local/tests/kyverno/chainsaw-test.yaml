@@ -10,20 +10,21 @@
 # spike (docs/adr/0020) + attestation-verify.bats; this only exercises the
 # admit path and the common unsigned-image deny.
 #
-# Fixtures are REAL, on public GHCR:
-#   - approved: cv-frontend@sha256:fd02f152... carries a real approval
+# Fixtures are REAL, on the in-cluster zot (T7c R2 — repointed from GHCR):
+#   - approved: cv-frontend@sha256:d0c92cb1... carries a real approval
 #     attestation signed by openbao://approval-key (annotated referrer)
-#   - unsigned: cv-frontend@sha256:8067480b... (a CI build, no attestation)
+#   - unsigned: cv-frontend@sha256:dc2d74b2... (a busybox stand-in pushed
+#     with no attestation — the deny path only cares that no referrer verifies)
 # Regenerate the approved one after an approval-key rotation:
-#   mise run attestation:sign -- ghcr.io/insuperposition/cv-frontend@<digest>
+#   mise run attestation:sign -- zot.zot.svc.cluster.local:5000/cv-frontend@<digest>
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
   name: kyverno-reconcile
 spec:
   # Kyverno's admission verification pulls the image + its referrers from
-  # GHCR and runs cosign verify — well over chainsaw's default operation
-  # timeout on a cold pull.
+  # the in-cluster zot and runs cosign verify — well over chainsaw's default
+  # operation timeout on a cold pull.
   timeouts:
     apply: 90s
     assert: 90s
@@ -57,7 +58,7 @@ spec:
                 restartPolicy: Never
                 containers:
                   - name: c
-                    image: ghcr.io/insuperposition/cv-frontend@sha256:fd02f152c99b49ed0841857fcb7e75f64b664f72e69b073303dcfc4d789eb26d
+                    image: zot.zot.svc.cluster.local:5000/cv-frontend@sha256:d0c92cb19745096d0a127f46ff691a3ea72a59d48e7e3b7d154d2466ebec62df
         - assert:
             resource:
               apiVersion: v1
@@ -67,7 +68,7 @@ spec:
               spec:
                 # the digest was NOT mutated (mutateDigest: false) and the
                 # pod exists == admission passed
-                (containers[0].image): ghcr.io/insuperposition/cv-frontend@sha256:fd02f152c99b49ed0841857fcb7e75f64b664f72e69b073303dcfc4d789eb26d
+                (containers[0].image): zot.zot.svc.cluster.local:5000/cv-frontend@sha256:d0c92cb19745096d0a127f46ff691a3ea72a59d48e7e3b7d154d2466ebec62df
 
     - name: an-unsigned-cv-frontend-pod-is-denied
       try:
@@ -81,7 +82,7 @@ spec:
                 restartPolicy: Never
                 containers:
                   - name: c
-                    image: ghcr.io/insuperposition/cv-frontend@sha256:8067480b8618c638166287cfcee5536b8333add208be885a7d18c32e33e988c2
+                    image: zot.zot.svc.cluster.local:5000/cv-frontend@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616
             expect:
               - check:
                   ($error != null): true

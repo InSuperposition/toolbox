@@ -26,7 +26,7 @@ spec:
                   spec:
                     # the digest from deploy/frontend/timoni.lock (image_ref),
                     # NOT the manifest-artifact digest
-                    (contains(containers[0].image, 'sha256:fd02f152c99b49ed0841857fcb7e75f64b664f72e69b073303dcfc4d789eb26d')): true
+                    (contains(containers[0].image, 'sha256:d0c92cb19745096d0a127f46ff691a3ea72a59d48e7e3b7d154d2466ebec62df')): true
 
     - name: the-pods-container-actually-started
       try:
