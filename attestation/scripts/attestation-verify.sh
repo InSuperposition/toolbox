@@ -63,7 +63,13 @@ REPO="${IMAGE_REF%@*}"
 IMAGE_HEX="${IMAGE_REF##*@sha256:}"
 REGISTRY_HOST="${REPO%%/*}"
 ORAS_HTTP=()
-if attestation_is_local_registry "$REGISTRY_HOST"; then ORAS_HTTP=(--plain-http); fi
+if attestation_is_local_registry "$REGISTRY_HOST"; then
+	ORAS_HTTP=(--plain-http)
+elif attestation_is_cluster_registry "$REGISTRY_HOST"; then
+	CA_FILE="$(attestation_cluster_ca_file)"
+	[ -f "$CA_FILE" ] || retryable "dev CA not found at $CA_FILE — run 'mise run local:zot:trust' first"
+	ORAS_HTTP=(--ca-file "$CA_FILE")
+fi
 
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT

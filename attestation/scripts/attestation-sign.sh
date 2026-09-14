@@ -70,11 +70,20 @@ REPO="${IMAGE_REF%@*}"
 IMAGE_DIGEST="${IMAGE_REF##*@}"
 REGISTRY_HOST="${REPO%%/*}"
 
-# Local dev registries speak http and need no auth; everything else is GHCR
-# over https with a call-time `gh` token (interim auth).
+# Three registry kinds: a loopback dev registry (plain http, no auth — the
+# bats fixture); the in-cluster zot (https, no auth, but the dev CA needs an
+# explicit file — R2, T7c); everything else is GHCR over https with a
+# call-time `gh` token (interim auth).
 ORAS_HTTP=()
+COSIGN_CACERT=()
 if attestation_is_local_registry "$REGISTRY_HOST"; then
 	ORAS_HTTP=(--plain-http)
+	LOCAL_REGISTRY=1
+elif attestation_is_cluster_registry "$REGISTRY_HOST"; then
+	CA_FILE="$(attestation_cluster_ca_file)"
+	[ -f "$CA_FILE" ] || { echo "attestation-sign: dev CA not found at $CA_FILE — run 'mise run local:zot:trust' first" >&2; exit 6; }
+	ORAS_HTTP=(--ca-file "$CA_FILE")
+	COSIGN_CACERT=(--registry-cacert "$CA_FILE")
 	LOCAL_REGISTRY=1
 else
 	LOCAL_REGISTRY=0
@@ -201,6 +210,7 @@ if ! cosign attest \
 	--tlog-upload=false \
 	--no-upload \
 	--bundle "$WORKDIR/att.bundle" \
+	"${COSIGN_CACERT[@]}" \
 	"$IMAGE_REF"; then
 	echo "attestation-sign: cosign attest failed — no durable record was written" >&2
 	exit 6

@@ -37,11 +37,12 @@ planning session.
   (`cosign.GetBundles`) filters on them; a bare `oras attach` referrer is
   invisible to it. `attestation-verify.sh` is unaffected (it is handed the
   digest and reads the layer, not the annotations).
-- **The verified image + attestation must be pulled from GHCR (HTTPS), not the
-  in-cluster zot.** Kyverno's referrer-discovery call does not honour
-  `--allowInsecureRegistry` for a plain-HTTP registry. An in-cluster-zot verify
-  path (a TLS-fronted zot, or a loopback port-forward) stays deferred — `TODOS.md`
-  T12.
+- **The verified image + attestation were pulled from GHCR (HTTPS)**, not the
+  in-cluster zot, because Kyverno's referrer-discovery call does not honour
+  `--allowInsecureRegistry` for a plain-HTTP registry. **Superseded by T7c
+  R2 (2026-09-14):** zot is HTTPS-only since R1b-ii-c, so `matchImageReferences`
+  now points at `zot.zot.svc.cluster.local:5000/cv-frontend*` and discovery
+  works against it directly — `TODOS.md` T12 resolved, the GHCR glob removed.
 - The Kyverno chart is **not** cosign-signed, so the OCIRepository pins
   `ref.digest` with no `spec.verify` — same shape as the OpenBao and
   cert-manager charts.

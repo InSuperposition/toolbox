@@ -719,6 +719,13 @@ first:
       plain-HTTP/NodePort confirmed clean.
 - **R2** — repoint `current-image.txt` / `timoni.lock` / `pipelinerun.cue`
   `#image` / the IVPol glob to `zot.zot.svc:5000/cv-frontend*`; re-sign.
+  **Scoped to the M3 in-cluster Flux delivery path only** (2026-09-14): the
+  ADR-0009 pitchfork docker-demo consumer of `current-image.txt` stays
+  pinned to GHCR — its `docker run --rm` container sits on the default
+  bridge network and got `no route to host` for zot's ClusterIP
+  (`192.168.194.237:5000`), unlike the host shell (which OrbStack bridges
+  into the cluster network directly) or an actual k8s pod. Real infra gap,
+  not a script bug — see T-ADR9 below.
 - **R3** — one documented end-to-end acceptance run (zot only), each hop +
   digest asserted. Closes T7b's deferred end-to-end demo.
 - **R4** — delete `.github/workflows/build-cv-frontend.yml` + the GHCR
@@ -743,6 +750,27 @@ T7d = a `TODOS.md` checklist next to O4/O5, no estimate.
 **T7c pre-plan + Increments 0/1a/1b/2** ✓ → Increment 4 (in-cluster OpenBao) ✓
 → distribution tail `R1a ✓ → R1b-i ✓ → R1b-ii ✓ (flux push's --insecure-registry
 interim accepted, not blocking) → R2 → R3 → R4`; R5 + T7d deferred.
+
+### T-ADR9 — ADR-0009 pitchfork demo vs. in-cluster zot — P3, planning session
+
+**What:** the ADR-0009 local pitchfork docker demo (`frontend-deploy.sh` /
+`frontend-serve.sh`) reads the same `current-image.txt` as the M3 in-cluster
+Flux delivery path, but its plain `docker run --rm` container sits on
+docker's default bridge network — not bridged into the OrbStack k8s pod
+network the way the host shell or an actual pod is. Repointing it to the
+in-cluster zot (`zot.zot.svc.cluster.local:5000`, T7c R2) fails at launch:
+`no route to host` on zot's ClusterIP. R2 (2026-09-14) scoped the zot
+repoint to M3 only and left this demo pinned to GHCR.
+
+**Options, undecided:** (a) attach the demo container to whatever network
+OrbStack uses to bridge the host into the cluster (if one is attachable via
+`docker run --network`); (b) re-add a zot NodePort scoped to this one
+consumer; (c) retire the ADR-0009 demo outright now that M3's in-cluster
+Flux delivery is live and proven — the docker demo predates it and may now
+be redundant negative space, not a gap to fill.
+
+**Depends on:** R2 merged. **Priority:** P3 — no active consumer is broken
+(GHCR stays reachable), this is cleanup/simplification, not a blocker.
 
 ### T-DR — declarative disaster recovery for the in-cluster OpenBao — P2, planning session
 

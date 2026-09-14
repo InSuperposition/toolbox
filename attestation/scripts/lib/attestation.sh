@@ -31,3 +31,25 @@ attestation_is_local_registry() {
 	*) return 1 ;;
 	esac
 }
+
+# attestation_is_cluster_registry <registry-host> — true for the in-cluster
+# zot registry (T7c R1): HTTPS, no registry auth (unlike GHCR), but on a
+# dev CA the host trust store does not carry — needs an explicit CA file,
+# not the loopback --plain-http path. zot is shared toolbox infrastructure
+# (registry-seed.sh's same TOOLBOX_ZOT_HOST default), never a named
+# consumer, so recognising it here does not violate the "attestation/ never
+# names a consumer" rule (docs/designs/repo-structure.md § File Placement).
+attestation_is_cluster_registry() {
+	[ "${1:-}" = "${TOOLBOX_ZOT_HOST:-zot.zot.svc.cluster.local:5000}" ]
+}
+
+# attestation_cluster_ca_file — the dev CA file path for the in-cluster zot
+# registry (T7c R1b-ii-b's node-dockerd file — a plain persistent mac file,
+# already trusted by that same registry's other host-side caller,
+# ci/scripts/registry-seed.sh's --to-ca-file). Go's x509 on darwin ignores
+# SSL_CERT_FILE (learning go-x509-darwin-ignores-ssl-cert-file), so both
+# `oras --ca-file` and `cosign --registry-cacert` need this passed
+# explicitly rather than relying on the mise [env] SSL_CERT_FILE.
+attestation_cluster_ca_file() {
+	printf '%s' "${TOOLBOX_ZOT_CA:-$HOME/.docker/certs.d/${TOOLBOX_ZOT_HOST:-zot.zot.svc.cluster.local:5000}/ca.crt}"
+}

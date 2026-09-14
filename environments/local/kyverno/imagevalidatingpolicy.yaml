@@ -27,9 +27,9 @@
 # it. `matchImageReferences` narrows further to the cv_frontend repo.
 #
 # tlog is ignored: toolbox cosign is keyed via OpenBao Transit, no Rekor
-# (docs/adr/0004). Image source is GHCR (HTTPS) — Kyverno's referrer
-# discovery does not work against the plain-HTTP in-cluster zot (docs/adr/0020,
-# TODOS T12).
+# (docs/adr/0004). Image source: the in-cluster zot (T7c R2 — repointed
+# from GHCR now that zot is HTTPS-only, T7c R1b-ii-c, and Kyverno's
+# referrer discovery works against it, TODOS T12 resolved).
 apiVersion: policies.kyverno.io/v1
 kind: ImageValidatingPolicy
 metadata:
@@ -50,7 +50,7 @@ spec:
         operations: ["CREATE"]
         resources: ["pods"]
   matchImageReferences:
-    - glob: "ghcr.io/insuperposition/cv-frontend*"
+    - glob: "zot.zot.svc.cluster.local:5000/cv-frontend*"
   validationConfigurations:
     mutateDigest: false
     verifyDigest: false

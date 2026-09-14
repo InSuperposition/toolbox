@@ -49,7 +49,7 @@ spec:
   certSecretRef:
     name: zot-flux-ca
   ref:
-    digest: "sha256:48dc67f0f0cf3289a68c5297499048b443c8edd3232608bc911e3497ae828715"
+    digest: "sha256:aad58cd36c5a6d2d86ded3285b7166d83afac314ca7c71d1e3cffc3a35cffad9"
 ---
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
