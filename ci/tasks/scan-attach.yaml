@@ -68,6 +68,18 @@ spec:
     - name: APP_REVISION
       type: string
       description: The app's git commit SHA — the tag the build pushed.
+    - name: PLATFORM
+      type: string
+      default: linux/arm64
+      description: >-
+        Single target platform (ADR 0008 — arm64 only for now), same
+        default as `buildkit-build`. HOTFIX 2026-09-14: once `build` gained
+        `attest:provenance` (T8), its push became a multi-manifest image
+        INDEX instead of a single manifest — trivy's own platform
+        auto-selection then defaults to linux/amd64 and fails closed
+        ("no child with platform linux/amd64 in index"), verified live
+        against a real PipelineRun. `--platform` makes the selection
+        explicit instead of relying on trivy's host-arch guess.
     - name: REGISTRY_INSECURE
       type: string
       default: "false"
@@ -114,6 +126,7 @@ spec:
       args:
         - image
         - --image-src=remote
+        - --platform=$(params.PLATFORM)
         - --cache-dir=$(workspaces.shared.path)/trivy-cache
         - --format=json
         - --output=$(workspaces.shared.path)/scan.json
@@ -130,6 +143,7 @@ spec:
       args:
         - image
         - --image-src=remote
+        - --platform=$(params.PLATFORM)
         - --cache-dir=$(workspaces.shared.path)/trivy-cache
         - --skip-db-update
         - --format=cyclonedx
