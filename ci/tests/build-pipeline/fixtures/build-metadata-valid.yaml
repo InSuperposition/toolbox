@@ -1,0 +1,14 @@
+# Run-scoped digest identity fixture: a BuildKit `--metadata-file` output
+# whose `containerimage.digest` is a well-formed sha256. Proves
+# `buildkit-build.yaml`'s `extract-digest` step's jq validation accepts a
+# real digest.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: extract-digest-fixture-valid
+data:
+  build-metadata.json: |
+    {
+      "containerimage.digest": "sha256:d7a452f4712c6eecd1184cd8f23d0777b35369dd0395c5854635fa249e3cda38",
+      "image.name": "zot.zot.svc.cluster.local:5000/cv-frontend:fixture"
+    }

@@ -57,8 +57,10 @@ build/scan/gate pipeline:
 3. `kubectl create`s the PipelineRun (namespaced `ci`, 15m server-side
    timeout), streams `tkn` logs, and polls `.status.conditions[Succeeded]`
    until it leaves `Unknown` (client bound ~16m).
-4. **Succeeded** → `oras resolve` the manifest digest (rejected unless a
-   canonical `sha256:<64hex>` — exit 5), print this run's
+4. **Succeeded** → read the PipelineRun's own `IMAGE_DIGEST` result — the
+   digest `build` captured at push time, never a fresh `oras resolve` of
+   the mutable tag (Run-scoped build digest identity, TODOS.md; rejected
+   unless a canonical `sha256:<64hex>` — exit 5), print this run's
    `vnd.trivy.report+json` referrer digest for the operator to eyeball,
    delete the run, and print the exact next line:
    `mise run attestation:sign -- zot.zot.svc.cluster.local:5000/cv-frontend@<digest>`.

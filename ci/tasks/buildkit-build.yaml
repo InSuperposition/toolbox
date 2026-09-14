@@ -5,18 +5,39 @@
 # PipelineRun in deploy/<consumer>/ (a Timoni module — T7b3).
 #
 # No embedded shell (CLAUDE.md § Constraints): every step is a pinned
-# `command` + `args`, never a `script:` block. Two steps — a privileged
-# `disable-ipv6` `sysctl` (see below) and the rootless `buildctl-daemonless.sh`.
+# `command` + `args`, never a `script:` block. Three steps — a privileged
+# `disable-ipv6` `sysctl` (see below), the rootless `buildctl-daemonless.sh`,
+# and `extract-digest` (below).
 #
 #   * The image is pushed as `$(params.IMAGE):$(params.APP_REVISION)` — the
-#     app's git SHA as a deterministic, meaningful tag. There is NO Tekton
-#     `IMAGE_DIGEST` result: `scan`/`attach`/`gate` (T7b2/T7b3) address the
-#     image by that same tag, ordering is `runAfter`, and `oras resolve`
-#     produces the immutable digest ONCE at the operator boundary — the
-#     only value-consumer, `attestation-sign.sh`, runs outside the
-#     pipeline. ADR 0001 holds: the tag is a convenience alias, the signed
-#     chain still pins the digest. (`~/.claude/plans/t7b-pipeline-recut.md`,
-#     `TODOS.md` T7b.)
+#     app's git SHA as a deterministic, meaningful tag; the tag stays a
+#     convenience alias (ADR 0001), never the addressing mechanism a
+#     downstream Task relies on.
+#   * **`IMAGE_DIGEST` result (TODOS.md "Run-scoped build digest identity",
+#     P2 — reverses the original T7b OPEN-1 "no Tekton result" call,
+#     `~/.claude/plans/t7b-pipeline-recut.md:183`).** That call was right
+#     for its own scope: at the time the digest was only ever needed once,
+#     post-hoc, by `attestation-sign.sh` outside the pipeline, and
+#     `enable-api-fields: alpha` wasn't worth spending just for that. Two
+#     things changed: `provenance-sign` (T8) now needs correct digest
+#     addressing INSIDE the pipeline (mutable-tag re-resolution lets a
+#     concurrent/rerun PipelineRun attach evidence to the wrong image —
+#     sequential Tasks within one run don't serialize across runs); and
+#     `enable-api-fields: alpha` is already flipped on repo-wide for T8's
+#     `stdoutConfig` (`environments/local/scripts/tekton-install.sh`) — the
+#     cost the original decision avoided is already sunk, paid for a
+#     different reason. `buildctl --metadata-file` writes
+#     `containerimage.digest` (the pushed INDEX digest, confirmed via
+#     BuildKit's own docs) to `/tekton/home/build-metadata.json` — a
+#     Task-local path, NOT a workspace (this Task has no `shared`
+#     workspace; `/tekton/home` is Tekton's own pre-created,
+#     already-proven-shared-across-this-Task's-steps directory, the same
+#     one the `build` step's own `HOME` env already points at). The
+#     `extract-digest` step reads it and validates + `stdoutConfig`s the
+#     digest to the `IMAGE_DIGEST` result — same `jq` + `stdoutConfig`
+#     pattern T8's `provenance-sign.yaml` already proved live, no new
+#     mechanism. Downstream Tasks (`scan-attach`, `provenance-sign`)
+#     address the image by THIS captured digest, never a re-resolved tag.
 #   * `registry.insecure=$(params.REGISTRY_INSECURE)` — governs the OUTPUT
 #     (push) leg only; the zot MIRROR entry's own trust is set separately in
 #     `buildkitd.toml` (`ci/runtime/buildkitd-mirror.yaml`). T7c R1b-ii-c:
@@ -35,10 +56,10 @@
 #     assuming it existed) makes this push a multi-manifest IMAGE INDEX:
 #     the platform manifest plus an UNSIGNED attestation manifest whose
 #     OCI 1.1 `subject` points at the PLATFORM manifest specifically, not
-#     the index (BuildKit's own convention — verified live). `oras discover`
-#     (provenance-sign.yaml) must query the platform manifest's digest, not
-#     this Task's tag/index — that resolution now happens in
-#     provenance-sign.yaml's own first step, not here.
+#     the index (BuildKit's own convention — verified live). The INDEX is
+#     what `IMAGE_DIGEST` above captures; deriving the platform-specific
+#     digest (and, from it, the attestation manifest) from that index
+#     happens in provenance-sign.yaml's own first two steps, not here.
 #
 # The `build` step's posture is the spike-proven minimum for rootless
 # BuildKit on `orb start k8s` — NOT privileged, no SYS_ADMIN (TODOS.md T7a,
@@ -61,8 +82,18 @@ metadata:
 spec:
   description: >-
     Build an OCI image from a Dockerfile with daemonless rootless BuildKit
-    and push it to a registry, tagged with the app's git SHA. The caller
-    resolves the pushed manifest digest with `oras resolve` and pins on it.
+    and push it to a registry, tagged with the app's git SHA. The digest
+    that tag resolved to at push time is captured as the IMAGE_DIGEST
+    result — every downstream Task addresses the image by this digest,
+    never a re-resolved tag.
+  results:
+    - name: IMAGE_DIGEST
+      description: >-
+        The pushed image's INDEX digest (validated `sha256:<64hex>`),
+        captured from BuildKit's own `--metadata-file` output at push
+        time — not a later `oras resolve` of the mutable tag. This is the
+        one run-scoped identity every downstream Task addresses the image
+        by (TODOS.md "Run-scoped build digest identity").
   params:
     - name: IMAGE
       type: string
@@ -187,3 +218,16 @@ spec:
         - --opt=vcs:source=$(params.APP_REPO_URL)
         - --opt=vcs:revision=$(params.APP_REVISION)
         - --output=type=image,name=$(params.IMAGE):$(params.APP_REVISION),push=true,registry.insecure=$(params.REGISTRY_INSECURE)
+        - --metadata-file=/tekton/home/build-metadata.json
+    - name: extract-digest
+      image: ghcr.io/jqlang/jq:1.8.1@sha256:4f34c6d23f4b1372ac789752cc955dc67c2ae177eb1b5860b75cdc5091ce6f91
+      stdoutConfig:
+        path: $(results.IMAGE_DIGEST.path)
+      command: ["/jq"]
+      args:
+        - -e
+        - -j
+        - >-
+          .["containerimage.digest"]
+          | if test("^sha256:[0-9a-f]{64}$") then . else error("malformed digest") end
+        - /tekton/home/build-metadata.json

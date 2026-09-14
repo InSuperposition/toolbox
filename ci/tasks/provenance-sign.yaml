@@ -40,6 +40,28 @@
 # honor on Linux (this pod's OS — the darwin exception that bit `crane`/
 # `flux push` on the operator's Mac doesn't apply here).
 #
+# **Run-scoped digest identity (TODOS.md, /plan-eng-review 2026-09-15,
+# 2 Codex outside-voice findings folded in):** this Task now takes a
+# `DIGEST` param (the INDEX digest `build` captured at push time and
+# propagated as a Pipeline result) instead of re-resolving the mutable
+# `APP_REVISION` tag — closes the gap where a concurrent/rerun
+# PipelineRun could sign provenance for the wrong image. A SECOND,
+# deeper gap Codex found: even with the index digest fixed, the OLD
+# `discover-referrer` step picked `.referrers[0]` on the platform
+# digest — a first-match pick, ambiguous if two runs ever produce a
+# byte-identical platform manifest (same source, same Dockerfile,
+# unchanged deps — plausible, not rare) with different provenance.
+# Replaced by `resolve-attestation-digest`: derives the attestation
+# manifest's digest from BuildKit's own OCI-native linking annotations
+# on the SAME index (`vnd.docker.reference.type`/`vnd.docker.reference.digest`,
+# verified live against docs.docker.com's attestation-storage docs) — an
+# exact match, not a guess. **Live-found while verifying this fix:**
+# `resolve-attestation-digest`'s go-template `index .annotations "..."`
+# panicked ("index of untyped nil") on manifest entries with NO
+# `annotations` field at all — the platform manifest entries, which
+# never carry `vnd.docker.reference.*` (only the attestation entry
+# does). Fixed with a `{{if .annotations}}` guard before indexing.
+#
 # Consumer-agnostic (ADR 0014, rules/boundary-ci.yml): params only. Runs
 # `runAfter: [scan-attach]` in build-scan-approve.yaml (sequential — see
 # that Pipeline's own header comment for why not parallel).
@@ -93,9 +115,11 @@ spec:
     - name: IMAGE
       type: string
       description: Target repo ref, no tag (e.g. zot.zot.svc.cluster.local:5000/cv-frontend).
-    - name: APP_REVISION
+    - name: DIGEST
       type: string
-      description: App commit SHA — the tag the build pushed.
+      description: >-
+        The pushed image's INDEX digest (`build`'s `IMAGE_DIGEST` result)
+        — validated `sha256:<64hex>` by the Task that produced it.
     - name: REGISTRY_INSECURE
       type: string
       default: "false"
@@ -139,22 +163,35 @@ spec:
         - --ca-file=/ca/ca-certificates.crt
         - --format=go-template
         - --template={{range .content.manifests}}{{if ne .platform.architecture "unknown"}}{{.digest}}{{end}}{{end}}
-        - $(params.IMAGE):$(params.APP_REVISION)
-    - name: discover-referrer
+        - $(params.IMAGE)@$(params.DIGEST)
+    - name: resolve-attestation-digest
       image: ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179
       results:
-        - name: referrer-ref
-          description: The unsigned attestation-manifest referrer's digest ref.
+        - name: attestation-digest
+          description: >-
+            The unsigned attestation manifest's digest, resolved from the
+            SAME index `resolve-platform-digest` fetched — not a separate
+            `oras discover` registry query (Run-scoped build digest
+            identity, Codex outside-voice finding: `oras discover`'s
+            `.referrers[0]` is a first-match pick, ambiguous if two runs
+            ever produce a byte-identical platform manifest with
+            different provenance). Matched by BuildKit's own OCI-native
+            linking annotations on the attestation descriptor within the
+            index (verified live against
+            docs.docker.com/build/metadata/attestations/attestation-storage/):
+            `vnd.docker.reference.type: "attestation-manifest"` +
+            `vnd.docker.reference.digest: <platform-manifest-digest>` —
+            an exact link, not a guess.
       stdoutConfig:
-        path: $(step.results.referrer-ref.path)
+        path: $(step.results.attestation-digest.path)
       command: ["oras"]
       args:
-        - discover
+        - manifest
+        - fetch
         - --ca-file=/ca/ca-certificates.crt
-        - --artifact-type=application/vnd.docker.attestation.manifest.v1+json
         - --format=go-template
-        - --template={{if .referrers}}{{(index .referrers 0).reference}}{{end}}
-        - $(params.IMAGE)@$(steps.resolve-platform-digest.results.platform-digest)
+        - --template={{range .content.manifests}}{{if .annotations}}{{if and (eq (index .annotations "vnd.docker.reference.type") "attestation-manifest") (eq (index .annotations "vnd.docker.reference.digest") "$(steps.resolve-platform-digest.results.platform-digest)")}}{{.digest}}{{end}}{{end}}{{end}}
+        - $(params.IMAGE)@$(params.DIGEST)
     - name: fetch-attestation-manifest
       image: ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179
       results:
@@ -169,7 +206,7 @@ spec:
         - --ca-file=/ca/ca-certificates.crt
         - --format=go-template
         - --template={{(index .content.layers 0).digest}}
-        - $(steps.discover-referrer.results.referrer-ref)
+        - $(params.IMAGE)@$(steps.resolve-attestation-digest.results.attestation-digest)
     - name: fetch-predicate-statement
       image: ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179
       workingDir: $(workspaces.shared.path)
@@ -223,6 +260,11 @@ spec:
         - --use-signing-config=false
         - --tlog-upload=false
         - $(params.IMAGE)@$(steps.resolve-platform-digest.results.platform-digest)
+  # cosign-attest's subject stays the PLATFORM digest (not the INDEX
+  # `$(params.DIGEST)`) — matches where BuildKit's own `subject` field on
+  # the attestation manifest points (verified live, T8 hotfix). The INDEX
+  # digest and the PLATFORM digest are DIFFERENT values by design; never
+  # asserted equal.
   volumes:
     - name: openbao-auth-token
       projected:

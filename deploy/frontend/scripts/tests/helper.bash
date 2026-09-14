@@ -50,6 +50,9 @@ build_fakebin() {
 			echo "pipelinerun.tekton.dev/${STUB_PR_NAME:-cv-frontend-t3st1}"; exit 0 ;;
 		*"get pipelinerun"*".status}"*)  printf '%s' "${STUB_PR_STATUS:-True}"; exit 0 ;;
 		*"get pipelinerun"*".reason}"*)  printf '%s' "${STUB_PR_REASON:-Succeeded}"; exit 0 ;;
+		*"get pipelinerun"*"IMAGE_DIGEST"*)
+			h64="$(printf 'a%.0s' {1..64})"
+			printf '%s' "${STUB_DIGEST:-sha256:$h64}"; exit 0 ;;
 		*"get pipelinerun"*"childReferences"*) printf '%s' "${STUB_GATE_TR-cv-frontend-t3st1-gate}"; exit 0 ;;
 		*"get taskrun"*)  printf '%s' "${STUB_GATE_EXIT-2}"; exit 0 ;;
 		*"delete pipelinerun"*) exit 0 ;;
@@ -68,12 +71,10 @@ build_fakebin() {
 		#!/usr/bin/env bash
 		set -eu
 		echo "$*" >>"$OLOG"
-		h64="$(printf 'a%.0s' {1..64})"
 		s64="$(printf 'b%.0s' {1..64})"
 		default_discover='{"referrers":[{"artifactType":"application/vnd.trivy.report+json","digest":"sha256:'"$s64"'"}]}'
 		case "$*" in
 		*discover*) printf '%s' "${STUB_ORAS_DISCOVER:-$default_discover}"; exit 0 ;;
-		*resolve*)  printf '%s\n' "${STUB_DIGEST:-sha256:$h64}"; exit 0 ;;
 		*) exit 0 ;;
 		esac
 	SH

@@ -146,14 +146,14 @@ setup() {
 	[[ "$output" == *"sha256:$b64"* ]]
 }
 
-@test "frontend-build: Succeeded but oras resolve returns a tag -> exit 5, run NOT deleted" {
+@test "frontend-build: Succeeded but the PipelineRun's IMAGE_DIGEST result is a tag -> exit 5, run NOT deleted" {
 	STUB_DIGEST="latest" run "$SCRIPTS/frontend-build.sh" "$REV"
 	[ "$status" -eq 5 ]
 	[[ "$output" == *"not a canonical sha256"* ]]
 	! grep -q 'delete pipelinerun' "$KLOG"
 }
 
-@test "frontend-build: Succeeded but oras resolve returns an uppercase digest -> exit 5" {
+@test "frontend-build: Succeeded but the PipelineRun's IMAGE_DIGEST result is uppercase -> exit 5" {
 	STUB_DIGEST="sha256:$(printf 'A%.0s' {1..64})" run "$SCRIPTS/frontend-build.sh" "$REV"
 	[ "$status" -eq 5 ]
 }
