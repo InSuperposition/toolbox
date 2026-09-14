@@ -36,9 +36,16 @@
 # build mirror handle). A retry clears it; the build has no external egress
 # left to retry.
 #
-# The build digest is never a Pipeline result — see
-# ci/tasks/buildkit-build.yaml. The operator runs
-# `oras resolve $(IMAGE):$(APP_REVISION)` after a green run.
+# The build digest IS a Pipeline result, `IMAGE_DIGEST` (TODOS.md
+# "Run-scoped build digest identity" — reverses the original T7b OPEN-1
+# call; see ci/tasks/buildkit-build.yaml's header for the full rationale).
+# `scan-attach`/`provenance-sign` address the image by this digest, never
+# a re-resolved `$(APP_REVISION)` tag — closes a real correctness gap
+# where a concurrent/rerun PipelineRun could attach evidence to, or sign
+# provenance for, the wrong image. `frontend-build.sh` reads this same
+# Pipeline result instead of its own post-hoc `oras resolve` — one source
+# of truth for the digest that gets shown to the operator and the digest
+# evidence was actually attached to.
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
@@ -80,6 +87,13 @@ spec:
     - name: shared
     - name: buildkitd-config
     - name: ca-bundle
+  results:
+    - name: IMAGE_DIGEST
+      description: >-
+        The pushed image's INDEX digest, captured once by `build` at push
+        time (TODOS.md "Run-scoped build digest identity") — the operator
+        reads this instead of a post-hoc `oras resolve`.
+      value: $(tasks.build.results.IMAGE_DIGEST)
   tasks:
     - name: clone-app
       retries: 2
@@ -123,7 +137,7 @@ spec:
         name: scan-attach
       params:
         - { name: IMAGE, value: $(params.IMAGE) }
-        - { name: APP_REVISION, value: $(params.APP_REVISION) }
+        - { name: DIGEST, value: $(tasks.build.results.IMAGE_DIGEST) }
         - { name: REGISTRY_INSECURE, value: $(params.REGISTRY_INSECURE) }
       workspaces:
         - { name: shared, workspace: shared }
@@ -134,7 +148,7 @@ spec:
         name: provenance-sign
       params:
         - { name: IMAGE, value: $(params.IMAGE) }
-        - { name: APP_REVISION, value: $(params.APP_REVISION) }
+        - { name: DIGEST, value: $(tasks.build.results.IMAGE_DIGEST) }
         - { name: REGISTRY_INSECURE, value: $(params.REGISTRY_INSECURE) }
       workspaces:
         - { name: shared, workspace: shared }

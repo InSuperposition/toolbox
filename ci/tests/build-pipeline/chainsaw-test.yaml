@@ -86,7 +86,7 @@ spec:
               metadata:
                 name: buildkit-build
               spec:
-                (length(steps)): 2
+                (length(steps)): 3
                 (steps[?script != null]): []
         - assert:
             resource:
@@ -142,6 +142,8 @@ spec:
                     (securityContext.privileged || 'unset'): unset
                     (contains(securityContext.capabilities.add, 'SYS_ADMIN')): false
                     (contains(securityContext.capabilities.add, 'SYS_PTRACE')): false
+                  - name: extract-digest
+                    (securityContext.privileged || 'unset'): unset
     - name: git-clone-only-the-sysctl-step-is-privileged
       try:
         - assert:
@@ -210,7 +212,7 @@ spec:
                   - name: resolve-platform-digest
                     command: [oras]
                     (securityContext.privileged || 'unset'): unset
-                  - name: discover-referrer
+                  - name: resolve-attestation-digest
                     command: [oras]
                     (securityContext.privileged || 'unset'): unset
                   - name: fetch-attestation-manifest
@@ -241,6 +243,9 @@ spec:
                   - name: shared
                   - name: buildkitd-config
                   - name: ca-bundle
+                results:
+                  - name: IMAGE_DIGEST
+                    value: $(tasks.build.results.IMAGE_DIGEST)
                 tasks:
                   - name: clone-app
                     retries: 2
@@ -375,3 +380,138 @@ spec:
               status:
                 (conditions[?type == 'Succeeded'] | [0].status): "False"
                 (steps[?name == 'gate'] | [0].terminated.exitCode): 1
+    # Run-scoped build digest identity (TODOS.md) — the extract-digest jq
+    # validation logic, tested in isolation, no real build needed (same
+    # G1 pattern as the gate tests above: a standalone TaskRun + a fixture
+    # ConfigMap). The real step (buildkit-build.yaml) reads a hardcoded
+    # /tekton/home path; this inline taskSpec exercises the SAME jq
+    # expression against a workspace-mounted fixture instead — parallel
+    # logic, not literal path reuse, same relationship G1's `gate` fixture
+    # tests already have to the real Pipeline wiring.
+    - name: extract-digest-accepts-a-valid-sha256
+      try:
+        - apply:
+            file: fixtures/build-metadata-valid.yaml
+        - apply:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: TaskRun
+              metadata:
+                name: extract-digest-valid
+              spec:
+                taskSpec:
+                  workspaces:
+                    - name: shared
+                  results:
+                    - name: IMAGE_DIGEST
+                  steps:
+                    - name: extract-digest
+                      image: ghcr.io/jqlang/jq:1.8.1@sha256:4f34c6d23f4b1372ac789752cc955dc67c2ae177eb1b5860b75cdc5091ce6f91
+                      stdoutConfig:
+                        path: $(results.IMAGE_DIGEST.path)
+                      command: ["/jq"]
+                      args:
+                        - -e
+                        - -j
+                        - >-
+                          .["containerimage.digest"]
+                          | if test("^sha256:[0-9a-f]{64}$") then . else error("malformed digest") end
+                        - $(workspaces.shared.path)/build-metadata.json
+                workspaces:
+                  - name: shared
+                    configMap:
+                      name: extract-digest-fixture-valid
+        - assert:
+            timeout: 240s
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: TaskRun
+              metadata:
+                name: extract-digest-valid
+              status:
+                (conditions[?type == 'Succeeded'] | [0].status): "True"
+                (results[?name == 'IMAGE_DIGEST'] | [0].value): sha256:d7a452f4712c6eecd1184cd8f23d0777b35369dd0395c5854635fa249e3cda38
+    - name: extract-digest-rejects-a-malformed-digest
+      try:
+        - apply:
+            file: fixtures/build-metadata-malformed.yaml
+        - apply:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: TaskRun
+              metadata:
+                name: extract-digest-malformed
+              spec:
+                taskSpec:
+                  workspaces:
+                    - name: shared
+                  results:
+                    - name: IMAGE_DIGEST
+                  steps:
+                    - name: extract-digest
+                      image: ghcr.io/jqlang/jq:1.8.1@sha256:4f34c6d23f4b1372ac789752cc955dc67c2ae177eb1b5860b75cdc5091ce6f91
+                      stdoutConfig:
+                        path: $(results.IMAGE_DIGEST.path)
+                      command: ["/jq"]
+                      args:
+                        - -e
+                        - -j
+                        - >-
+                          .["containerimage.digest"]
+                          | if test("^sha256:[0-9a-f]{64}$") then . else error("malformed digest") end
+                        - $(workspaces.shared.path)/build-metadata.json
+                workspaces:
+                  - name: shared
+                    configMap:
+                      name: extract-digest-fixture-malformed
+        - assert:
+            timeout: 240s
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: TaskRun
+              metadata:
+                name: extract-digest-malformed
+              status:
+                (conditions[?type == 'Succeeded'] | [0].status): "False"
+    - name: extract-digest-rejects-a-missing-key
+      try:
+        - apply:
+            file: fixtures/build-metadata-missing.yaml
+        - apply:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: TaskRun
+              metadata:
+                name: extract-digest-missing
+              spec:
+                taskSpec:
+                  workspaces:
+                    - name: shared
+                  results:
+                    - name: IMAGE_DIGEST
+                  steps:
+                    - name: extract-digest
+                      image: ghcr.io/jqlang/jq:1.8.1@sha256:4f34c6d23f4b1372ac789752cc955dc67c2ae177eb1b5860b75cdc5091ce6f91
+                      stdoutConfig:
+                        path: $(results.IMAGE_DIGEST.path)
+                      command: ["/jq"]
+                      args:
+                        - -e
+                        - -j
+                        - >-
+                          .["containerimage.digest"]
+                          | if test("^sha256:[0-9a-f]{64}$") then . else error("malformed digest") end
+                        - $(workspaces.shared.path)/build-metadata.json
+                workspaces:
+                  - name: shared
+                    configMap:
+                      name: extract-digest-fixture-missing
+        - assert:
+            timeout: 240s
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: TaskRun
+              metadata:
+                name: extract-digest-missing
+              status:
+                (conditions[?type == 'Succeeded'] | [0].status): "False"

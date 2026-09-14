@@ -157,19 +157,27 @@ reason="$(frontend_kube get pipelinerun "$name" \
 # --- 4. success ------------------------------------------------------
 if [ "$status" = "True" ]; then
 	host_image="$(frontend_host_image)"
-
 	zot_ca="$(frontend_zot_ca)"
-	scan_refs="$(oras discover --ca-file "$zot_ca" --format json "${host_image}:${REV}" 2>/dev/null |
-		jq -r '(.referrers // .manifests // [])[]
-		       | select(.artifactType == "application/vnd.trivy.report+json") | .digest' || true)"
 
-	digest="$(oras resolve --ca-file "$zot_ca" "${host_image}:${REV}")" ||
-		die "oras resolve failed for ${host_image}:${REV}"
+	# Read the digest THIS run's build actually captured at push time
+	# (Run-scoped build digest identity, TODOS.md) — never a fresh
+	# `oras resolve` of the mutable tag, which a concurrent/rerun
+	# PipelineRun could have since repointed. One source of truth: the
+	# same digest evidence was attached to.
+	digest="$(frontend_kube get pipelinerun "$name" \
+		-o jsonpath='{.status.results[?(@.name=="IMAGE_DIGEST")].value}')" ||
+		die "reading the PipelineRun's IMAGE_DIGEST result failed for $name"
 	frontend_strict_digest "$digest" ||
 		{
-			echo "frontend-build: resolved '$digest' is not a canonical sha256:<64hex>" >&2
+			echo "frontend-build: PipelineRun result '$digest' is not a canonical sha256:<64hex>" >&2
 			exit 5
 		}
+
+	# Discovery against the DIGEST, not the tag — same reasoning: a tag
+	# re-resolved here could point at a different (later) run's push.
+	scan_refs="$(oras discover --ca-file "$zot_ca" --format json "${host_image}@${digest}" 2>/dev/null |
+		jq -r '(.referrers // .manifests // [])[]
+		       | select(.artifactType == "application/vnd.trivy.report+json") | .digest' || true)"
 
 	frontend_kube delete pipelinerun "$name" >/dev/null 2>&1 || true
 

@@ -1,0 +1,14 @@
+# Run-scoped digest identity fixture: a `containerimage.digest` value that
+# is NOT a well-formed sha256 (wrong length, no algorithm prefix). Proves
+# `extract-digest`'s jq validation fails LOUD at the source instead of
+# silently propagating garbage to scan-attach/provenance-sign.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: extract-digest-fixture-malformed
+data:
+  build-metadata.json: |
+    {
+      "containerimage.digest": "not-a-real-digest",
+      "image.name": "zot.zot.svc.cluster.local:5000/cv-frontend:fixture"
+    }

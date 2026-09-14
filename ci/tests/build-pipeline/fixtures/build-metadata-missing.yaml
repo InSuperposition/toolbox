@@ -1,0 +1,13 @@
+# Run-scoped digest identity fixture: a metadata-file JSON with NO
+# `containerimage.digest` key at all (a plausible BuildKit output-shape
+# drift). Proves `extract-digest`'s `jq -e` treats a missing key as a
+# failure (null), not a silently-empty result.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: extract-digest-fixture-missing
+data:
+  build-metadata.json: |
+    {
+      "image.name": "zot.zot.svc.cluster.local:5000/cv-frontend:fixture"
+    }

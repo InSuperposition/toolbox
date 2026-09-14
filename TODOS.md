@@ -25,10 +25,6 @@ open work):
     Phases 0-3, cross-referenced from the four items above it
 - *tofu modules*
   - `Retrofit vm-orbstack, cluster-k0sctl, secret-openbao to digest-pinning`
-- *Tekton/CI*
-  - `Run-scoped build digest identity` — surfaced reviewing "Promotion
-    boundary" (below); a live correctness gap in scan-attach's evidence
-    attachment, not hypothetical
 - *Kyverno/Cilium*
   - `Cilium — planning session needed`
   - `Plan B — Timoni + Kyverno + Crossplane boundary` — shipped M1→X1→K1→M3,
@@ -50,6 +46,8 @@ open work):
   - `Pin-drift guard: host mise.toml vs ci/tasks/* step images`
   - `openbao-verify.bats's online() helper checks only one of two registries`
   - `kyverno-reconcile chainsaw fixture — stale hardcoded digest`
+  - `Run-scoped digest identity — race-simulating test` — empirical proof,
+    deferred from the shipped fix (provable by construction today)
   - `Tekton Dashboard`
   - `T10 — VEX hardening`
   - `Publish a multi-arch image once a real amd64 consumer exists`
@@ -64,6 +62,47 @@ open work):
 
 Newest first. Git-log density — commit/PR references, not a transcript.
 Full detail lives in the referenced PRs, ADRs, and commit messages.
+
+- **Run-scoped build digest identity — DONE** (`/plan-eng-review`
+  2026-09-15, 1 Codex outside-voice pass, 5 findings folded). Reversed
+  the original T7b OPEN-1 "no Tekton result" call
+  (`~/.claude/plans/t7b-pipeline-recut.md:183`) — that call was right for
+  its own scope (digest only ever needed post-hoc, `alpha` not worth
+  spending for that alone); two things changed: `provenance-sign` (T8)
+  now needs correct digest addressing INSIDE the pipeline, and
+  `enable-api-fields: alpha` is already sunk for T8's `stdoutConfig`.
+  Ships: `buildkit-build.yaml`'s `build` step gains
+  `--metadata-file=/tekton/home/build-metadata.json`; a new
+  `extract-digest` step (jq, `-e` + regex validation, `stdoutConfig`)
+  produces a Task-level `IMAGE_DIGEST` result (the pushed INDEX digest,
+  captured at push time — never a later `oras resolve` of the mutable
+  tag); propagated as a Pipeline-level result and a `DIGEST` param to
+  `scan-attach`/`provenance-sign`, which now address the image by
+  `$(params.IMAGE)@$(params.DIGEST)`, never
+  `$(params.IMAGE):$(params.APP_REVISION)`. `frontend-build.sh` reads the
+  same Pipeline result instead of its own post-hoc `oras resolve` — one
+  source of truth. **Codex outside-voice (5 findings, all folded):**
+  (1) the original plan's `--metadata-file` path targeted a nonexistent
+  `shared` workspace on `buildkit-build` — fixed to `/tekton/home`,
+  Tekton's own pre-created per-pod directory, already proven shared
+  across steps by the T8 hotfix; (2) `provenance-sign`'s old
+  `discover-referrer` step picked `.referrers[0]` on the platform digest
+  — a first-match pick, ambiguous if two runs ever produce a
+  byte-identical platform manifest with different provenance (plausible:
+  same source, same Dockerfile, unchanged deps) — replaced by
+  `resolve-attestation-digest`, which derives the attestation manifest's
+  digest from BuildKit's own OCI-native `vnd.docker.reference.type`/
+  `vnd.docker.reference.digest` annotations on the SAME index (verified
+  live against docs.docker.com's attestation-storage docs) — an exact
+  match, not a guess; (3) the plan's own verification wording claimed
+  scan-attach/provenance-sign land on "the SAME digest", which is false
+  by design (index vs. platform digest are different values) — corrected;
+  (4) `frontend-build.sh`'s `scan_refs` discovery stayed tag-addressed
+  even after the digest fix landed elsewhere — reordered to read the
+  digest first; (5) no test simulates the tag moving mid-pipeline —
+  deferred to a new P3 item (below) with an explicit rationale (the fix
+  is provable by construction — exact annotation match, not first-match
+  — not empirically race-tested).
 
 - **Promotion boundary for build-scan-approve — RESOLVED, documentation-only**
   (`/plan-eng-review`, Codex outside voice). Rejected a real registry-level
@@ -592,39 +631,6 @@ the digest-equivalent for git-sourced modules.
 **Priority:** P2
 **Depends on:** digest-as-source-of-truth Phase 1-2 landing and proving out
 
-### Run-scoped build digest identity — P2, planning session
-
-**What:** the `build-scan-approve` Pipeline has no run-scoped digest
-identity — `scan-attach`, `provenance-sign`, and `gate` all address the
-image by the mutable `$(APP_REVISION)` git-SHA tag
-(`ci/pipelines/build-scan-approve.yaml:39`), not a digest resolved and
-pinned once per run. Design a mechanism (a Tekton result carrying the
-resolved digest, propagated to every downstream Task; or something else)
-so concurrent/rerun collisions can't attach one run's evidence to
-another run's image.
-
-**Why — this is a live correctness gap, not hypothetical:** surfaced by
-Codex's outside-voice review of the "Promotion boundary" item (above),
-which found it while reviewing a different, narrower proposal. Two
-overlapping `build-scan-approve` PipelineRuns (a rerun after a failed
-clone, or two runs started close together) can result in `scan-attach`
-attaching a scan report or SBOM for the WRONG image, since every Task
-just re-resolves the same mutable tag independently — sequential Tasks
-*within* one run don't serialize *across* runs. Signing the resulting
-digest (T8) doesn't repair evidence that was already mismatched.
-
-**Context:** `ADR 0001` (digest is the trust boundary) and the pipeline's
-own stated design ("the build digest is never a Tekton result... `oras
-resolve` produces the immutable digest once at the operator boundary")
-were written assuming a SINGLE run's timeline, not concurrent/rerun
-collision — that assumption is the actual gap.
-
-**Depends on:** nothing blocking. **Priority:** P2 — blocks trusting any
-future registry-side marking mechanism (the "Promotion boundary" item,
-above, explicitly deferred pending this); also worth fixing on its own
-merits since it's a correctness gap in already-shipped evidence
-attachment.
-
 ### Build reproducibility (SOURCE_DATE_EPOCH, independent rebuild verification) — P3
 
 **What:** land byte-level build reproducibility
@@ -907,6 +913,36 @@ human-approval attestation) from T8's provenance, so out of scope here.
 (`policy-is-ready` and the unsigned-deny path both still pass). Not
 fixed here (out of scope for the T8 hotfix; flagged per repo-ownership
 discipline).
+
+### Run-scoped digest identity — race-simulating test — P3
+
+**What:** a chainsaw test that pushes a second image to the same tag
+between `build`'s push and `scan-attach`'s run, and asserts
+`scan-attach`/`provenance-sign` still process the FIRST run's captured
+digest, not the tag's now-current one.
+
+**Why:** empirical proof of run-isolation under the exact concurrency
+scenario the "Run-scoped build digest identity" item itself was named
+for, rather than resting on the structural argument alone. That fix
+(`provenance-sign.yaml`'s `resolve-attestation-digest`, an exact
+`vnd.docker.reference.digest` annotation match instead of a first-match
+`oras discover` pick) makes the SPECIFIC ambiguity Codex found provable
+by construction — reading the code proves it, the way a unique-key
+lookup doesn't need a race test to prove it returns the right row — but
+a genuinely different future bug in the propagation chain wouldn't be
+caught without a live race test.
+
+**Context:** surfaced by Codex's outside-voice review of "Run-scoped
+build digest identity" itself (`/plan-eng-review`, 2026-09-15) — deferred
+deliberately, not silently dropped, because designing a deterministic
+mid-pipeline race injection in chainsaw isn't a solved pattern in this
+suite yet, and the shipped fix's correctness didn't depend on it.
+
+**Depends on:** the shipped fix (this item tests the mechanism it adds —
+the `IMAGE_DIGEST` result, the `DIGEST` param threading, and
+`resolve-attestation-digest`'s annotation-keyed lookup all need to exist
+first). **Priority:** P3 — the current fix is provable by construction;
+this closes the empirical gap, not a known-broken behavior.
 
 ### R5 — OCI-bundle distribution of the `ci/` defs — deferred
 

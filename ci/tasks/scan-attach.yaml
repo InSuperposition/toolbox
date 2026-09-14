@@ -16,11 +16,14 @@
 #   3. oras attach  application/vnd.trivy.report+json  scan.json
 #   4. oras attach  application/vnd.cyclonedx+json     sbom.cdx.json
 #
-# The image is addressed by `$(params.IMAGE):$(params.APP_REVISION)` — the
-# same SHA tag the build pushed. `oras attach` resolves that tag to its
-# manifest digest and hangs the referrer off the DIGEST, so ADR 0001 still
-# holds: the operator's later `oras resolve` + `attestation:sign` pin the
-# digest, the tag is only a convenience handle. No Tekton result.
+# The image is addressed by `$(params.IMAGE)@$(params.DIGEST)` — the
+# INDEX digest `build` captured at push time and propagated as a Pipeline
+# result (TODOS.md "Run-scoped build digest identity"), never a
+# re-resolved `$(APP_REVISION)` tag. Re-resolving the tag independently
+# here is exactly the gap that let a concurrent/rerun PipelineRun attach
+# evidence to the wrong image — sequential Tasks within one run don't
+# serialize across runs. ADR 0001 still holds: the digest is the trust
+# boundary, the tag was only ever a convenience handle.
 #
 # ONE trivy DB pull: both trivy steps share `--cache-dir
 # $(workspaces.shared.path)/trivy-cache`; step 1 populates it, step 2 reuses.
@@ -65,9 +68,11 @@ spec:
       description: >-
         Target repository reference with no tag, e.g.
         zot.zot.svc.cluster.local:5000/cv-frontend.
-    - name: APP_REVISION
+    - name: DIGEST
       type: string
-      description: The app's git commit SHA — the tag the build pushed.
+      description: >-
+        The pushed image's INDEX digest (`build`'s `IMAGE_DIGEST` result)
+        — validated `sha256:<64hex>` by the Task that produced it.
     - name: PLATFORM
       type: string
       default: linux/arm64
@@ -130,7 +135,7 @@ spec:
         - --cache-dir=$(workspaces.shared.path)/trivy-cache
         - --format=json
         - --output=$(workspaces.shared.path)/scan.json
-        - $(params.IMAGE):$(params.APP_REVISION)
+        - $(params.IMAGE)@$(params.DIGEST)
     - name: trivy-sbom-cyclonedx
       image: docker.io/aquasec/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
       workingDir: $(workspaces.shared.path)
@@ -148,7 +153,7 @@ spec:
         - --skip-db-update
         - --format=cyclonedx
         - --output=$(workspaces.shared.path)/sbom.cdx.json
-        - $(params.IMAGE):$(params.APP_REVISION)
+        - $(params.IMAGE)@$(params.DIGEST)
     - name: oras-attach-scan-report
       image: ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179
       workingDir: $(workspaces.shared.path)
@@ -157,7 +162,7 @@ spec:
         - attach
         - --ca-file=$(workspaces.ca-bundle.path)/ca-certificates.crt
         - --artifact-type=application/vnd.trivy.report+json
-        - $(params.IMAGE):$(params.APP_REVISION)
+        - $(params.IMAGE)@$(params.DIGEST)
         - scan.json:application/vnd.trivy.report+json
     - name: oras-attach-sbom
       image: ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179
@@ -167,5 +172,5 @@ spec:
         - attach
         - --ca-file=$(workspaces.ca-bundle.path)/ca-certificates.crt
         - --artifact-type=application/vnd.cyclonedx+json
-        - $(params.IMAGE):$(params.APP_REVISION)
+        - $(params.IMAGE)@$(params.DIGEST)
         - sbom.cdx.json:application/vnd.cyclonedx+json
