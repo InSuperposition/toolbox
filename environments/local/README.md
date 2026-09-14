@@ -361,6 +361,93 @@ kubectl --context orbstack delete -f ./environments/local/zot/zot.yaml
 Regenerate the image digest on a version bump:
 `oras resolve ghcr.io/project-zot/zot-linux-arm64:v<VERSION>`.
 
+## Frontend delivery — end-to-end acceptance (T7c R3)
+
+This IS T7b's deferred "end-to-end demo." Not a `mise run check` gate —
+a documented, reproducible run through the whole delivery chain (Plan B
+M3, ADR 0019), zot only, no GHCR. Each hop's digest is named and matched
+against the next hop's input — a stale `Ready` condition alone does not
+pass (Codex #6: `.status.artifact.revision` / `.status.lastAppliedRevision`
+must equal *this run's* digest, not just `True`).
+
+Precedent: `local:flux:bootstrap` / `local:openbao:bootstrap`. Last run:
+2026-09-14, T7c R2 (PR #41) + the reports-controller CA fix (PR #42).
+
+```
+# 1. Build in-cluster from a cv_frontend commit SHA. Preflights the
+#    Pipeline + gate Task, buildkitd mirror CM, zot, seeded base images;
+#    renders pipelinerun.cue, creates the PipelineRun in ns `ci`, polls
+#    to a terminal state.
+mise run frontend:build -- <cv_frontend-sha>
+#   -> PipelineRun Succeeded; prints the pushed image ref.
+
+# 2. The build already resolved D_img (a strict sha256, never a Tekton
+#    result — ADR 0001); frontend-build.sh prints it. To re-derive by
+#    hand:
+oras resolve --ca-file ~/.docker/certs.d/zot.zot.svc.cluster.local:5000/ca.crt \
+  zot.zot.svc.cluster.local:5000/cv-frontend:<sha>
+#   -> D_img = sha256:<...>
+
+# 3. Human approval — review the evidence, sign. Needs OpenBao up.
+mise run attestation:sign -- zot.zot.svc.cluster.local:5000/cv-frontend@<D_img>
+#   -> APPROVED <D_img>; attestation digest D_att = sha256:<...>
+#   (attestation-sign.sh talks to zot HTTPS with the dev CA, no gh auth —
+#   T7c R2, attestation_is_cluster_registry.)
+
+# 4. Render the Timoni module against the approved digest, flux-push the
+#    manifests as an OCI artifact. Verifies D_att FIRST — nothing renders
+#    or pushes unless it holds.
+mise run frontend:publish -- \
+  zot.zot.svc.cluster.local:5000/cv-frontend@<D_img> <D_att> <revision>
+#   -> PUBLISHED; prints D_man = sha256:<...> (the manifest-artifact digest)
+
+# 5. Commit the three git pins in a reviewed PR — the digest IS the
+#    trust boundary (ADR 0001), frontend:publish never auto-commits:
+#      deploy/frontend/timoni.lock            manifest_digest, image_ref,
+#                                              attestation_digest
+#      environments/local/flux/frontend.yaml  OCIRepository frontend
+#                                              spec.ref.digest = D_man
+#   Merge. Flux reconciles from `main` — no manual apply.
+
+# 6. Confirm Flux converged on THIS run's digest, not a stale Ready:
+kubectl get ocirepository frontend -n flux-system \
+  -o jsonpath='{.status.conditions[?(@.type=="Ready")].status} {.status.artifact.revision}{"\n"}'
+#   -> True sha256:<D_man>   (must equal step 4's D_man)
+kubectl get kustomization frontend -n flux-system \
+  -o jsonpath='{.status.conditions[?(@.type=="Ready")].status} {.status.lastAppliedRevision}{"\n"}'
+#   -> True sha256:<D_man>
+
+# 7. Kyverno admitted it — both the enforcement path (webhook, gates pod
+#    creation) and the observability path (PolicyReport, T7c R3's
+#    reports-controller CA fix, PR #42):
+kubectl get policyreport -n frontend -o wide
+#   -> PASS 1, FAIL 0, ERROR 0 for the Pod/ReplicaSet/Deployment rows
+kubectl get pods -n frontend -o jsonpath='{.items[0].spec.containers[0].image}{"\n"}'
+#   -> zot.zot.svc.cluster.local:5000/cv-frontend:main@sha256:<D_img>
+
+# 8. The pod's container actually started — asserts DELIVERY, not app
+#    health (`wait: false` on the Kustomization; cv_frontend's known
+#    Remix v3 boot crash, `deploy/frontend/README.md`):
+kubectl get pods -n frontend \
+  -o jsonpath='{.items[0].status.containerStatuses[0].state}{" restarts="}{.items[0].status.containerStatuses[0].restartCount}{"\n"}'
+#   -> {"running":{"startedAt":"..."}} restarts=0
+```
+
+**Verification pattern for proving a change before merge** (used
+throughout T7c's distribution tail, R1b-ii-a through R3): temporarily
+`kubectl patch gitrepository flux-system -n flux-system --type merge -p
+'{"spec":{"ref":{"name":"refs/heads/<branch>"}}}'`, `flux reconcile
+source git flux-system` + `flux reconcile kustomization flux-system
+--with-source`, verify live, then revert `ref.name` to
+`refs/heads/main` and reconcile again. **The GitRepository object
+itself self-heals** back to whatever `main` says on its own reconcile
+interval (it is itself GitOps-managed) — a long-running verification
+session should re-patch and re-check rather than assume the temporary
+ref sticks. An always-run chainsaw/bats assertion against a
+not-yet-merged branch is *expected* to read red in a bare local `mise
+run check` between the revert and the merge — the cluster only ever
+tracks `main`; that is structural, not a bug.
+
 ## Notes
 
 - **Not the production `secret-openbao` module.** That module is deferred
