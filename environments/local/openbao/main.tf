@@ -215,11 +215,20 @@ resource "vault_kubernetes_auth_backend_role" "flux_sops" {
 # pkg/signature/kms/hashivault/client.go). Never `approval-key` — this is a
 # separate key, `vault_transit_secret_backend_key.extra["chains-provenance-key"]`,
 # not the restore-managed one.
+#
+# HOTFIX 2026-09-14: the `sign` path was an EXACT match with no glob —
+# cosign's hashivault client actually calls
+# `transit/sign/chains-provenance-key/<hash-algo>` (e.g. `/sha2-256`, the
+# API's optional hash-algorithm URL segment), so every real sign attempt
+# got a live 403 "permission denied" even with a valid token and the
+# right role. Verified live before fixing, not assumed. A trailing `*`
+# with no slash before it is a Vault/OpenBao PREFIX match — it covers the
+# bare path (star matches empty) and any suffixed variant.
 resource "vault_policy" "chains_provenance_sign" {
   name = "chains_provenance_sign"
 
   policy = <<-HCL
-    path "transit/sign/chains-provenance-key" {
+    path "transit/sign/chains-provenance-key*" {
       capabilities = ["update"]
     }
     path "transit/keys/chains-provenance-key" {

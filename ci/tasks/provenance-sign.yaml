@@ -1,16 +1,51 @@
 # T8 — build provenance (TODOS.md). Signs BuildKit's own native SLSA
-# provenance output (already pushed as an UNSIGNED referrer by the `build`
-# Task's `attest:provenance=` opt) with the `chains-provenance-key` OpenBao
+# provenance output (pushed as an UNSIGNED referrer by the `build` Task's
+# `attest:provenance=` opt) with the `chains-provenance-key` OpenBao
 # Transit key — the exact `cosign attest` + OpenBao-Transit pattern
 # `attestation-sign.sh` already proves out for `approval-key`, reused here
 # instead of installing Tekton Chains (rejected — upstream alpha, TODOS.md).
 #
+# **HOTFIX 2026-09-14** (this comment previously claimed the opt "already"
+# existed — it didn't; `buildkit-build.yaml` never requested provenance
+# output at merge, and even once added, `oras discover` against the TAG
+# found zero referrers). BuildKit's attestation manifest carries an OCI 1.1
+# `subject` pointing at the PLATFORM manifest, never the index the tag
+# resolves to when provenance is enabled — both bugs verified live before
+# this fix, not assumed. See `resolve-platform-digest`, the new first step.
+# A third bug, same hotfix: `openbao-login`/`cosign-attest` set
+# HOME=$(workspaces.shared.path)/openbao-home, a PVC subdir nothing ever
+# creates — `bao login` authenticated fine but failed writing
+# `.vault-token.tmp` ("no such file or directory", exit 2), and
+# `cosign-attest` then skipped as a downstream failure. Fixed by pointing
+# HOME at `/tekton/home` instead — Tekton's own per-pod `emptyDir`,
+# pre-created and already shared across every step's container (the same
+# convention `buildkit-build.yaml`'s `build` step relies on) — so
+# `bao login`'s token-helper write and cosign's hashivault KMS read of it
+# share that directory with no explicit `mkdir` step needed. A fourth bug,
+# found only once the first three were fixed and a real run reached this
+# far: sharing the emptyDir wasn't enough on its own — `bao login` writes
+# `.vault-token` `0600`, owned by whichever UID the container ran as. The
+# two images default to DIFFERENT UIDs (`openbao`'s named `openbao` user
+# vs. cosign's distroless `65532`), so cosign's read failed
+# `permission denied` even with the file present and the directory
+# shared. Both steps now pin the SAME explicit `runAsUser: 65532` — keeps
+# the token `0600`-owner-only (never loosened to world-readable) while
+# making both containers that same owning UID.
+# A fifth bug, found once auth and signing itself both worked: the actual
+# sign call succeeded, then `cosign attest`'s PUSH of the attestation to
+# zot failed TLS verification. `VAULT_CACERT` only configures the
+# hashivault KMS client's Vault connection — the registry push is a
+# separate Go `net/http` client (go-containerregistry) that doesn't read
+# that var. Fixed with `SSL_CERT_FILE`, which Go's `crypto/x509` DOES
+# honor on Linux (this pod's OS — the darwin exception that bit `crane`/
+# `flux push` on the operator's Mac doesn't apply here).
+#
 # Consumer-agnostic (ADR 0014, rules/boundary-ci.yml): params only. Runs
-# `runAfter: [build]` in build-scan-approve.yaml, parallel to `scan-attach`
-# — both are evidence, neither blocks the other; `gate` waits on both.
+# `runAfter: [scan-attach]` in build-scan-approve.yaml (sequential — see
+# that Pipeline's own header comment for why not parallel).
 #
 # No embedded shell (CLAUDE.md § Constraints): every step is a single
-# pinned `command` + `args`, never a `script:` block. Six steps, each one
+# pinned `command` + `args`, never a `script:` block. Seven steps, each one
 # CLI call. The only non-obvious plumbing is `stdoutConfig` (Tekton alpha,
 # `environments/local/scripts/tekton-install.sh` enables it) — a step's
 # stdout is duplicated to a file by TEKTON ITSELF (no shell redirection),
@@ -80,6 +115,31 @@ spec:
         signs both zot's and OpenBao's listener certs, so one bundle
         covers oras/cosign→zot AND bao→OpenBao TLS trust.
   steps:
+    - name: resolve-platform-digest
+      image: ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179
+      results:
+        - name: platform-digest
+          description: >-
+            The single-platform manifest's digest (ADR 0008, arm64-only) —
+            NOT the index digest the tag resolves to. BuildKit's provenance
+            attestation manifest carries an OCI 1.1 `subject` pointing at
+            THIS digest, never the index (verified live, 2026-09-14 —
+            `oras discover` against the tag/index finds zero referrers;
+            against this digest it finds the attestation manifest). The
+            attestation manifest's own sentinel is
+            `platform: {architecture: unknown, os: unknown}` — filtered out
+            here, matching BuildKit's own convention for marking a
+            non-runnable entry in the index.
+      stdoutConfig:
+        path: $(step.results.platform-digest.path)
+      command: ["oras"]
+      args:
+        - manifest
+        - fetch
+        - --ca-file=/ca/ca-certificates.crt
+        - --format=go-template
+        - --template={{range .content.manifests}}{{if ne .platform.architecture "unknown"}}{{.digest}}{{end}}{{end}}
+        - $(params.IMAGE):$(params.APP_REVISION)
     - name: discover-referrer
       image: ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179
       results:
@@ -94,7 +154,7 @@ spec:
         - --artifact-type=application/vnd.docker.attestation.manifest.v1+json
         - --format=go-template
         - --template={{if .referrers}}{{(index .referrers 0).reference}}{{end}}
-        - $(params.IMAGE):$(params.APP_REVISION)
+        - $(params.IMAGE)@$(steps.resolve-platform-digest.results.platform-digest)
     - name: fetch-attestation-manifest
       image: ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179
       results:
@@ -108,7 +168,7 @@ spec:
         - fetch
         - --ca-file=/ca/ca-certificates.crt
         - --format=go-template
-        - --template={{(index .layers 0).digest}}
+        - --template={{(index .content.layers 0).digest}}
         - $(steps.discover-referrer.results.referrer-ref)
     - name: fetch-predicate-statement
       image: ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179
@@ -124,15 +184,17 @@ spec:
       image: ghcr.io/jqlang/jq:1.8.1@sha256:4f34c6d23f4b1372ac789752cc955dc67c2ae177eb1b5860b75cdc5091ce6f91
       stdoutConfig:
         path: $(workspaces.shared.path)/provenance-predicate.json
-      command: ["jq"]
+      command: ["/jq"]
       args:
         - -c
         - .predicate
         - $(workspaces.shared.path)/provenance-statement.json
     - name: openbao-login
       image: quay.io/openbao/openbao:2.6.2@sha256:11fd73a2102cda9c55d5d881a8c3210303146a7ec1e8ac76f526e175c6d24641
+      securityContext:
+        runAsUser: 65532
       env:
-        - { name: HOME, value: $(workspaces.shared.path)/openbao-home }
+        - { name: HOME, value: /tekton/home }
         - { name: BAO_ADDR, value: https://openbao.openbao.svc.cluster.local:8200 }
         - { name: BAO_CACERT, value: /ca/ca-certificates.crt }
       command: ["bao"]
@@ -145,11 +207,14 @@ spec:
         - { name: openbao-auth-token, mountPath: /var/run/secrets/openbao-auth }
     - name: cosign-attest
       image: gcr.io/projectsigstore/cosign:v3.1.3@sha256:9e5c2f2edc34351160407ca3416c61855bdf9403c3c5936e0f0be7fc261611b8
+      securityContext:
+        runAsUser: 65532
       env:
-        - { name: HOME, value: $(workspaces.shared.path)/openbao-home }
+        - { name: HOME, value: /tekton/home }
         - { name: VAULT_ADDR, value: https://openbao.openbao.svc.cluster.local:8200 }
         - { name: VAULT_CACERT, value: /ca/ca-certificates.crt }
-      command: ["cosign"]
+        - { name: SSL_CERT_FILE, value: /ca/ca-certificates.crt }
+      command: ["/ko-app/cosign"]
       args:
         - attest
         - --predicate=$(workspaces.shared.path)/provenance-predicate.json
@@ -157,7 +222,7 @@ spec:
         - --key=openbao://chains-provenance-key
         - --use-signing-config=false
         - --tlog-upload=false
-        - $(params.IMAGE):$(params.APP_REVISION)
+        - $(params.IMAGE)@$(steps.resolve-platform-digest.results.platform-digest)
   volumes:
     - name: openbao-auth-token
       projected:

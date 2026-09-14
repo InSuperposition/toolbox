@@ -30,6 +30,15 @@
 #     within the `build-defs` workspace (a separate toolbox checkout — the
 #     two-repo split, ADR 0014). Both workspaces are subPaths of one
 #     `volumeClaimTemplate` PVC in the Pipeline (ci/README.md § Workspaces).
+#   * `attest:provenance` (T8, TODOS.md — HOTFIX 2026-09-14, was missing
+#     from the original merge despite provenance-sign.yaml's own comments
+#     assuming it existed) makes this push a multi-manifest IMAGE INDEX:
+#     the platform manifest plus an UNSIGNED attestation manifest whose
+#     OCI 1.1 `subject` points at the PLATFORM manifest specifically, not
+#     the index (BuildKit's own convention — verified live). `oras discover`
+#     (provenance-sign.yaml) must query the platform manifest's digest, not
+#     this Task's tag/index — that resolution now happens in
+#     provenance-sign.yaml's own first step, not here.
 #
 # The `build` step's posture is the spike-proven minimum for rootless
 # BuildKit on `orb start k8s` — NOT privileged, no SYS_ADMIN (TODOS.md T7a,
@@ -65,6 +74,13 @@ spec:
       description: >-
         The app's git commit SHA. Used as the push tag — deterministic and
         meaningful, not a throwaway.
+    - name: APP_REPO_URL
+      type: string
+      description: >-
+        Public HTTPS git URL of the app — threaded into the SLSA provenance
+        attestation's vcs:source/vcs:revision build opts (T8, TODOS.md) so
+        the attestation carries the actual source identity, not just the
+        Dockerfile's embedded bytes.
     - name: PLATFORM
       type: string
       default: linux/arm64
@@ -167,4 +183,7 @@ spec:
         - --local=dockerfile=$(workspaces.build-defs.path)/$(params.DOCKERFILE_DIR)
         - --opt=filename=$(params.DOCKERFILE)
         - --opt=platform=$(params.PLATFORM)
+        - --opt=attest:provenance=mode=max,builder-id=https://github.com/InSuperposition/toolbox/blob/main/ci/tasks/buildkit-build.yaml
+        - --opt=vcs:source=$(params.APP_REPO_URL)
+        - --opt=vcs:revision=$(params.APP_REVISION)
         - --output=type=image,name=$(params.IMAGE):$(params.APP_REVISION),push=true,registry.insecure=$(params.REGISTRY_INSECURE)

@@ -113,7 +113,7 @@ spec:
               metadata:
                 name: provenance-sign
               spec:
-                (length(steps)): 6
+                (length(steps)): 7
                 (steps[?script != null]): []
     - name: build-posture-has-not-drifted
       try:
@@ -207,6 +207,9 @@ spec:
                 name: provenance-sign
               spec:
                 steps:
+                  - name: resolve-platform-digest
+                    command: [oras]
+                    (securityContext.privileged || 'unset'): unset
                   - name: discover-referrer
                     command: [oras]
                     (securityContext.privileged || 'unset'): unset
@@ -217,13 +220,13 @@ spec:
                     command: [oras]
                     (securityContext.privileged || 'unset'): unset
                   - name: extract-predicate
-                    command: [jq]
+                    command: ["/jq"]
                     (securityContext.privileged || 'unset'): unset
                   - name: openbao-login
                     command: [bao]
                     (securityContext.privileged || 'unset'): unset
                   - name: cosign-attest
-                    command: [cosign]
+                    command: ["/ko-app/cosign"]
                     (securityContext.privileged || 'unset'): unset
     - name: pipeline-shape
       try:

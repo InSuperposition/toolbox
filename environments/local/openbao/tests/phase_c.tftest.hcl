@@ -119,6 +119,16 @@ run "chains_provenance_policy_grants_sign_and_read_only" {
     ])
     error_message = "the policy must be scoped to chains-provenance-key only — no approval-key, no sops, no encrypt capability"
   }
+  assert {
+    # HOTFIX 2026-09-14, live-verified: cosign's hashivault KMS client
+    # actually calls transit/sign/chains-provenance-key/<hash-algo> (e.g.
+    # /sha2-256) — an EXACT path here 403s every real sign call. The `sign`
+    # path must be a Vault/OpenBao PREFIX match (trailing `*`, no slash
+    # before it — matches the bare path AND any suffixed variant), not a
+    # bare exact string.
+    condition     = strcontains(vault_policy.chains_provenance_sign.policy, "transit/sign/chains-provenance-key*")
+    error_message = "the sign path must be a prefix match (trailing '*') to cover cosign's hash-algorithm URL suffix (transit/sign/chains-provenance-key/sha2-256) — an exact path 403s every real sign call"
+  }
 }
 
 run "k8s_auth_role_is_scoped_to_provenance_signer" {

@@ -49,6 +49,7 @@ open work):
   - `T7d — production repoint`
   - `Pin-drift guard: host mise.toml vs ci/tasks/* step images`
   - `openbao-verify.bats's online() helper checks only one of two registries`
+  - `kyverno-reconcile chainsaw fixture — stale hardcoded digest`
   - `Tekton Dashboard`
   - `T10 — VEX hardening`
   - `Publish a multi-arch image once a real amd64 consumer exists`
@@ -124,6 +125,81 @@ Full detail lives in the referenced PRs, ADRs, and commit messages.
   Scope split per Gall's Law: OCI-bundle signing → `R5`; build
   reproducibility → its own entry; the promotion-boundary gap Codex
   found → its own entry (below), both P2, not part of this item.
+  **HOTFIX 2026-09-14 — six real bugs, none caught by the merge above,**
+  all found live running the ACTUAL `build-scan-approve` Pipeline
+  end-to-end (`mise run frontend:build`), not the isolated spikes PR #51
+  verified with. Root cause of the miss: those spikes exercised BuildKit
+  provenance and OpenBao auth as standalone Jobs, never the real merged
+  Task/Pipeline wiring together — a `/plan-eng-review` of a *different*
+  item ("Run-scoped build digest identity") surfaced the first bug via
+  Codex outside-voice, which cascaded into finding the rest by testing
+  for real. Fixed, in the order hit:
+  1. `buildkit-build.yaml` never actually passed `--opt=attest:provenance=`
+     — added, plus `vcs:source`/`vcs:revision` (needs the new
+     `APP_REPO_URL` param, threaded through the Pipeline).
+  2. `oras discover` against the tag/index found zero referrers —
+     BuildKit's attestation manifest's OCI 1.1 `subject` points at the
+     single-PLATFORM manifest (ADR 0008, arm64-only), never the index a
+     tag resolves to once provenance makes the push multi-manifest.
+     Fixed with a new first step, `resolve-platform-digest`, filtering
+     the index for the entry whose `platform.architecture != "unknown"`
+     (BuildKit's own sentinel for the non-runnable attestation entry).
+  3. `oras manifest fetch --format go-template`'s output wraps every
+     field under `.content` (`.content.manifests`, `.content.layers`) —
+     unlike `oras discover`'s own output (`.referrers` at the top level).
+     Both templates in `provenance-sign.yaml` fixed; caught only because
+     this was the first time the real CLI path (not a `jq`-piped spike)
+     ran.
+  4. `scan-attach`'s trivy calls failed closed
+     (`no child with platform linux/amd64 in index`) once `build`'s push
+     became a multi-manifest index — trivy's platform auto-selection
+     defaults to amd64. Fixed: new `PLATFORM` param (default
+     `linux/arm64`, matching `buildkit-build`'s own), `--platform=` on
+     both trivy calls.
+  5. `openbao-login`/`cosign-attest` set
+     `HOME=$(workspaces.shared.path)/openbao-home`, a PVC subdir nothing
+     ever created — `bao login` authenticated fine but failed writing
+     `.vault-token.tmp` (exit 2), so `cosign-attest` then skipped as a
+     downstream failure. Fixed: `HOME=/tekton/home` — Tekton's own
+     per-pod `emptyDir`, pre-created and already shared across every
+     step's container (the convention `buildkit-build.yaml`'s `build`
+     step already relies on) — no `mkdir` step needed.
+  6. Even with the shared directory, cosign's read of the token still
+     403'd `permission denied` — `bao login` writes `.vault-token` mode
+     `0600`, owned by whichever UID the container ran as, and the two
+     images default to DIFFERENT UIDs (`openbao`'s named `openbao` user
+     vs. cosign's distroless `65532`). Fixed: both steps now pin the
+     same explicit `runAsUser: 65532` (keeps the token owner-only, never
+     loosened to world-readable).
+  7. Sign itself then 403'd separately — the actual API call is
+     `transit/sign/chains-provenance-key/sha2-256` (cosign's hashivault
+     KMS client appends the hash algorithm), but the tofu policy
+     (`environments/local/openbao/main.tf`) granted only the EXACT path
+     with no suffix. Fixed: `transit/sign/chains-provenance-key*`, a
+     Vault/OpenBao prefix match — covers the bare path and any suffixed
+     variant. Locked in with a new `tofu test` assertion
+     (`environments/local/openbao/tests/phase_c.tftest.hcl`), not just
+     the fix.
+  8. `cosign attest`'s registry PUSH to zot then failed TLS verification
+     — `VAULT_CACERT` only configures the hashivault KMS client's Vault
+     connection; the registry push is a separate Go `net/http` client
+     (go-containerregistry) that doesn't read it. Fixed with
+     `SSL_CERT_FILE` (Go's `crypto/x509` honors it on Linux — the pod's
+     OS; the darwin exception that bites `crane`/`flux push` on the
+     operator's Mac doesn't apply in-cluster).
+  **Verified live end-to-end, not just chainsaw:** a full
+  `mise run frontend:build` run against the real `cv_frontend` repo went
+  green — `oras discover` against the resolved platform digest shows a
+  real `application/vnd.dev.sigstore.bundle.v0.3+json` referrer, a
+  genuinely cosign-signed SLSA v1 provenance statement, alongside
+  BuildKit's own unsigned one. `ci/tests/build-pipeline/chainsaw-test.yaml`
+  updated to match (`extract-predicate`/`cosign-attest` absolute-path
+  `command:` values). **Not fixed, unrelated, flagged:** `mise run check`
+  surfaced one pre-existing failure, `kyverno-reconcile`'s
+  `an-approved-cv-frontend-pod-is-admitted` step — its fixture pins a
+  hardcoded `cv-frontend@sha256:d0c92cb1...` digest that no longer
+  exists in zot (confirmed 404). A different concern (the human-approval
+  attestation fixture, not T8's provenance) — own P3 entry, below.
 
 - **T-ADR9 — ADR-0009 pitchfork demo had no reachable registry — RESOLVED**
   (PR #45 escalation → PR #46 fix). T7c R4's GHCR package deletion broke the
@@ -807,6 +883,30 @@ what the script itself actually needs to succeed past the render step.
 
 **Priority:** P3 — not a real regression, a test-harness gap. Not fixed
 here (out of scope for T8; flagged per repo-ownership discipline).
+
+### `kyverno-reconcile` chainsaw fixture — stale hardcoded digest — P3
+
+**Found 2026-09-14** while running `mise run check` for the T8 hotfix
+(unrelated to it). `environments/local/tests/kyverno/chainsaw-test.yaml`'s
+`an-approved-cv-frontend-pod-is-admitted` step pins a hardcoded
+`cv-frontend@sha256:d0c92cb19745096d0a127f46ff691a3ea72a59d48e7e3b7d154d2466ebec62df`
+— confirmed live (`oras manifest fetch`) that digest no longer exists in
+zot (404). The fixture is a durable, out-of-band-seeded image (the
+file's own header comment: "Regenerate the approved one after an
+approval-key rotation" — `mise run attestation:sign -- ...@<digest>`),
+not something the test suite creates itself; zot's storage evidently
+lost it at some point (unclear when — no code change in this session
+touched zot's PVC). Fixing needs pushing a fresh `cv-frontend` image,
+signing it with `attestation:sign`, and updating both this fixture
+(`environments/local/tests/kyverno/chainsaw-test.yaml`) and the sibling
+one in `environments/local/tests/frontend/delivery/chainsaw-test.yaml`
+(same digest, line 29) to the new digest — a different concern (the
+human-approval attestation) from T8's provenance, so out of scope here.
+
+**Priority:** P3 — a test-fixture staleness, not a policy or code defect
+(`policy-is-ready` and the unsigned-deny path both still pass). Not
+fixed here (out of scope for the T8 hotfix; flagged per repo-ownership
+discipline).
 
 ### R5 — OCI-bundle distribution of the `ci/` defs — deferred
 

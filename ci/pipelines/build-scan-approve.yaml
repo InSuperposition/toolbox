@@ -109,6 +109,7 @@ spec:
       params:
         - { name: IMAGE, value: $(params.IMAGE) }
         - { name: APP_REVISION, value: $(params.APP_REVISION) }
+        - { name: APP_REPO_URL, value: $(params.APP_REPO_URL) }
         - { name: DOCKERFILE_DIR, value: $(params.DOCKERFILE_DIR) }
         - { name: REGISTRY_INSECURE, value: $(params.REGISTRY_INSECURE) }
       workspaces:
