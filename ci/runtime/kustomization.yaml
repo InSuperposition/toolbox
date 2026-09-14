@@ -13,3 +13,4 @@ kind: Kustomization
 resources:
   - namespace.yaml
   - buildkitd-mirror.yaml
+  - provenance-signer-sa.yaml

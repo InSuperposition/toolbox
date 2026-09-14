@@ -1,0 +1,173 @@
+# T8 — build provenance (TODOS.md). Signs BuildKit's own native SLSA
+# provenance output (already pushed as an UNSIGNED referrer by the `build`
+# Task's `attest:provenance=` opt) with the `chains-provenance-key` OpenBao
+# Transit key — the exact `cosign attest` + OpenBao-Transit pattern
+# `attestation-sign.sh` already proves out for `approval-key`, reused here
+# instead of installing Tekton Chains (rejected — upstream alpha, TODOS.md).
+#
+# Consumer-agnostic (ADR 0014, rules/boundary-ci.yml): params only. Runs
+# `runAfter: [build]` in build-scan-approve.yaml, parallel to `scan-attach`
+# — both are evidence, neither blocks the other; `gate` waits on both.
+#
+# No embedded shell (CLAUDE.md § Constraints): every step is a single
+# pinned `command` + `args`, never a `script:` block. Six steps, each one
+# CLI call. The only non-obvious plumbing is `stdoutConfig` (Tekton alpha,
+# `environments/local/scripts/tekton-install.sh` enables it) — a step's
+# stdout is duplicated to a file by TEKTON ITSELF (no shell redirection),
+# and a LATER step's `args` can reference an earlier step's captured
+# result via `$(steps.<name>.results.<name>)` — pure declarative
+# substitution, verified live against this exact cluster (2026-09-14,
+# TODOS.md T8). Small values (digests, refs) go through `results:`
+# (Tekton's ~4KB size cap); the predicate content itself (can exceed that
+# for a real build) goes straight to a `shared`-workspace file instead.
+#
+# No `disable-ipv6` step: unlike `git-clone`/`buildkit-build`/`scan-attach`,
+# every endpoint this Task reaches (zot, OpenBao) is in-cluster ClusterIP
+# DNS — the OrbStack IPv6-egress defect only affects EXTERNAL fetches.
+#
+# Auth (round-2 Codex outside-voice finding, live-verified 2026-09-14 —
+# not mocked): the `provenance-signer` ServiceAccount
+# (`ci/runtime/provenance-signer-sa.yaml`) is bound, by the PipelineRun's
+# `taskRunSpecs` override (`deploy/frontend/pipelinerun.cue`), to run ONLY
+# this Task — every other Task keeps the namespace default SA. It
+# authenticates to OpenBao's `chains_provenance` k8s-auth role
+# (`environments/local/openbao/main.tf`) via a PROJECTED token whose
+# `audience` matches the role's config exactly (the role's `audience`
+# field requires it — a default-automounted token's audience does NOT
+# match and login fails 403, confirmed live). `bao login` writes
+# `$HOME/.vault-token` (its own token-helper convention); cosign's
+# hashivault KMS client reads that file automatically
+# (sigstore/sigstore v1.10.8 pkg/signature/kms/hashivault/client.go) — no
+# VAULT_TOKEN env needed, no token ever appears in a Task param or log.
+# Live-verified: this role signs `chains-provenance-key` and is DENIED
+# `approval-key` (403) — both proven against the real cluster, not a
+# tofu mock.
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: provenance-sign
+  labels:
+    app.kubernetes.io/part-of: toolbox-ci
+spec:
+  description: >-
+    Sign BuildKit's own SLSA provenance attestation (already pushed
+    unsigned) with the chains-provenance-key OpenBao Transit key.
+    Evidence-only — never a second enforced gate; approval-key remains the
+    one real gate (docs/designs/digest-as-source-of-truth.md § Architecture).
+  params:
+    - name: IMAGE
+      type: string
+      description: Target repo ref, no tag (e.g. zot.zot.svc.cluster.local:5000/cv-frontend).
+    - name: APP_REVISION
+      type: string
+      description: App commit SHA — the tag the build pushed.
+    - name: REGISTRY_INSECURE
+      type: string
+      default: "false"
+      description: >-
+        Skip TLS verification for oras/cosign registry calls. "false" — the
+        steady state — trusts zot via the `ca-bundle` workspace instead.
+  workspaces:
+    - name: shared
+      description: >-
+        The per-run PVC. Holds the fetched provenance statement and the
+        extracted predicate before signing.
+    - name: ca-bundle
+      mountPath: /ca
+      description: >-
+        The merged system + dev-CA bundle (trust-manager's
+        `toolbox-ca-bundle`, T7c R1b-ii-a) — the SAME `toolbox-dev-ca` root
+        signs both zot's and OpenBao's listener certs, so one bundle
+        covers oras/cosign→zot AND bao→OpenBao TLS trust.
+  steps:
+    - name: discover-referrer
+      image: ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179
+      results:
+        - name: referrer-ref
+          description: The unsigned attestation-manifest referrer's digest ref.
+      stdoutConfig:
+        path: $(step.results.referrer-ref.path)
+      command: ["oras"]
+      args:
+        - discover
+        - --ca-file=/ca/ca-certificates.crt
+        - --artifact-type=application/vnd.docker.attestation.manifest.v1+json
+        - --format=go-template
+        - --template={{if .referrers}}{{(index .referrers 0).reference}}{{end}}
+        - $(params.IMAGE):$(params.APP_REVISION)
+    - name: fetch-attestation-manifest
+      image: ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179
+      results:
+        - name: layer-digest
+          description: The predicate layer's digest within the attestation manifest.
+      stdoutConfig:
+        path: $(step.results.layer-digest.path)
+      command: ["oras"]
+      args:
+        - manifest
+        - fetch
+        - --ca-file=/ca/ca-certificates.crt
+        - --format=go-template
+        - --template={{(index .layers 0).digest}}
+        - $(steps.discover-referrer.results.referrer-ref)
+    - name: fetch-predicate-statement
+      image: ghcr.io/oras-project/oras:v1.3.4@sha256:f7bc056d54d97baa399414ed5048ecc67c3371b750d4bbce1d871827a5758179
+      workingDir: $(workspaces.shared.path)
+      command: ["oras"]
+      args:
+        - blob
+        - fetch
+        - --ca-file=/ca/ca-certificates.crt
+        - --output=$(workspaces.shared.path)/provenance-statement.json
+        - $(params.IMAGE)@$(steps.fetch-attestation-manifest.results.layer-digest)
+    - name: extract-predicate
+      image: ghcr.io/jqlang/jq:1.8.1@sha256:4f34c6d23f4b1372ac789752cc955dc67c2ae177eb1b5860b75cdc5091ce6f91
+      stdoutConfig:
+        path: $(workspaces.shared.path)/provenance-predicate.json
+      command: ["jq"]
+      args:
+        - -c
+        - .predicate
+        - $(workspaces.shared.path)/provenance-statement.json
+    - name: openbao-login
+      image: quay.io/openbao/openbao:2.6.2@sha256:11fd73a2102cda9c55d5d881a8c3210303146a7ec1e8ac76f526e175c6d24641
+      env:
+        - { name: HOME, value: $(workspaces.shared.path)/openbao-home }
+        - { name: BAO_ADDR, value: https://openbao.openbao.svc.cluster.local:8200 }
+        - { name: BAO_CACERT, value: /ca/ca-certificates.crt }
+      command: ["bao"]
+      args:
+        - login
+        - -method=kubernetes
+        - role=chains_provenance
+        - jwt=@/var/run/secrets/openbao-auth/token
+      volumeMounts:
+        - { name: openbao-auth-token, mountPath: /var/run/secrets/openbao-auth }
+    - name: cosign-attest
+      image: gcr.io/projectsigstore/cosign:v3.1.3@sha256:9e5c2f2edc34351160407ca3416c61855bdf9403c3c5936e0f0be7fc261611b8
+      env:
+        - { name: HOME, value: $(workspaces.shared.path)/openbao-home }
+        - { name: VAULT_ADDR, value: https://openbao.openbao.svc.cluster.local:8200 }
+        - { name: VAULT_CACERT, value: /ca/ca-certificates.crt }
+      command: ["cosign"]
+      args:
+        - attest
+        - --predicate=$(workspaces.shared.path)/provenance-predicate.json
+        - --type=https://slsa.dev/provenance/v1
+        - --key=openbao://chains-provenance-key
+        - --use-signing-config=false
+        - --tlog-upload=false
+        - $(params.IMAGE):$(params.APP_REVISION)
+  volumes:
+    - name: openbao-auth-token
+      projected:
+        sources:
+          - serviceAccountToken:
+              path: token
+              # MUST match environments/local/openbao/main.tf's
+              # chains_provenance role `audience` (= var.openbao_endpoint)
+              # exactly — a default-audience token is REJECTED (403,
+              # confirmed live). Short-lived: this Task's own step, not a
+              # long-running pod.
+              audience: https://openbao.openbao.svc.cluster.local:8200
+              expirationSeconds: 600

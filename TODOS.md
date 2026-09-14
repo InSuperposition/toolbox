@@ -26,8 +26,6 @@ open work):
 - *tofu modules*
   - `Retrofit vm-orbstack, cluster-k0sctl, secret-openbao to digest-pinning`
 - *Tekton/CI*
-  - `T8 — build provenance (reshaped 2026-09-14: no Tekton Chains — alpha
-    upstream; reuses the attestation-sign.sh pattern instead)`
   - `Promotion boundary for build-scan-approve` — new, surfaced by T8's
     eng review (Codex outside voice)
 - *Kyverno/Cilium*
@@ -49,6 +47,7 @@ open work):
     verification)` — split out from the old T8 scope
   - `T7d — production repoint`
   - `Pin-drift guard: host mise.toml vs ci/tasks/* step images`
+  - `openbao-verify.bats's online() helper checks only one of two registries`
   - `Tekton Dashboard`
   - `T10 — VEX hardening`
   - `Publish a multi-arch image once a real amd64 consumer exists`
@@ -63,6 +62,51 @@ open work):
 
 Newest first. Git-log density — commit/PR references, not a transcript.
 Full detail lives in the referenced PRs, ADRs, and commit messages.
+
+- **T8 — build provenance — DONE** (PR #51; reshaped by PR #49/#50 —
+  `/plan-eng-review`, 2 Codex outside-voice passes, live spikes). Rejected
+  installing Tekton Chains (upstream alpha) and a hand-assembled
+  "SLSA-shaped" predicate (not real SLSA, tag-race prone). Ships instead:
+  a new `ci/tasks/provenance-sign.yaml` Task signs BuildKit's own native
+  SLSA v1 provenance output (already pushed unsigned by `build`'s
+  `attest:provenance=` opt) with a second OpenBao Transit key
+  (`chains-provenance-key`), reusing the `cosign attest` + OpenBao pattern
+  `attestation-sign.sh` already proves out for `approval-key` — zero new
+  controllers. Evidence-only (not a second enforced gate); wired into
+  `attestation-sign.sh`'s evidence display, hard-blocking on missing
+  evidence like SBOM/scan already do. Runs `build → scan-attach →
+  provenance-sign → gate` (sequential, avoids a concurrent-PVC-mount
+  question).
+  **Auth, live-verified against the real cluster, not mocked:** a
+  dedicated `provenance-signer` ServiceAccount
+  (`ci/runtime/provenance-signer-sa.yaml`), bound only to this
+  PipelineTask (`deploy/frontend/pipelinerun.cue` `taskRunSpecs`),
+  authenticates to a new OpenBao k8s-auth role (`chains_provenance`,
+  `environments/local/openbao/main.tf`) scoped to `chains-provenance-key`
+  sign+read only — confirmed live: signs `chains-provenance-key`, denied
+  (403) on `approval-key`. Found and fixed mid-implementation: the
+  role's `audience` (matching the existing `flux_sops` role's own
+  pattern) requires an explicitly-projected custom-audience SA token —
+  the k8s default-automounted token's audience does NOT match and login
+  fails 403 (same latent gap likely exists, still unexercised, in
+  `flux_sops` — G1/SOPS is deferred, never live-tested).
+  **Zero embedded shell** (CLAUDE.md § Constraints) — every step is one
+  pinned CLI call. The extract-a-JSON-field problem that would normally
+  force a script was solved by `stdoutConfig` (Tekton, alpha-gated —
+  `environments/local/scripts/tekton-install.sh` now flips
+  `enable-api-fields` after the checksum-verified base install): a
+  step's stdout is duplicated to a file BY TEKTON ITSELF, and a later
+  step's `args` reference it via `$(steps.<name>.results.<name>)` —
+  verified live with 3 throwaway TaskRuns before committing to the
+  design. One new pinned image (`jq`, well-known/single-purpose) for the
+  one field-extraction step; no custom multi-tool image.
+  **Also found, unrelated, flagged not fixed:** `openbao-verify.bats`'s
+  `online()` helper checks only `ghcr.io`, not `quay.io` (which the
+  script also needs) — a `quay.io` outage makes an unrelated
+  anti-rotation-guard test falsely report failure. Own P3 entry, below.
+  Scope split per Gall's Law: OCI-bundle signing → `R5`; build
+  reproducibility → its own entry; the promotion-boundary gap Codex
+  found → its own entry (below), both P2, not part of this item.
 
 - **T-ADR9 — ADR-0009 pitchfork demo had no reachable registry — RESOLVED**
   (PR #45 escalation → PR #46 fix). T7c R4's GHCR package deletion broke the
@@ -455,187 +499,6 @@ the digest-equivalent for git-sourced modules.
 **Priority:** P2
 **Depends on:** digest-as-source-of-truth Phase 1-2 landing and proving out
 
-### T8 — build provenance — P2, planning session
-
-**Reshaped 2026-09-14** (`/plan-eng-review`, full session incl. Codex
-outside voice). Original scope was "install Tekton Chains"; that is
-**rejected** below. OCI-bundle signing and build reproducibility — both
-originally bundled into this item — are **split out** to their own entries
-(`R5`, below, and a new `Build reproducibility` entry) so each ships and
-tests independently (Gall's Law), matching how every other multi-part item
-in this file (T7, Plan B, T7c) was phased once it grew past one deliverable.
-
-**What:** a new Tekton Task (same shape as `scan-attach`/`gate` — CLI-only,
-no `script:` block) signs **BuildKit's own native SLSA provenance output**
-(not a hand-assembled predicate) with a second OpenBao Transit key
-(`chains-provenance-key`), via the exact `cosign attest` + CUE-schema
-pattern `attestation-sign.sh`/`attestation-verify.sh` already proves out for
-`approval-key`. **The Task resolves the immutable digest itself
-(`oras resolve`, the same pattern `attestation-sign.sh` already uses)
-before calling `cosign attest`** — `cosign attest --predicate` builds its
-statement subject from whatever image ref it's given, it does **not**
-automatically inherit BuildKit's own subject (Codex outside-voice, round
-2), so skipping this step would silently reintroduce the exact tag-race
-bug the hand-assembled-predicate approach was rejected for, below. The
-attestation is **evidence-only** — a referrer a human reads alongside the
-SBOM/scan report, same tier as those two, wired into
-`attestation-sign.sh`'s evidence display. **Selected by predicate type, not
-artifactType alone** (round-2 finding — approval and provenance
-attestations share the same Sigstore bundle artifactType, so the
-`last`-of-artifactType pattern SBOM/scan use would let an existing
-approval satisfy the new provenance check, including on a pre-T8 image).
-It is **not** a second enforced gate; `approval-key` remains the one real
-gate, per the design doc's existing 3-tier model
-(`docs/designs/digest-as-source-of-truth.md` § Architecture).
-
-**Two failure-mode decisions resolved (2026-09-14, second review pass):**
-- **Missing provenance evidence hard-blocks human approval** — same exit-4
-  path `attestation-sign.sh` already uses when SBOM or scan evidence is
-  missing on a digest. Consistent: "evidence-only" means provenance doesn't
-  gate the *image*, but it still gates the *approval step* — an approver
-  should never see partial evidence without being stopped. Consequence,
-  named honestly: pre-T8 images cannot be approved after this ships without
-  a rebuild (cheap on this repo's single-consumer scale).
-- **BuildKit producing no provenance output at runtime fails the Task
-  closed** — same severity tier as the already-decided OpenBao-unreachable
-  case and the existing CRITICAL scan gate. One failure-handling story for
-  the whole Task: any way it can't produce a signed attestation stops the
-  PipelineRun, never a silent gap discovered later.
-
-**Why:** the third supply-chain leg (how the build happened), signed
-mechanically — reusing infrastructure that already exists and is already
-tested, instead of a new dependency.
-
-**Rejected: installing Tekton Chains.** Checked directly against upstream:
-"Tekton Chains is working towards a formal beta release. Until then, all
-features are technically considered alpha"
-([github.com/tektoncd/chains/blob/main/releases.md](https://github.com/tektoncd/chains/blob/main/releases.md)).
-Every other tool in this stack is pinned deliberately by maturity (Cilium's
-Beta status is named and gated the same way) — Chains gets the same
-treatment. The desired outcome (a signed provenance attestation) does not
-require the Chains controller: the repo's own attestation pattern already
-gets there with zero new controllers and zero alpha dependency.
-
-**Rejected: hand-assembling a "SLSA-shaped" predicate.** The first draft of
-this reshape proposed 4 custom fields (digest, source SHA, builder ID,
-timestamp) validated by CUE. Codex's outside-voice review (this session)
-caught two real problems with that: (1) no real build digest was captured
-— the pipeline addresses images by `$(APP_REVISION)` tag
-(`ci/tasks/buildkit-build.yaml`), so a hand-typed predicate would describe
-a moving target, not a pinned build; (2) 4 custom fields passing CUE
-validation is not a real SLSA v1.1 predicate (missing both repo identities
-+ resolved commits, the build definition, a run identifier —
-[slsa.dev/spec/v1.1/provenance](https://slsa.dev/spec/v1.1/provenance)) —
-misleading to call it "SLSA-shaped." **Fix: sign BuildKit's own generated
-provenance output** ([moby/buildkit SLSA provenance
-docs](https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-provenance.md))
-instead — real schema, no handwritten generator to maintain (the correct
-digest is resolved separately at sign time, above — BuildKit's own output
-does not guarantee it on its own, round-2 finding).
-
-**Phase-0 spike — DONE, live against the real cluster (2026-09-14).** Ran
-the pinned `moby/buildkit:rootless` digest in the `ci` namespace against
-the in-cluster zot: `--opt attest:provenance=mode=max,builder-id=<url>`
-+ `--opt vcs:source=<url> --opt vcs:revision=<sha>`, pushed, then fetched
-and inspected the actual in-toto statement with `oras`. Result — **partial
-pass, decided, not blocking:**
-
-- `predicateType`: real `https://slsa.dev/provenance/v1`, not custom
-  fields. ✅
-- `runDetails.builder.id`: set correctly via the `builder-id` param. ✅
-- App-repo identity + resolved commit: lands cleanly in
-  `runDetails.metadata.buildkit_metadata.vcs.{source,revision}` via the
-  `vcs:source`/`vcs:revision` opts. ✅
-- `buildkit_completeness.resolvedDependencies: false` for a local-context
-  build — BuildKit flags its own incompleteness rather than overclaiming;
-  matches the docs, not a defect.
-- **Gap:** only ONE `vcs:source`/`vcs:revision` pair is supported —
-  the pipeline's **second** repo (this toolbox repo, holding the
-  Dockerfile, ADR 0014's two-repo split) has no discrete identity+commit
-  field. Its raw Dockerfile bytes get embedded verbatim in the predicate
-  instead (`buildDefinition.internalParameters...source.infos[].data`) —
-  arguably stronger evidence than a bare commit SHA, but not a second
-  "repository identity" as the round-2 finding asked for.
-
-**Decided:** accept app-repo VCS + embedded Dockerfile content as
-sufficient for the evidence-only tier — no second signed statement for the
-defs repo. `DEFS_REVISION` stays visible via the Pipeline's own params and
-TaskRun status regardless; this isn't the one real gate (`approval-key`
-is), so a human reviewer already has the trail without it living inside
-the provenance predicate too. **Not tested in the spike:** `FROM scratch`
-was used (no base image to resolve) — `resolvedDependencies` for a real
-base image (e.g. `cv_frontend`'s distroless Node base, ADR 0007) is
-documented behavior, not independently verified; low risk, verify when
-the real Task is written.
-
-**Auth wiring (explicit, not left implicit — Codex outside-voice finding):**
-a dedicated ServiceAccount + OpenBao k8s-auth role scoped to **both**
-`transit/sign/chains-provenance-key` **and** `transit/keys/chains-provenance-key`
-(read) — round-2 finding: `sign` alone omits the public-key read cosign's
-KMS client needs just to run at all
-([sigstore's pinned hashivault client](https://github.com/sigstore/sigstore/blob/v1.10.8/pkg/signature/kms/hashivault/client.go)),
-so the narrower grant would have silently broken the whole Task. Plus a
-**live** test (not tofu-mocked) that actually authenticates as the scoped
-ServiceAccount and signs successfully, alongside a negative test proving
-that role is denied `transit/sign` on `approval-key` — mirrors the
-anti-rotation-guard tests `approval-key` already has
-(`environments/local/openbao/tests/phase_c.tftest.hcl`), but a mocked
-`.tftest.hcl` case alone cannot prove runtime authorization actually
-works, only that the tofu config is shaped correctly. This is a new,
-narrowly-scoped auth path; `flux_sops`'s existing k8s-auth role
-(`main.tf:188-210`) is untouched.
-
-**Trust model (accepted, not deepened):** who can invoke the signing Task
-with what inputs is bounded by the same threat model the `ci` namespace
-already operates under — single-operator OrbStack VM, no RBAC because none
-is needed at this blast radius (`ci/runtime/namespace.yaml`). Signing
-BuildKit's own output (rather than a script picking arbitrary values)
-keeps the producer honest without a new trust mechanism.
-
-**Corrected 2026-09-14:** `environments/local/openbao` does **not** already
-have an empty `policies` input — checked against the actual `.tf` files.
-The only extension point that exists today is `var.transit_keys`
-(`variables.tf:102-114`, default `[]`, consumed at `main.tf:160-170`). A
-generic `policies` variable is new work this item adds, not something
-already present.
-
-**Operational Lifecycle Trace** (`chains-provenance-key`, CLAUDE.md's
-planning gate — no new long-lived process, since Chains itself is
-rejected; only a new secret):
-- **Bootstrap:** one more entry in `var.transit_keys` (same mechanism
-  `approval-key` and `sops` already use) + the new scoped k8s-auth role +
-  policy, applied by the existing `environments/local/openbao` tofu unit.
-- **Process restart / machine reboot:** identical to `approval-key` —
-  restore-managed key material survives a pod restart; the tofu-managed
-  role/policy re-applies from state, no manual step.
-- **Disaster (raft store lost) — corrected 2026-09-14, round 2:** does
-  **NOT** simply inherit `approval-key`'s story, as originally claimed.
-  `approval-key` is restore-managed (created by the raft snapshot restore
-  itself); `chains-provenance-key` is **tofu-created** — a re-`apply` after
-  a lost raft store can mint a *different* key under the same name,
-  silently breaking every past provenance attestation's verifiability with
-  no warning. **Fix, required at rollout, not deferred:** the host
-  bootstrap script's snapshot/recovery bundle (`openbao-bootstrap.sh:182`)
-  must explicitly capture this key on the run that provisions it, and
-  recovery is proven by a **fingerprint-equality test** (the restored
-  key's public half matches the committed one) — not assumed identical to
-  `approval-key`'s already-proven story.
-
-**Dependency, corrected:** was "T7 (all of T7a–T7d) shipped" — wrong. T7d
-(production repoint) is its own indefinitely-deferred item (needs
-`cluster-k0sctl`, unbuilt, no ETA). This work runs on the **dev** cluster,
-same as K1's Kyverno `ImageValidatingPolicy` already does without T7d.
-
-**Related — surfaced by this review, own entry:** `Promotion boundary for
-build-scan-approve` (below) — `buildkit-build` pushes the image before
-`scan-attach`/`gate`/this new Task even run, so a CRITICAL-vuln or
-unsigned image briefly exists in the registry regardless of gate outcome.
-Pre-existing gap (shared with the scan gate), not introduced by this item,
-not fixed by it either — tracked separately.
-
-**Priority:** P2 · **Depends on:** T7a–T7c shipped (all shipped; T7d
-explicitly NOT required, see above).
-
 ### Promotion boundary for build-scan-approve — P2, planning session
 
 **What:** design a real promotion boundary for the `build-scan-approve`
@@ -788,10 +651,12 @@ policy; `chainsaw-{kyverno,frontend}` pass post-merge.
 
 **Depends on:** Plan A merged (done, `a3b5a24`). **Priority:** P2. Related:
 **T-DR** overlaps K1's snapshot needs / O5's `snapshot_schedule`; **T8**
-(build provenance, reshaped — no Chains) will need a `policies` extension
-point that does not exist yet (see T8's entry — corrected 2026-09-14) —
-O4 should account for it,
-not assume it's already there to preserve.
+(build provenance, shipped — see "Recently closed," no Chains) ended up
+adding its own dedicated `vault_policy` resource directly
+(`chains_provenance_sign`, `main.tf`) rather than a generic `policies`
+extension point — no such point exists yet. O4 should account for that
+shape (one named policy resource per consumer) when it extracts this
+unit, not assume a reusable `policies` variable it can preserve.
 
 ### Kyverno module — accumulating design inputs — P2/P3, planning session
 
@@ -895,6 +760,31 @@ drives them (tekton + oras + cue; cosign + oras + openbao) — the rename
 needs thought, and it touches `mise.toml` tasks, ADRs, README, bats.
 (`frontend-deploy.sh`/`frontend-serve.sh`, the other two originally named
 here, are gone — ADR 0023 retired them, not renamed them.)
+
+### `openbao-verify.bats`'s `online()` helper checks only one of two registries — P3
+
+**Found 2026-09-14** while running `mise run check` for T8 (unrelated to it —
+confirmed on clean `main`). `environments/local/scripts/tests/openbao-verify.bats`'s
+`online()` helper checks only `ghcr.io` (the chart registry) reachability
+before deciding whether to run the anti-rotation-guard cases live. The
+script itself (`openbao-verify.sh`) ALSO needs `quay.io` (the image
+registry) for its second `crane digest` check, and self-skips (exit 0,
+no failure) if that one specific registry is unreachable — independent
+of `ghcr.io`. When `quay.io` is down (confirmed live: 504/502 gateway
+errors while `ghcr.io` answered fine) the bats `online()` check passes,
+the test runs, the script hits its OWN internal skip on the `quay.io`
+call before ever reaching the anti-rotation grep, and the test then
+falsely reports the guard failed (it never ran) rather than skipping
+cleanly like the script's own design intends ("a flapping registry does
+not red `mise run check`" — true for the script, not for this test).
+
+**Fix:** `online()` should check both `ghcr.io/openbao/charts/openbao:0.29.4`
+and `quay.io/openbao/openbao:2.6.2` (or whatever `openbao-verify.sh`'s
+`image_ref:image_tag` currently resolve to) before proceeding, matching
+what the script itself actually needs to succeed past the render step.
+
+**Priority:** P3 — not a real regression, a test-harness gap. Not fixed
+here (out of scope for T8; flagged per repo-ownership discipline).
 
 ### R5 — OCI-bundle distribution of the `ci/` defs — deferred
 

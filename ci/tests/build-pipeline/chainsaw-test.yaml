@@ -1,11 +1,12 @@
 # [k8s]-gated (ci/scripts/chainsaw-test.sh skips without an orbstack cluster
 # + Tekton). Server-side validation the static kubeconform gate cannot do:
-# the Tekton admission webhook accepts the four defs, none carries embedded
+# the Tekton admission webhook accepts the defs, none carries embedded
 # shell (CLAUDE.md § Constraints), the spike-proven build posture has not
 # drifted, the only privileged container in each Task is its `disable-ipv6`
-# sysctl step (TODOS.md T7b1-followup), and the Pipeline DAG is
-# clone-app -> clone-defs -> build -> scan-attach over the `shared` workspace
-# with a `buildkitd-config` ConfigMap workspace.
+# sysctl step (TODOS.md T7b1-followup) — `provenance-sign` (T8) has NONE,
+# every endpoint it reaches is in-cluster — and the Pipeline DAG is
+# clone-app -> clone-defs -> build -> scan-attach -> provenance-sign -> gate
+# over the `shared` workspace with a `buildkitd-config` ConfigMap workspace.
 #
 # The full clone -> build -> push -> `oras resolve` -> `docker pull` run
 # needs registry + git egress and a ~90s build; it is proven by an
@@ -32,6 +33,8 @@ spec:
         - apply:
             file: ../../tasks/scan-attach.yaml
         - apply:
+            file: ../../tasks/provenance-sign.yaml
+        - apply:
             file: ../../tasks/gate.yaml
         - apply:
             file: ../../pipelines/build-scan-approve.yaml
@@ -47,6 +50,12 @@ spec:
               kind: Task
               metadata:
                 name: scan-attach
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: provenance-sign
         - assert:
             resource:
               apiVersion: tekton.dev/v1
@@ -96,6 +105,15 @@ spec:
                 name: gate
               spec:
                 (length(steps)): 1
+                (steps[?script != null]): []
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: provenance-sign
+              spec:
+                (length(steps)): 6
                 (steps[?script != null]): []
     - name: build-posture-has-not-drifted
       try:
@@ -179,6 +197,34 @@ spec:
                   - name: gate
                     command: [trivy]
                     (securityContext.privileged || 'unset'): unset
+    - name: provenance-sign-has-no-privileged-step
+      try:
+        - assert:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: Task
+              metadata:
+                name: provenance-sign
+              spec:
+                steps:
+                  - name: discover-referrer
+                    command: [oras]
+                    (securityContext.privileged || 'unset'): unset
+                  - name: fetch-attestation-manifest
+                    command: [oras]
+                    (securityContext.privileged || 'unset'): unset
+                  - name: fetch-predicate-statement
+                    command: [oras]
+                    (securityContext.privileged || 'unset'): unset
+                  - name: extract-predicate
+                    command: [jq]
+                    (securityContext.privileged || 'unset'): unset
+                  - name: openbao-login
+                    command: [bao]
+                    (securityContext.privileged || 'unset'): unset
+                  - name: cosign-attest
+                    command: [cosign]
+                    (securityContext.privileged || 'unset'): unset
     - name: pipeline-shape
       try:
         - assert:
@@ -226,8 +272,17 @@ spec:
                         workspace: shared
                       - name: ca-bundle
                         workspace: ca-bundle
-                  - name: gate
+                  - name: provenance-sign
                     runAfter: [scan-attach]
+                    taskRef:
+                      name: provenance-sign
+                    workspaces:
+                      - name: shared
+                        workspace: shared
+                      - name: ca-bundle
+                        workspace: ca-bundle
+                  - name: gate
+                    runAfter: [provenance-sign]
                     taskRef:
                       name: gate
                     workspaces:

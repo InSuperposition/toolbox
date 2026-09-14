@@ -2,10 +2,15 @@
 #
 # No Role/RoleBinding on purpose (ADR 0014, T7a plan § RBAC): the build
 # step reads a *mounted* Secret, never the k8s API, so its ServiceAccount
-# needs no verbs. The TaskRun also sets automountServiceAccountToken:false.
-# Granting taskrun-create to the build SA would be an indirect
-# workload-creation path that could sidestep the securityContext posture
-# ci/tasks/buildkit-build.yaml pins.
+# needs no verbs. **Corrected 2026-09-14** (a `/plan-eng-review` outside-
+# voice pass found this stale): no TaskRun in this pipeline actually sets
+# `automountServiceAccountToken: false` anywhere — every Task except
+# `provenance-sign` (T8, `ci/runtime/provenance-signer-sa.yaml`) simply runs
+# as the namespace's default ServiceAccount with default automount, and
+# none of them touch the k8s API regardless. Granting taskrun-create to any
+# build SA would be an indirect workload-creation path that could sidestep
+# the securityContext posture `ci/tasks/buildkit-build.yaml` pins — that's
+# the real reason there's no RBAC here, not the token-mount setting.
 #
 # Pod Security Admission: `privileged` is set explicitly, not inherited.
 # Rootless BuildKit needs seccomp Unconfined + SETUID/SETGID +

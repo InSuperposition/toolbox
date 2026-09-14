@@ -58,3 +58,16 @@ actual="$(shasum -a 256 "$manifest" | awk '{print $1}')"
 
 echo "tekton-install: checksum OK — applying Tekton Pipelines $version (context '$CONTEXT')"
 kubectl --context "$CONTEXT" apply --server-side -f "$manifest"
+
+# T8 — build provenance (TODOS.md): the pinned release ships
+# enable-api-fields=beta by default. `stdoutConfig` (a step's stdout
+# duplicated to a file, consumed declaratively by a later step via
+# $(steps.<name>.results.<name>) — no embedded shell, verified live
+# 2026-09-14) needs alpha. The BASE manifest above stays untouched and
+# checksum-verified (the trust boundary, ADR 0001) — this is a small,
+# separate, auditable patch applied after it, same pattern the OpenBao
+# bridge uses for its own post-apply steps. Idempotent: a merge patch to
+# an unchanged value is a no-op.
+echo "tekton-install: patching feature-flags (enable-api-fields: alpha — T8 stdoutConfig)"
+kubectl --context "$CONTEXT" patch configmap feature-flags -n tekton-pipelines \
+	--type merge -p '{"data":{"enable-api-fields":"alpha"}}'

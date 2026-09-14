@@ -100,3 +100,39 @@ run "approval_key_can_never_be_tofu_managed" {
 
   expect_failures = [var.transit_keys]
 }
+
+run "chains_provenance_policy_grants_sign_and_read_only" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      strcontains(vault_policy.chains_provenance_sign.policy, "transit/sign/chains-provenance-key"),
+      strcontains(vault_policy.chains_provenance_sign.policy, "transit/keys/chains-provenance-key"),
+    ])
+    error_message = "the policy must grant both transit/sign/chains-provenance-key (to sign) and transit/keys/chains-provenance-key (read, for cosign's KMS client to fetch the pubkey — round-2 outside-voice finding)"
+  }
+  assert {
+    condition = alltrue([
+      !strcontains(vault_policy.chains_provenance_sign.policy, "approval-key"),
+      !strcontains(vault_policy.chains_provenance_sign.policy, "transit/sign/sops"),
+      !strcontains(vault_policy.chains_provenance_sign.policy, "encrypt"),
+    ])
+    error_message = "the policy must be scoped to chains-provenance-key only — no approval-key, no sops, no encrypt capability"
+  }
+}
+
+run "k8s_auth_role_is_scoped_to_provenance_signer" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      toset(vault_kubernetes_auth_backend_role.chains_provenance.bound_service_account_names) == toset(["provenance-signer"]),
+      toset(vault_kubernetes_auth_backend_role.chains_provenance.bound_service_account_namespaces) == toset(["ci"]),
+    ])
+    error_message = "the role must bind only provenance-signer in ci"
+  }
+  assert {
+    condition     = toset(vault_kubernetes_auth_backend_role.chains_provenance.token_policies) == toset(["chains_provenance_sign"])
+    error_message = "the role must grant only the chains_provenance_sign policy — never flux_sops_decrypt, never anything approval-key-adjacent"
+  }
+}
