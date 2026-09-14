@@ -77,6 +77,44 @@ holds: the tag is a convenience alias; the signed chain
 never leaves the human boundary. (`~/.claude/plans/t7b-pipeline-recut.md`,
 `TODOS.md` T7b.)
 
+**Known gap (not yet fixed — `TODOS.md` "Run-scoped build digest
+identity"):** every Task above re-resolves the same mutable tag
+independently, so this reasoning holds only *within* one run — a rerun or
+two overlapping `build-scan-approve` PipelineRuns can attach one run's
+evidence (`scan-attach`'s SBOM/scan report, T8's provenance) to a
+*different* run's image. Signing the resulting digest doesn't repair
+evidence that was already mismatched. Found by Codex's outside-voice
+review 2026-09-14 while reviewing an unrelated proposal; tracked, not
+fixed here.
+
+## Trust boundary: consumption-time, not registry presence
+
+`build` pushes the image before `scan-attach`, `provenance-sign`, or
+`gate` even run — an unapproved or CRITICAL-vuln image briefly (or, on a
+failed run, indefinitely) exists in the registry regardless of what any
+gate later decides. **This repo does not build a registry-level promotion
+boundary for that** (`TODOS.md` "Promotion boundary for build-scan-approve"
+— reviewed and rejected 2026-09-14): no zot-native feature exists for it,
+and every real trust check in this design already happens at
+**consumption time**, never at registry presence — Kyverno's
+`ImageValidatingPolicy` checks the approval attestation at pod admission
+(scoped to labelled namespaces + `cv-frontend`'s image ref,
+`environments/local/kyverno/imagevalidatingpolicy.yaml`), and
+`frontend-publish.sh` verifies before rendering or pushing anything. An
+image merely existing in the registry doesn't let either path consume it
+unsafely.
+
+**The real residual risk is a direct registry pull** — `docker pull` or
+`oras copy` against a tag directly, outside both checks above. Nothing in
+this pipeline warns against that; it is a documented, accepted gap, not a
+solved one. Before trusting any image pulled this way, verify its
+approval attestation yourself (`mise run attestation:verify`) — never
+assume registry presence means approved. This also bounds the claim
+correctly: it is *automation outside the designated frontend delivery
+path* that can bypass consumption-time checks, not only a human at a
+keyboard — any workload created in an unlabelled namespace or against a
+non-matching image ref bypasses Kyverno's policy too.
+
 ## Workspaces
 
 `shared` is backed by a per-run `volumeClaimTemplate` in the PipelineRun.
