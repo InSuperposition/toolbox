@@ -762,26 +762,51 @@ T7d = a `TODOS.md` checklist next to O4/O5, no estimate.
 interim accepted, not blocking) → R2 ✓ → R3 ✓ → R4 ✓`; **the T7 arc is
 fully closed.** R5 + T7d deferred, no trigger yet.
 
-### T-ADR9 — ADR-0009 pitchfork demo vs. in-cluster zot — P3, planning session
+### T-ADR9 — ADR-0009 pitchfork demo has no reachable registry — **P1, escalated 2026-09-14**
 
 **What:** the ADR-0009 local pitchfork docker demo (`frontend-deploy.sh` /
 `frontend-serve.sh`) reads the same `current-image.txt` as the M3 in-cluster
-Flux delivery path, but its plain `docker run --rm` container sits on
-docker's default bridge network — not bridged into the OrbStack k8s pod
-network the way the host shell or an actual pod is. Repointing it to the
-in-cluster zot (`zot.zot.svc.cluster.local:5000`, T7c R2) fails at launch:
-`no route to host` on zot's ClusterIP. R2 (2026-09-14) scoped the zot
-repoint to M3 only and left this demo pinned to GHCR.
+Flux delivery path, but its plain `docker run --rm` container (and its
+host-side launch re-verify, `attestation-verify.sh`) sits on docker's
+default bridge network — not bridged into the OrbStack k8s pod network the
+way the host shell or an actual pod is. Repointing it to the in-cluster
+zot (`zot.zot.svc.cluster.local:5000`, T7c R2) fails at launch: `no route
+to host` on zot's ClusterIP. R2 (2026-09-14) scoped the zot repoint to M3
+only and left this demo pinned to GHCR, on the stated assumption that
+"GHCR stays reachable."
 
-**Options, undecided:** (a) attach the demo container to whatever network
-OrbStack uses to bridge the host into the cluster (if one is attachable via
-`docker run --network`); (b) re-add a zot NodePort scoped to this one
-consumer; (c) retire the ADR-0009 demo outright now that M3's in-cluster
-Flux delivery is live and proven — the docker demo predates it and may now
-be redundant negative space, not a gap to fill.
+**That assumption broke the same day.** T7c R4 (2026-09-14, same session)
+deleted the GHCR `cv-frontend`/`cv-frontend-spike` packages entirely — R4's
+own plan never cross-checked that the ADR-0009 demo was still relying on
+that registry. Confirmed live: `oras manifest fetch
+ghcr.io/insuperposition/cv-frontend@sha256:fd02f152...` now 404s ("not
+found"). The `frontend` pitchfork daemon is running fine right now off a
+locally-cached docker image, but has **zero working restart path**: a
+crash, `pitchfork restart`, or a re-run of `mise run frontend:deploy`
+would hit the launch re-verify against a deleted GHCR package (retryable
+error, bounded retries, then a stopped daemon) — and it cannot fall back
+to zot either, per the network gap above. This is the Operational
+Lifecycle Trace "process restart" case with **no working manual recovery
+step today**, not just an inconvenience — CLAUDE.md's planning gate marks
+that a flaw to fix, not a feature to document.
 
-**Depends on:** R2 merged. **Priority:** P3 — no active consumer is broken
-(GHCR stays reachable), this is cleanup/simplification, not a blocker.
+**Options, undecided (a and c now clearly cheaper than before given zot
+already carries a currently-signed image from this session's R2/R3 work,
+if the network gap gets solved):** (a) attach the demo container + its
+host-side verify step to whatever network OrbStack uses to bridge the
+host into the cluster (if one is attachable via `docker run --network` or
+similar for the verify step too — the verify step is the harder half,
+it's not even in a container); (b) re-establish a live GHCR image (build +
+push + sign a fresh one) as a stopgap, then still decide a/c — cheap but
+re-creates the exact dependency R4 just spent effort retiring; (c) retire
+the ADR-0009 demo outright now that M3's in-cluster Flux delivery is live
+and proven — the docker demo predates it and may now be redundant
+negative space, not a gap to fill; **this option now looks strongest**
+given (a) real cost/complexity is unresolved and (b) is a step backward.
+
+**Depends on:** R2 + R4 merged (both are). **Priority:** P1 — an active
+consumer's restart path is currently broken, discovered via a live
+`gh api -X DELETE` + `oras manifest fetch` probe, not assumed.
 
 ### T-DR — declarative disaster recovery for the in-cluster OpenBao — P2, planning session
 
