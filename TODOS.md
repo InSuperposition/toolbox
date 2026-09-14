@@ -737,10 +737,11 @@ first:
 - **R4** — ✅ **DONE (2026-09-14).** Deleted
   `.github/workflows/build-cv-frontend.yml` + the doc sweep (`ci/README.md`,
   `deploy/frontend/README.md`, `digest-as-source-of-truth.md`, ADR 0003,
-  `CLAUDE.md`). **GHCR `cv-frontend*` package deletion still pending** —
-  this session's `gh` token lacks `delete:packages`; needs
-  `gh auth refresh -s delete:packages` (interactive) before
-  `gh api -X DELETE` can run.
+  `CLAUDE.md`). The GHCR `cv-frontend` (public) and `cv-frontend-spike`
+  (private) packages are deleted — user ran `gh auth refresh -s
+  delete:packages`, `gh api -X DELETE /users/InSuperposition/packages/
+  container/{cv-frontend,cv-frontend-spike}`, verified empty after. R4
+  fully closed.
 - **R5 (DEFERRED)** — OCI-bundle distribution of the `ci/` defs
   (`tkn bundle push`, self-contained Pipeline + Task closure, `@sha256:`
   resolver pins). This is ADR 0014's stated end state, recorded UNFINISHED —
@@ -758,9 +759,8 @@ T7d = a `TODOS.md` checklist next to O4/O5, no estimate.
 **Priority:** P2 · **Depends on:** ~~T5 + T5b~~ done. **T7b0–T7b3** ✓ →
 **T7c pre-plan + Increments 0/1a/1b/2** ✓ → Increment 4 (in-cluster OpenBao) ✓
 → distribution tail `R1a ✓ → R1b-i ✓ → R1b-ii ✓ (flux push's --insecure-registry
-interim accepted, not blocking) → R2 ✓ → R3 ✓ → R4 ✓ (package deletion
-pending — see R4 above)`; the T7 arc is functionally complete. R5 + T7d
-deferred, no trigger yet.
+interim accepted, not blocking) → R2 ✓ → R3 ✓ → R4 ✓`; **the T7 arc is
+fully closed.** R5 + T7d deferred, no trigger yet.
 
 ### T-ADR9 — ADR-0009 pitchfork demo vs. in-cluster zot — P3, planning session
 
