@@ -531,19 +531,42 @@ provenance output** ([moby/buildkit SLSA provenance
 docs](https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-provenance.md))
 instead — real schema, no handwritten generator to maintain (the correct
 digest is resolved separately at sign time, above — BuildKit's own output
-does not guarantee it on its own, round-2 finding). **First implementation
-step:** a spike confirming the pinned `moby/buildkit:rootless` digest
-supports provenance output and how it's exposed to a downstream Task (an
-image-index attestation manifest vs. a separately fetchable artifact) —
-unverified, do this before writing the signing Task. **Spike pass
-condition, tightened (round 2):** not "an attestation exists" — the
-emitted provenance must contain both repo identities **and** their
-resolved commits (BuildKit's documented local-input provenance can omit
-both when given local directories instead of a git URL — this pipeline's
-exact shape, `ci/tasks/buildkit-build.yaml`), a non-empty builder ID, and a
-real predicate version. If the local-input mode can't produce these, the
-hand-assembled-predicate fallback (rejected above) gets reconsidered with
-real data, not assumption.
+does not guarantee it on its own, round-2 finding).
+
+**Phase-0 spike — DONE, live against the real cluster (2026-09-14).** Ran
+the pinned `moby/buildkit:rootless` digest in the `ci` namespace against
+the in-cluster zot: `--opt attest:provenance=mode=max,builder-id=<url>`
++ `--opt vcs:source=<url> --opt vcs:revision=<sha>`, pushed, then fetched
+and inspected the actual in-toto statement with `oras`. Result — **partial
+pass, decided, not blocking:**
+
+- `predicateType`: real `https://slsa.dev/provenance/v1`, not custom
+  fields. ✅
+- `runDetails.builder.id`: set correctly via the `builder-id` param. ✅
+- App-repo identity + resolved commit: lands cleanly in
+  `runDetails.metadata.buildkit_metadata.vcs.{source,revision}` via the
+  `vcs:source`/`vcs:revision` opts. ✅
+- `buildkit_completeness.resolvedDependencies: false` for a local-context
+  build — BuildKit flags its own incompleteness rather than overclaiming;
+  matches the docs, not a defect.
+- **Gap:** only ONE `vcs:source`/`vcs:revision` pair is supported —
+  the pipeline's **second** repo (this toolbox repo, holding the
+  Dockerfile, ADR 0014's two-repo split) has no discrete identity+commit
+  field. Its raw Dockerfile bytes get embedded verbatim in the predicate
+  instead (`buildDefinition.internalParameters...source.infos[].data`) —
+  arguably stronger evidence than a bare commit SHA, but not a second
+  "repository identity" as the round-2 finding asked for.
+
+**Decided:** accept app-repo VCS + embedded Dockerfile content as
+sufficient for the evidence-only tier — no second signed statement for the
+defs repo. `DEFS_REVISION` stays visible via the Pipeline's own params and
+TaskRun status regardless; this isn't the one real gate (`approval-key`
+is), so a human reviewer already has the trail without it living inside
+the provenance predicate too. **Not tested in the spike:** `FROM scratch`
+was used (no base image to resolve) — `resolvedDependencies` for a real
+base image (e.g. `cv_frontend`'s distroless Node base, ADR 0007) is
+documented behavior, not independently verified; low risk, verify when
+the real Task is written.
 
 **Auth wiring (explicit, not left implicit — Codex outside-voice finding):**
 a dedicated ServiceAccount + OpenBao k8s-auth role scoped to **both**
