@@ -17,7 +17,9 @@ signing/verifying logic itself is **not** here — it moved to
 consumer.
 
 - **T4** (GitHub Actions build/scan/SBOM) — built, CI-green
-  (`.github/workflows/build-cv-frontend.yml`).
+  (`.github/workflows/build-cv-frontend.yml`); **retired** once T7c's
+  in-cluster build (T7b3, below) proved stable end to end (`TODOS.md` T7,
+  R4).
 - **T5** (approve) — the seam is `attestation/scripts/attestation-sign.sh`
   / `attestation-verify.sh`. `mise run attestation:sign` /
   `attestation:verify`. See `attestation/README.md`.

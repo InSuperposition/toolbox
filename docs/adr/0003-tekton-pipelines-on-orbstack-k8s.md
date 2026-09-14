@@ -22,8 +22,10 @@ Considered and rejected:
   contradicts the "no production cluster in this wedge" premise. Belongs
   after the pipeline is proven, not instead of it.
 
-Status: accepted. Phase 1 shipped (GitHub Actions + GHCR). Phase 2 — the
+Status: accepted. Phase 1 shipped (GitHub Actions + GHCR), then retired
+(T7c R4) once Phase 2 proved stable end to end. Phase 2 — the
 Tekton Pipeline on OrbStack k8s — shipped: the build/scan/gate pipeline
-(`ci/`, T7b1–b3) reconciled by Flux (T7c Increment 2). Tekton Chains
+(`ci/`, T7b1–b3) reconciled by Flux (T7c Increment 2), delivering into
+the in-cluster zot (T7c R1-R2). Tekton Chains
 provenance is **T8**, still blocked on the in-cluster OpenBao move
 (`TODOS.md` — the loopback listener cannot serve an in-cluster Chains pod).
