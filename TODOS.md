@@ -21,6 +21,8 @@ open work):
   - `T-DR` — declarative disaster recovery for the in-cluster OpenBao
   - `zot registry auth` — credential-free today, real auth deferred
   - `Flux / registry CA trust — could a mesh solve this structurally?`
+  - `SPIRE — phased workload-identity rollout` — planning-session output,
+    Phases 0-3, cross-referenced from the four items above it
 - *tofu modules*
   - `Retrofit vm-orbstack, cluster-k0sctl, secret-openbao to digest-pinning`
 - *Tekton/CI*
@@ -119,12 +121,14 @@ Full detail lives in the referenced PRs, ADRs, and commit messages.
 The first `approval-key` was rotated on 2026-09-06 (commit `bcbb862`)
 because it was provisioned in an AI session whose bootstrap output was
 transcript-visible. Procedure for any future rotation:
+
 ```
 mise run local:openbao:reset            # stops daemon, wipes raft store + 0600 secret files + tfstate
 mise run local:openbao:bootstrap        # fresh approval-key; regenerates seal.key / root.token /
                                   #   recovery.key (all 0600); rewrites cosign-approval.pub
 git add attestation/cosign-approval.pub && git commit
 ```
+
 No `fnox.toml` / keychain step — the secrets are `0600` files (ADR 0011).
 Every attestation signed with the old key stops verifying against the new
 `cosign-approval.pub` — re-run `mise run attestation:sign` for any image whose
@@ -168,9 +172,9 @@ session does not re-derive them.
 **The two gaps — kept distinct, `auth` alone is ambiguous:**
 
 | Principal | Authentication (which principal is acting) | Authorization (what it may do) |
-|---|---|---|
+| --- | --- | --- |
 | **Human approver** | `attestation-sign.sh` presents the **root token**; OpenBao authenticates the token, not a person. `approvedBy` is a typed string (`gh api user` / `$USER`), unverified. | Root token ⇒ every path. Wants a policy scoped to `transit/sign/approval-key` only. |
-| **Pipeline pod** (T7b+) | T7a copies an operator `gh auth token` into a `docker-registry` Secret; the pod "is" whoever minted it. No workload identity. | That token carries the operator's full `gh` scopes. Wants push-one-repo / clone-two-repos and nothing wider. |
+| **Pipeline pod** (T7b+) | **Corrected 2026-09-14** (this description was stale — no `docker-registry` Secret exists in the current manifests, verified against every `ci/*.yaml` and `deploy/frontend/*`): `git-clone` is anonymous HTTPS only, zot is credential-free by design, and no Role/RoleBinding is granted (`ci/runtime/namespace.yaml`'s own comment states the intent is no k8s API identity at all — a live double-check pass found that intent is not yet backed by an actual `automountServiceAccountToken: false` on any TaskRun/PipelineRun spec in `ci/` or `deploy/frontend/`; flagged as its own small gap, not fixed here). The real live gap is that pods have **effectively zero** useful identity today, not a mis-scoped one. | Nothing scoped today because nothing is authenticated today. Wants push-one-repo / clone-two-repos and nothing wider, whenever a real credential is needed. |
 
 **Why it is safe to defer:** the zero-trust claim ("possession of the
 private key is the access control") collapses today to "possession of one
@@ -180,13 +184,17 @@ known-deferred P2, not urgent. The only forcing function for the human gap
 is a second approver.
 
 **Folded in from the retired "Local OpenBao unseal-key storage" section:**
-its one live loose end was gh token expiry — the personal `gh auth token`
-copied into the pipeline-pod's `docker-registry` Secret (the row above) has
-no rotation/renewal story; it silently expires with no scheduled renewal.
-Covered by trigger 2 below (a shared runner / CI service account is the
-real fix, not a manual re-copy).
+its one live loose end was gh token expiry. **Corrected 2026-09-14:** the
+actual live credential is the human operator's own `gh auth token`, read
+live at sign-time by `attestation/scripts/attestation-sign.sh:111` (not a
+stored pipeline-pod Secret — none exists) — it has no rotation/renewal
+story this repo manages; `gh` CLI's own local credential refresh is the
+only thing standing behind it today. Covered by trigger 2 below (a shared
+runner / CI service account is the real fix, once pods carry any
+credential at all).
 
 **Reopen when ANY of:**
+
 1. A second person needs to sign an approval verdict (the real trigger for
    the human gap).
 2. The build/scan pipeline moves to a shared runner, a CI service account,
@@ -201,6 +209,7 @@ real fix, not a manual re-copy).
    input for exactly this; T8 does not need this whole session.
 
 **Pre-picked direction (evaluate these first, don't restart from zero):**
+
 - *Human authn+authz* — either (a) an OpenBao auth method (userpass / OIDC
   / AppRole) issuing a token scoped to `transit/sign/approval-key`, or
   (b) cosign **keyless / Fulcio** so the approver identity is an OIDC
@@ -211,7 +220,12 @@ real fix, not a manual re-copy).
   ServiceAccount, gets short-lived narrowly-scoped registry + git creds),
   vs. a scoped machine PAT in a sealed Secret. Kyverno can enforce *which*
   SA may mount the Secret but is not the identity primitive and its module
-  is unbuilt. SPIFFE/SPIRE is an innovation-token overspend for one VM.
+  is unbuilt. **Updated 2026-09-14:** SPIFFE/SPIRE is no longer dismissed
+  outright — a phased, cheap-to-execute rollout exists
+  (`SPIRE — phased workload-identity rollout`, below) that closes real
+  gaps incrementally without needing this whole session to reopen. This
+  item stays formally deferred (no trigger below has fired) but the
+  direction is de-risked; see that entry before re-deriving from zero.
 - *New-member DX target* — `git clone` → `mise run attestation:sign` with
   no runbook step, idempotent on a fresh machine.
 
@@ -256,10 +270,15 @@ all cluster writers are the operator's). **Why:** a credential-free registry let
 any cluster workload push an image or attach a referrer; `attestation-sign.sh`
 selects evidence by `last`-of-artifactType. Fine solo, not fine with a second
 operator or a shared cluster. **Options to weigh:** static htpasswd Secret,
-zot's OIDC/LDAP, an OpenBao-issued short-lived credential. **First step:** decide
-whether this folds into the deferred "Auth + multi-member DX" session (likely) or
-stays separate. **Depends on:** T7b0 (zot exists). **Triggers with:** a 2nd
-operator, a shared cluster, or `environments/production/`.
+zot's OIDC/LDAP, an OpenBao-issued short-lived credential, **or SPIFFE/SPIRE
+mTLS (4th candidate, now the lead one)** — zot has first-party documented
+support for extracting identity from an X.509-SVID's URI SAN
+([zotregistry.dev authn-authz](https://zotregistry.dev/v2.1.14/articles/authn-authz/)),
+no beta caveat. See `SPIRE — phased workload-identity rollout` below, Phase 1.
+**First step:** decide whether this folds into the deferred "Auth + multi-member
+DX" session (likely) or stays separate. **Depends on:** T7b0 (zot exists).
+**Triggers with:** a 2nd operator, a shared cluster, or
+`environments/production/`.
 
 ### Flux / registry CA trust — could a mesh or another pinned tool solve this structurally? — planning session — P2
 
@@ -278,26 +297,136 @@ in-cluster registry traffic trusted by construction, independent of whether
 `flux push`/`crane`/whatever-comes-next happens to expose a CA flag — closes
 this whole class of gap instead of solving it once per tool.
 
-**Candidates to research (real sources, not pattern-matching from training
+**Candidates researched (real sources, not pattern-matching from training
 data — same discipline as the R1b-ii-c pre-plan):**
-- **Cilium's newer service-mesh / ztunnel-style mTLS features** — Cilium is
-  already pinned+deferred in this stack (CLAUDE.md § Tool Boundaries); check
-  its current (not historical) docs for what it actually does today re:
-  transparent mTLS between pods, and whether that extends to a *host→pod*
-  path (registry-seed/flux-publish run on the Mac host, not in-cluster) or
-  only pod↔pod.
+
+- **Cilium's Mutual Authentication — checked, does NOT answer this item.**
+  Confirmed Beta, and Cilium's own docs state it "only works within a
+  Cilium-managed cluster and is not compatible with an external mTLS
+  solution" ([docs.cilium.io mutual-authentication](https://docs.cilium.io/en/stable/network/servicemesh/mutual-authentication/mutual-authentication/)) —
+  pod-to-pod only. The actual pain here (`flux push`/`oras`/
+  `frontend-publish.sh` running **on the Mac host**, outside the cluster)
+  is exactly the case this feature rules out. Not the answer to this
+  item's own question.
+- **SPIFFE/SPIRE host-side agent — the candidate that does answer it.**
+  SPIRE supports non-Kubernetes node attestation (`join_token`, `x509pop`)
+  for bare hosts/VMs ([spiffe.io SPIRE concepts](https://spiffe.io/docs/latest/spire-about/spire-concepts/)).
+  A SPIRE Agent on the dev Mac issues host CLI processes their own
+  X.509-SVIDs via the Workload API, which zot's SPIFFE mTLS support (see
+  "zot registry auth", above) consumes directly — one mechanism closes
+  both this item and that one, without waiting on Cilium's beta maturity.
+  See `SPIRE — phased workload-identity rollout` below, Phase 2.
 - **Kyverno** — anything beyond admission policy (already scoped, ADR
-  0020/0022) relevant to registry trust distribution.
-- **Crossplane** — pinned/inactive (ADR 0018); check if the "provision"
-  stage has any real bearing on this (likely not — flag if so, don't force
-  it if not).
-- Whatever else the research surfaces — this is explicitly open, not scoped
-  to only those three.
+  0020/0022) relevant to registry trust distribution. Not investigated
+  further — no lead found.
+- **Crossplane** — pinned/inactive (ADR 0018); the "provision" stage has
+  no bearing on this (transport trust, not backing-infra provisioning).
 
 **Depends on:** R1b-ii-c's per-tool fixes landing first (this session)
 — they're needed regardless of whether a mesh answer ever ships, and prove
 the problem is real before reaching for a bigger structural tool.
 **Triggers with:** a dedicated planning/research session, not blocking R2–R4.
+
+### SPIRE — phased workload-identity rollout — P2, planning-session output
+
+**What:** a corrected, cited map of every identity boundary in the repo
+today, plus an ordered, small-transaction rollout of SPIFFE/SPIRE where it
+closes an *already-open* gap — not a rewrite. Full plan:
+`~/.claude/plans/let-s-go-with-the-steady-treehouse.md`. Owns and is
+cross-referenced from: "zot registry auth", "Flux / registry CA trust",
+"Auth + multi-member DX", T8, and the Cilium planning-session entry
+(all this file).
+
+**Why now:** the sharpest, most concrete, already-self-diagnosed gap in
+the stack — `docs/designs/digest-as-source-of-truth.md` § Trust boundary
+— is that the human approver authenticates to OpenBao with the **root
+token**, not a scoped identity (`attestation-sign.sh:98-103`). SPIFFE/SPIRE
+was previously dismissed stack-wide as "an innovation-token overspend for
+one VM" (this file's Auth + multi-member DX entry) — that call was right
+for a monolithic all-at-once adoption; it doesn't hold once the rollout is
+broken into phases, each cheap and independently revertable, each closing
+one named gap.
+
+**Ground truth (2026-09-14), corrected against two stale claims this pass
+fixed in place:** OpenBao's k8s-auth `flux_sops` role (`main.tf:188-210`)
+already works narrowly and is untouched by any phase below. Tekton build
+pods have zero identity of any kind (not a mis-scoped one — see the
+Auth + multi-member DX correction above). zot is credential-free by
+design. The `var.transit_keys` extension point exists; a generic
+`policies` variable does not yet (T8 correction above).
+
+**Per-boundary verdicts (checked against each tool's own current docs,
+not pattern-matched from training data):**
+
+- **zot** — ready today. First-party SPIFFE mTLS support, no beta caveat
+  ([zotregistry.dev](https://zotregistry.dev/v2.1.14/articles/authn-authz/)).
+- **OpenBao** — no native SPIFFE auth method. Vault's own SPIFFE auth
+  method is Enterprise-only, irrelevant to OpenBao
+  ([developer.hashicorp.com/vault/docs/auth/spiffe](https://developer.hashicorp.com/vault/docs/auth/spiffe/spiffe)).
+  Real options: `jwt` auth + JWT-SVID (works today, but JWT-SVIDs are
+  bearer tokens — SPIFFE's own spec: proof-of-possession is via TLS for
+  X.509-SVID, not achievable the same way for a bearer JWT) vs. `cert`
+  auth + X.509-SVID mTLS (stronger, matches "JWT isn't secure enough" —
+  but whether OpenBao's `cert` backend extracts identity from a URI SAN
+  rather than only CN is **unverified** — Phase 0 spikes this before any
+  real wiring).
+- **Registry-CA-trust "mesh" question** — Cilium's Mutual Authentication
+  is confirmed pod-to-pod only, explicitly incompatible with external/host
+  mTLS ([docs.cilium.io](https://docs.cilium.io/en/stable/network/servicemesh/mutual-authentication/mutual-authentication/)) —
+  does not answer the "Flux / registry CA trust" item's own question. A
+  host-side SPIRE Agent (non-k8s node attestation via `join_token`) does —
+  see that item's entry above.
+- **Tekton Chains** — not viable now, upstream alpha, "not yet functional"
+  ([tekton.dev](https://tekton.dev/docs/pipelines/spire/)). T8 does not
+  depend on this.
+
+**Phases (each its own PR, gated on the previous phase's verification):**
+
+0. **Spike** — throwaway SPIRE Server + Agent; confirm OpenBao `cert` auth
+   extracts a SPIFFE ID from an X.509-SVID's URI SAN. Decides whether
+   Phase 3 targets `cert` auth or falls back to `jwt` auth. No production
+   wiring; a finding, not code.
+1. **SPIRE Server + Agent in-cluster; zot mTLS** — new concern directory
+   `environments/local/spire/` (sibling to `openbao/`, same tofu-unit
+   skeleton). SPIRE's intermediate cert issued via OpenBao's PKI secrets
+   engine as upstream authority (keeps OpenBao as the one root of trust —
+   no third independent CA alongside `toolbox-dev-ca` and OpenBao's own
+   listener cert). SPIRE Agent DaemonSet, `k8s_psat` attestor. Closes
+   "zot registry auth."
+2. **Host-side SPIRE Agent** — `join_token` node attestation on the dev
+   Mac, `pitchfork`-supervised (never a bare `spire-agent run &`). Host
+   CLI tools (`flux push`, `oras`, `frontend-publish.sh`,
+   `registry-seed.sh`) present an X.509-SVID to zot instead of per-CLI
+   `--ca-file` patchwork. Closes "Flux / registry CA trust."
+3. **OpenBao signing identity** — gated on Phase 0. `attestation-sign.sh`
+   authenticates via the host SVID → OpenBao `cert` (or `jwt`, if the
+   spike fails) auth → a policy scoped to `transit/sign/approval-key`
+   only — the root token retires from this one path. Directly answers
+   Auth + multi-member DX's trigger #1 (a second approver) ahead of that
+   trigger firing, since the mechanism becomes cheap to have ready.
+   `flux_sops`'s k8s-auth role is untouched.
+4. **Cilium Mutual Authentication** — not scheduled; deferred to the
+   Cilium planning-session entry (above), reusing this Phase 1's SPIRE
+   Server, never Cilium's bundled one.
+   Not scheduled at all: Tekton Chains + SPIRE (upstream not ready — see
+   T8's entry).
+
+**Operational Lifecycle Trace (SPIRE Server, required before Phase 1
+ships per CLAUDE.md's planning gate):** bootstrap via a tofu unit +
+`spire-bootstrap.sh` (intermediate cert from OpenBao PKI, host
+`join_token` written `0600`, registration entries declarative via
+`spire-register.sh` — never typed by hand); process restart — in-cluster
+DB on a PVC survives, host agent restarted + re-attested by `pitchfork`;
+machine reboot — both sides autostart, no manual step; disaster — SPIRE's
+cert re-issues from OpenBao (already-recoverable root), registration
+entries re-apply from the checked-in manifest. No recurring manual step,
+no memorized secret — matches the standard ADR 0011 already holds OpenBao
+to. Full trace: the plan file above.
+
+**Effort:** planning done (this entry + the linked plan); Phase 0 ~1
+session; Phases 1-3 ~S-M each.
+**Priority:** P2 · **Depends on:** nothing blocking — Phase 0 can start
+any time. Phase 4 depends on the Cilium planning session (above).
 
 ### Retrofit vm-orbstack, cluster-k0sctl, secret-openbao to digest-pinning
 
@@ -326,16 +455,31 @@ Transit key (`chains-provenance-key`) with an access policy that denies it
 per build (`cosign verify-attestation --key <chains-pubkey>`).
 
 **Why:** the third supply-chain leg (how the build happened), signed
-mechanically. `environments/local/openbao` already has an empty `policies`
-input for the scoped policy.
+mechanically.
+
+**Corrected 2026-09-14:** `environments/local/openbao` does **not** already
+have an empty `policies` input — checked against the actual `.tf` files.
+The only extension point that exists today is `var.transit_keys`
+(`variables.tf:102-114`, default `[]`, consumed at `main.tf:160-170`). A
+generic `policies` variable would need to be added when T8 is built, not
+assumed present.
 
 **First task — RESOLVED:** the loopback blocker is gone. The in-cluster
 OpenBao (ADR 0016) serves pods over TLS at
 `https://openbao.openbao.svc.cluster.local:8200` with k8s-ServiceAccount
 auth. Chains adds a `chains-provenance-key` Transit key + a scoped policy
 (deny `transit/sign` on `approval-key`) + a `chains` k8s-auth role — the
-`transit_keys` / `policies` extension points on `environments/local/openbao`
-are the seam.
+`transit_keys` extension point on `environments/local/openbao` is the seam
+for the key; the policy variable is new work, not existing.
+
+**SPIRE checked, not viable yet:** Tekton's own docs state plainly, as of
+this check, "SPIRE support is not yet functional" — TaskRun-result signing
+via SPIRE is alpha, four phases planned, only phase 1 (a SPIRE client)
+shipped upstream ([tekton.dev/docs/pipelines/spire](https://tekton.dev/docs/pipelines/spire/)).
+T8 proceeds on the `chains-provenance-key` Transit-key approach above, no
+SPIRE dependency. Revisit trigger: that page drops the "not yet
+functional" banner. See `SPIRE — phased workload-identity rollout`
+(below) for the full per-boundary research this verdict is drawn from.
 
 **Also in T8:** sign the `ci/` OCI bundles with a dedicated key
 ([ADR 0014](docs/adr/0014-tekton-defs-are-oci-bundles-in-ci.md)); land
@@ -416,6 +560,16 @@ server, git/OCI pulls, OpenBao — CLAUDE.md § Zero Trust), Hubble observabilit
 existing-stack fit (OrbStack's current CNI, Flux-reconciled install), and
 whether Kyverno's admission webhook and Cilium's policy engine overlap.
 
+**SPIRE note (added 2026-09-14):** Cilium's Mutual Authentication feature
+(pod-to-pod mTLS) is backed by SPIFFE/SPIRE, confirmed Beta — "security
+model completeness not yet complete"
+([Cilium CFP-22215](https://github.com/cilium/design-cfps/blob/main/cilium/CFP-22215-mutual-auth-for-service-mesh.md)).
+If this session evaluates it: **reuse the SPIRE Server from
+`SPIRE — phased workload-identity rollout` (below) — Cilium's Helm chart
+offers to deploy its own SPIRE server, do not use that option.** One
+SPIRE Server per cluster, never two (CLAUDE.md § Tool Boundaries — no two
+tools compete for one job).
+
 **Depends on:** T7c (local Flux — Cilium installs through it). **Priority:** P2
 · runs after the T7 arc, likely alongside the Kyverno module design.
 
@@ -438,7 +592,7 @@ policy; `chainsaw-{kyverno,frontend}` pass post-merge.
 **Deferred (own triggers):**
 
 | Item | Trigger |
-|---|---|
+| --- | --- |
 | **O4 / O5** — extract `modules/secret-openbao/` (`moved` blocks — `deletion_allowed=false` on `sops`/`extra` keys makes `tofu destroy` fail partway) + `ha` / `awskms`\|`transit` unseal / `snapshot_schedule` / `tls_issuer` presets. **ADR 0017**. | `environments/production/openbao/` becomes real planned work (the true 2nd consumer — one consumer is not a module, `modules/README.md`). ADR 0012 stands until then. O4 planning also picks up a dedicated OpenBao Transit `manifest-signing` key for the M3 artifact. |
 | **Crossplane install** (core + `provider-*` + a Composition + its own ADR) | a consumer declares backing infra it does not own (bucket / DB / queue / DNS as a CR) — **not** a directory count. |
 | **G1** — Flux SOPS (`--sops-vault-configmap` + ConfigMap + `spec.decryption`) | a named secret needs SOPS decryption. Plan A's Phase C left the OpenBao side (`sops` key, `flux_sops` role) ready. |
@@ -448,7 +602,9 @@ policy; `chainsaw-{kyverno,frontend}` pass post-merge.
 
 **Depends on:** Plan A merged (done, `a3b5a24`). **Priority:** P2. Related:
 **T-DR** overlaps K1's snapshot needs / O5's `snapshot_schedule`; **T8**
-(Tekton Chains) uses the `policies` seam O4 must preserve.
+(Tekton Chains) will need a `policies` extension point that does not exist
+yet (see T8's entry — corrected 2026-09-14) — O4 should account for it,
+not assume it's already there to preserve.
 
 ### Kyverno module — accumulating design inputs — P2/P3, planning session
 
