@@ -231,7 +231,7 @@ else
   into $SNAP_DIR and re-run. If approval-key itself is unrecoverable, follow the
   'resume signing' runbook: fresh \`bao operator init\` ->
   \`mise run attestation:export-pubkey\` + commit -> re-sign the current image ->
-  \`mise run frontend:deploy <image@digest> <attestation-digest>\`."
+  \`mise run frontend:publish <image@digest> <attestation-digest> <revision>\`."
 fi
 
 # ── 3. cluster reachable + Flux reconciling cert-manager ──────────────

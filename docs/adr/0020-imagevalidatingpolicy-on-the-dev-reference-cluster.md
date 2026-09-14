@@ -20,6 +20,8 @@ planning session.
   container path only.** Rejected: the in-cluster `cv_frontend` Deployment (ADR
   0019) has no launch re-verify — nothing checks the approval attestation before
   the Pod runs. The GitOps path would be strictly weaker than the pitchfork path.
+  (The pitchfork path is retired since — [ADR 0023](0023-retire-adr-0009-pitchfork-demo.md).
+  This comparison is historical; Kyverno's admission-time check stands on its own now.)
 - **Mutate the image to a verified digest at admission instead of denying.**
   Rejected (ADR 0018): an invisible admission rewrite is worse for review than a
   denied Pod with a rendered manifest. `mutateDigest: false`, deny-only.

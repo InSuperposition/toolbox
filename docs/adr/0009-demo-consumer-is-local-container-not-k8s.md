@@ -24,3 +24,5 @@ container is retained as the path with full launch-time approval
 re-verification.
 
 **Plan B M3:** `mise run frontend:publish` (the in-cluster delivery path) reaches this same seam — it verifies the pinned attestation before rendering/pushing, so the contract holds for both the pitchfork and the k8s consumer.
+
+Status: superseded by [ADR 0023](0023-retire-adr-0009-pitchfork-demo.md).

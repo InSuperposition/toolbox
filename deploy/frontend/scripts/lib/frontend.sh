@@ -1,17 +1,21 @@
 # shellcheck shell=bash
 #
-# deploy/frontend/scripts/lib/frontend.sh — shared shell for the frontend
-# consumer's two scripts (frontend-deploy.sh / frontend-serve.sh).
-# Self-contained, no repo-level runtime lib (docs/designs/repo-structure.md
+# deploy/frontend/scripts/lib/frontend.sh — shared shell for the in-cluster
+# build/publish pair (frontend-build.sh / frontend-publish.sh, T7b3 / Plan B
+# M3). Self-contained, no repo-level runtime lib (docs/designs/repo-structure.md
 # § Naming). Source it; do not execute.
 #
-# Its whole job is the ONE allowed cross-concern edge: deploy/frontend
-# reaches the attestation verify seam. Per the DAG (repo-structure.md
-# § The concerns) that edge runs through the TOOLBOX_ATTESTATION_VERIFY env
-# seam — the same shape as TOOLBOX_APPROVAL_PUBKEY / TOOLBOX_APPROVE_KEY.
-# The default is resolved through the checkout root (mise.toml marker), not
-# a `../attestation` relative climb, so the boundary lint stays honest: a
-# resolved path is fine, a relative climb into a sibling concern is not.
+# frontend_attestation_verify is the ONE allowed cross-concern edge:
+# deploy/frontend reaches the attestation verify seam. Per the DAG
+# (repo-structure.md § The concerns) that edge runs through the
+# TOOLBOX_ATTESTATION_VERIFY env seam — the same shape as
+# TOOLBOX_APPROVAL_PUBKEY / TOOLBOX_APPROVE_KEY. The default is resolved
+# through the checkout root (mise.toml marker), not a `../attestation`
+# relative climb, so the boundary lint stays honest: a resolved path is
+# fine, a relative climb into a sibling concern is not. The rest of this
+# file (frontend_kube*/frontend_tkn/frontend_strict_digest/
+# frontend_host_image/frontend_zot_ca) is T7b3's in-cluster-build helper
+# set, no cross-concern edge involved.
 
 # frontend_repo_root — the checkout root, walking up from this lib for the
 # mise.toml marker. Depth-independent.

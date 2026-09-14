@@ -97,8 +97,9 @@ approvals — `attestation-verify.sh` checks against the committed
 `approval-key` is unrecoverable. Past approvals still verify (the pubkey is
 committed), so it is a **"resume signing"** problem, not a verification
 outage: fresh `bao operator init` → `mise run attestation:export-pubkey` +
-commit → re-sign the current image → `mise run frontend:deploy <image@digest>
-<attestation-digest>`. Blast radius: future signing only.
+commit → re-sign the current image → `mise run frontend:publish
+<image@digest> <attestation-digest> <revision>`. Blast radius: future
+signing only.
 
 ### The retired host daemon
 

@@ -808,6 +808,16 @@ given (a) real cost/complexity is unresolved and (b) is a step backward.
 consumer's restart path is currently broken, discovered via a live
 `gh api -X DELETE` + `oras manifest fetch` probe, not assumed.
 
+**✅ RESOLVED (2026-09-14), option (c) taken.** The ADR-0009 pitchfork
+demo is retired, not repaired — [ADR 0023](docs/adr/0023-retire-adr-0009-pitchfork-demo.md).
+`frontend-deploy.sh`/`frontend-serve.sh`/`[daemons.frontend]`/
+`frontend:deploy`/`current-image.txt` all deleted; the daemon was stopped
+first. The in-cluster Flux path (`frontend:publish`) is the only consumer
+now. Named cost, not papered over: the launch-time re-verify property the
+pitchfork path had (ADR 0019's distinguishing claim for it) has no
+replacement — Kyverno's admission-time check is the only re-verify point
+left, and it never re-checks an already-admitted pod.
+
 ### T-DR — declarative disaster recovery for the in-cluster OpenBao — P2, planning session
 
 **What:** design the full recovery story for the in-cluster OpenBao once the
@@ -1136,9 +1146,10 @@ appears.
 **What:** Promote the scan-clean-first posture to an enforced mechanism:
 `.openvex.json` statement(s) → `vexctl attest` (signed via an OpenBao
 Transit key, same custody as approval/provenance) → attached as an OCI
-referrer → `mise run frontend:deploy` re-runs `trivy image --vex <referrer>
+referrer → `mise run frontend:publish` re-runs `trivy image --vex <referrer>
 --severity CRITICAL --exit-code 1` against the SBOM referrer before
-accepting a digest.
+accepting a digest (the ADR-0009 pitchfork path this named is retired,
+ADR 0023 — `frontend:publish` is the only consume gate now).
 
 **Why:** an unsigned, consume-unenforced VEX statement buys no present
 enforcement benefit; this is where the benefit lands. `vexctl`

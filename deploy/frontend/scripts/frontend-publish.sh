@@ -9,7 +9,7 @@ set -euo pipefail
 #
 # Verify FIRST — nothing is rendered or pushed unless the pinned approval
 # attestation holds. This is the operator-boundary gate, the same shape as
-# `frontend:deploy` and `attestation:sign` (the verify seam is the
+# `attestation:sign`'s own verify step (the verify seam is the
 # attestation/ concern's, reached through lib/frontend.sh's
 # TOOLBOX_ATTESTATION_VERIFY seam — the one allowed cross-concern edge,
 # repo-structure.md § The concerns, ADR 0013). The render + push are
