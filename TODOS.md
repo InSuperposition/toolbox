@@ -26,7 +26,10 @@ open work):
 - *tofu modules*
   - `Retrofit vm-orbstack, cluster-k0sctl, secret-openbao to digest-pinning`
 - *Tekton/CI*
-  - `T8 — Tekton Chains provenance`
+  - `T8 — build provenance (reshaped 2026-09-14: no Tekton Chains — alpha
+    upstream; reuses the attestation-sign.sh pattern instead)`
+  - `Promotion boundary for build-scan-approve` — new, surfaced by T8's
+    eng review (Codex outside voice)
 - *Kyverno/Cilium*
   - `Cilium — planning session needed`
   - `Plan B — Timoni + Kyverno + Crossplane boundary` — shipped M1→X1→K1→M3,
@@ -40,7 +43,10 @@ open work):
 - *Tekton/CI*
   - `A real resolved-dependency-graph boundary check`
   - `T7a-follow-up — rename frontend-*/attestation-* to <tool>-<verb>`
-  - `R5 — OCI-bundle distribution of the ci/ defs`
+  - `R5 — OCI-bundle distribution of the ci/ defs` (now also owns signing
+    the bundles, folded in from the old T8 scope)
+  - `Build reproducibility (SOURCE_DATE_EPOCH, independent rebuild
+    verification)` — split out from the old T8 scope
   - `T7d — production repoint`
   - `Pin-drift guard: host mise.toml vs ci/tasks/* step images`
   - `Tekton Dashboard`
@@ -203,10 +209,12 @@ credential at all).
    does **not** cross this line; T7a's interim `gh`-token Secret is fine
    there.
 3. `zot` replaces GHCR (T7d) and needs its own identity model wired.
-4. T8 (Tekton Chains) — narrower and already scoped: adds a
-   `chains-provenance-key` Transit policy denying it `approval-key`.
-   `environments/local/openbao/main.tf` already has the empty `policies`
-   input for exactly this; T8 does not need this whole session.
+4. T8 (build provenance, reshaped 2026-09-14 — no Chains) — narrower and
+   already scoped: adds a `chains-provenance-key` Transit policy denying it
+   `approval-key`, plus a dedicated ServiceAccount + k8s-auth role scoped
+   to that key only. `environments/local/openbao/main.tf` does **not**
+   already have this — it's new work T8 adds; T8 does not need this whole
+   session regardless.
 
 **Pre-picked direction (evaluate these first, don't restart from zero):**
 
@@ -447,47 +455,202 @@ the digest-equivalent for git-sourced modules.
 **Priority:** P2
 **Depends on:** digest-as-source-of-truth Phase 1-2 landing and proving out
 
-### T8 — Tekton Chains provenance — P2, planning session
+### T8 — build provenance — P2, planning session
 
-**What:** Install Tekton Chains on the Phase-2 cluster; add a second OpenBao
-Transit key (`chains-provenance-key`) with an access policy that denies it
-`transit/sign` on `approval-key`; verify automatic signed SLSA provenance
-per build (`cosign verify-attestation --key <chains-pubkey>`).
+**Reshaped 2026-09-14** (`/plan-eng-review`, full session incl. Codex
+outside voice). Original scope was "install Tekton Chains"; that is
+**rejected** below. OCI-bundle signing and build reproducibility — both
+originally bundled into this item — are **split out** to their own entries
+(`R5`, below, and a new `Build reproducibility` entry) so each ships and
+tests independently (Gall's Law), matching how every other multi-part item
+in this file (T7, Plan B, T7c) was phased once it grew past one deliverable.
+
+**What:** a new Tekton Task (same shape as `scan-attach`/`gate` — CLI-only,
+no `script:` block) signs **BuildKit's own native SLSA provenance output**
+(not a hand-assembled predicate) with a second OpenBao Transit key
+(`chains-provenance-key`), via the exact `cosign attest` + CUE-schema
+pattern `attestation-sign.sh`/`attestation-verify.sh` already proves out for
+`approval-key`. **The Task resolves the immutable digest itself
+(`oras resolve`, the same pattern `attestation-sign.sh` already uses)
+before calling `cosign attest`** — `cosign attest --predicate` builds its
+statement subject from whatever image ref it's given, it does **not**
+automatically inherit BuildKit's own subject (Codex outside-voice, round
+2), so skipping this step would silently reintroduce the exact tag-race
+bug the hand-assembled-predicate approach was rejected for, below. The
+attestation is **evidence-only** — a referrer a human reads alongside the
+SBOM/scan report, same tier as those two, wired into
+`attestation-sign.sh`'s evidence display. **Selected by predicate type, not
+artifactType alone** (round-2 finding — approval and provenance
+attestations share the same Sigstore bundle artifactType, so the
+`last`-of-artifactType pattern SBOM/scan use would let an existing
+approval satisfy the new provenance check, including on a pre-T8 image).
+It is **not** a second enforced gate; `approval-key` remains the one real
+gate, per the design doc's existing 3-tier model
+(`docs/designs/digest-as-source-of-truth.md` § Architecture).
+
+**Two failure-mode decisions resolved (2026-09-14, second review pass):**
+- **Missing provenance evidence hard-blocks human approval** — same exit-4
+  path `attestation-sign.sh` already uses when SBOM or scan evidence is
+  missing on a digest. Consistent: "evidence-only" means provenance doesn't
+  gate the *image*, but it still gates the *approval step* — an approver
+  should never see partial evidence without being stopped. Consequence,
+  named honestly: pre-T8 images cannot be approved after this ships without
+  a rebuild (cheap on this repo's single-consumer scale).
+- **BuildKit producing no provenance output at runtime fails the Task
+  closed** — same severity tier as the already-decided OpenBao-unreachable
+  case and the existing CRITICAL scan gate. One failure-handling story for
+  the whole Task: any way it can't produce a signed attestation stops the
+  PipelineRun, never a silent gap discovered later.
 
 **Why:** the third supply-chain leg (how the build happened), signed
-mechanically.
+mechanically — reusing infrastructure that already exists and is already
+tested, instead of a new dependency.
+
+**Rejected: installing Tekton Chains.** Checked directly against upstream:
+"Tekton Chains is working towards a formal beta release. Until then, all
+features are technically considered alpha"
+([github.com/tektoncd/chains/blob/main/releases.md](https://github.com/tektoncd/chains/blob/main/releases.md)).
+Every other tool in this stack is pinned deliberately by maturity (Cilium's
+Beta status is named and gated the same way) — Chains gets the same
+treatment. The desired outcome (a signed provenance attestation) does not
+require the Chains controller: the repo's own attestation pattern already
+gets there with zero new controllers and zero alpha dependency.
+
+**Rejected: hand-assembling a "SLSA-shaped" predicate.** The first draft of
+this reshape proposed 4 custom fields (digest, source SHA, builder ID,
+timestamp) validated by CUE. Codex's outside-voice review (this session)
+caught two real problems with that: (1) no real build digest was captured
+— the pipeline addresses images by `$(APP_REVISION)` tag
+(`ci/tasks/buildkit-build.yaml`), so a hand-typed predicate would describe
+a moving target, not a pinned build; (2) 4 custom fields passing CUE
+validation is not a real SLSA v1.1 predicate (missing both repo identities
++ resolved commits, the build definition, a run identifier —
+[slsa.dev/spec/v1.1/provenance](https://slsa.dev/spec/v1.1/provenance)) —
+misleading to call it "SLSA-shaped." **Fix: sign BuildKit's own generated
+provenance output** ([moby/buildkit SLSA provenance
+docs](https://github.com/moby/buildkit/blob/master/docs/attestations/slsa-provenance.md))
+instead — real schema, no handwritten generator to maintain (the correct
+digest is resolved separately at sign time, above — BuildKit's own output
+does not guarantee it on its own, round-2 finding). **First implementation
+step:** a spike confirming the pinned `moby/buildkit:rootless` digest
+supports provenance output and how it's exposed to a downstream Task (an
+image-index attestation manifest vs. a separately fetchable artifact) —
+unverified, do this before writing the signing Task. **Spike pass
+condition, tightened (round 2):** not "an attestation exists" — the
+emitted provenance must contain both repo identities **and** their
+resolved commits (BuildKit's documented local-input provenance can omit
+both when given local directories instead of a git URL — this pipeline's
+exact shape, `ci/tasks/buildkit-build.yaml`), a non-empty builder ID, and a
+real predicate version. If the local-input mode can't produce these, the
+hand-assembled-predicate fallback (rejected above) gets reconsidered with
+real data, not assumption.
+
+**Auth wiring (explicit, not left implicit — Codex outside-voice finding):**
+a dedicated ServiceAccount + OpenBao k8s-auth role scoped to **both**
+`transit/sign/chains-provenance-key` **and** `transit/keys/chains-provenance-key`
+(read) — round-2 finding: `sign` alone omits the public-key read cosign's
+KMS client needs just to run at all
+([sigstore's pinned hashivault client](https://github.com/sigstore/sigstore/blob/v1.10.8/pkg/signature/kms/hashivault/client.go)),
+so the narrower grant would have silently broken the whole Task. Plus a
+**live** test (not tofu-mocked) that actually authenticates as the scoped
+ServiceAccount and signs successfully, alongside a negative test proving
+that role is denied `transit/sign` on `approval-key` — mirrors the
+anti-rotation-guard tests `approval-key` already has
+(`environments/local/openbao/tests/phase_c.tftest.hcl`), but a mocked
+`.tftest.hcl` case alone cannot prove runtime authorization actually
+works, only that the tofu config is shaped correctly. This is a new,
+narrowly-scoped auth path; `flux_sops`'s existing k8s-auth role
+(`main.tf:188-210`) is untouched.
+
+**Trust model (accepted, not deepened):** who can invoke the signing Task
+with what inputs is bounded by the same threat model the `ci` namespace
+already operates under — single-operator OrbStack VM, no RBAC because none
+is needed at this blast radius (`ci/runtime/namespace.yaml`). Signing
+BuildKit's own output (rather than a script picking arbitrary values)
+keeps the producer honest without a new trust mechanism.
 
 **Corrected 2026-09-14:** `environments/local/openbao` does **not** already
 have an empty `policies` input — checked against the actual `.tf` files.
 The only extension point that exists today is `var.transit_keys`
 (`variables.tf:102-114`, default `[]`, consumed at `main.tf:160-170`). A
-generic `policies` variable would need to be added when T8 is built, not
-assumed present.
+generic `policies` variable is new work this item adds, not something
+already present.
 
-**First task — RESOLVED:** the loopback blocker is gone. The in-cluster
-OpenBao (ADR 0016) serves pods over TLS at
-`https://openbao.openbao.svc.cluster.local:8200` with k8s-ServiceAccount
-auth. Chains adds a `chains-provenance-key` Transit key + a scoped policy
-(deny `transit/sign` on `approval-key`) + a `chains` k8s-auth role — the
-`transit_keys` extension point on `environments/local/openbao` is the seam
-for the key; the policy variable is new work, not existing.
+**Operational Lifecycle Trace** (`chains-provenance-key`, CLAUDE.md's
+planning gate — no new long-lived process, since Chains itself is
+rejected; only a new secret):
+- **Bootstrap:** one more entry in `var.transit_keys` (same mechanism
+  `approval-key` and `sops` already use) + the new scoped k8s-auth role +
+  policy, applied by the existing `environments/local/openbao` tofu unit.
+- **Process restart / machine reboot:** identical to `approval-key` —
+  restore-managed key material survives a pod restart; the tofu-managed
+  role/policy re-applies from state, no manual step.
+- **Disaster (raft store lost) — corrected 2026-09-14, round 2:** does
+  **NOT** simply inherit `approval-key`'s story, as originally claimed.
+  `approval-key` is restore-managed (created by the raft snapshot restore
+  itself); `chains-provenance-key` is **tofu-created** — a re-`apply` after
+  a lost raft store can mint a *different* key under the same name,
+  silently breaking every past provenance attestation's verifiability with
+  no warning. **Fix, required at rollout, not deferred:** the host
+  bootstrap script's snapshot/recovery bundle (`openbao-bootstrap.sh:182`)
+  must explicitly capture this key on the run that provisions it, and
+  recovery is proven by a **fingerprint-equality test** (the restored
+  key's public half matches the committed one) — not assumed identical to
+  `approval-key`'s already-proven story.
 
-**SPIRE checked, not viable yet:** Tekton's own docs state plainly, as of
-this check, "SPIRE support is not yet functional" — TaskRun-result signing
-via SPIRE is alpha, four phases planned, only phase 1 (a SPIRE client)
-shipped upstream ([tekton.dev/docs/pipelines/spire](https://tekton.dev/docs/pipelines/spire/)).
-T8 proceeds on the `chains-provenance-key` Transit-key approach above, no
-SPIRE dependency. Revisit trigger: that page drops the "not yet
-functional" banner. See `SPIRE — phased workload-identity rollout`
-(below) for the full per-boundary research this verdict is drawn from.
+**Dependency, corrected:** was "T7 (all of T7a–T7d) shipped" — wrong. T7d
+(production repoint) is its own indefinitely-deferred item (needs
+`cluster-k0sctl`, unbuilt, no ETA). This work runs on the **dev** cluster,
+same as K1's Kyverno `ImageValidatingPolicy` already does without T7d.
 
-**Also in T8:** sign the `ci/` OCI bundles with a dedicated key
-([ADR 0014](docs/adr/0014-tekton-defs-are-oci-bundles-in-ci.md)); land
-byte-level build reproducibility (`SOURCE_DATE_EPOCH`,
-`--output rewrite-timestamp=true`) alongside provenance + independent
-rebuild verification.
+**Related — surfaced by this review, own entry:** `Promotion boundary for
+build-scan-approve` (below) — `buildkit-build` pushes the image before
+`scan-attach`/`gate`/this new Task even run, so a CRITICAL-vuln or
+unsigned image briefly exists in the registry regardless of gate outcome.
+Pre-existing gap (shared with the scan gate), not introduced by this item,
+not fixed by it either — tracked separately.
 
-**Priority:** P2 · **Depends on:** T7 (all of T7a–T7d) shipped.
+**Priority:** P2 · **Depends on:** T7a–T7c shipped (all shipped; T7d
+explicitly NOT required, see above).
+
+### Promotion boundary for build-scan-approve — P2, planning session
+
+**What:** design a real promotion boundary for the `build-scan-approve`
+Pipeline — today `buildkit-build` pushes the image
+(`ci/tasks/buildkit-build.yaml`) before `scan-attach`, `gate`, or T8's new
+provenance-sign Task even run. A CRITICAL-vuln or unsigned image is
+briefly (or, on a failed run, indefinitely) present in the registry
+regardless of what any gate later decides.
+
+**Why:** closes a real zero-trust gap this repo's design doc doesn't
+currently claim to have. `gate.yaml`'s blocking exit code stops the
+*PipelineRun*, not the image's registry presence — a distinction the repo
+has not stated plainly anywhere until this review.
+
+**Candidates to weigh:** a staging repo path the image lands in first,
+promoted (re-tagged/re-pushed, or a manifest-list flip) to the real path
+only after every gate passes; a registry-side quarantine/retention policy;
+zot-native support for this pattern (worth checking before building one).
+
+**Context:** surfaced by Codex's outside-voice review of the T8 plan-eng-
+review (2026-09-14) — not a new defect, a pre-existing gap in the shipped
+`scan-attach`/`gate` design that T8's review happened to notice while
+checking a related claim.
+
+**Depends on:** nothing blocking. **Priority:** P2 — affects the existing
+scan gate, not just T8; should land before or alongside T8's provenance
+work since it's the same pipeline.
+
+### Build reproducibility (SOURCE_DATE_EPOCH, independent rebuild verification) — P3
+
+**What:** land byte-level build reproducibility
+(`SOURCE_DATE_EPOCH`, `--output rewrite-timestamp=true`) plus independent
+rebuild verification. **Split out from the old T8 scope** (2026-09-14) —
+unrelated pacing to provenance signing, no reason to block on it or be
+blocked by it.
+
+**Depends on:** T8's provenance work landing first is not required: this
+is orthogonal (build determinism, not signing). **Priority:** P3.
 
 ### Cilium — planning session needed — P2
 
@@ -602,8 +765,9 @@ policy; `chainsaw-{kyverno,frontend}` pass post-merge.
 
 **Depends on:** Plan A merged (done, `a3b5a24`). **Priority:** P2. Related:
 **T-DR** overlaps K1's snapshot needs / O5's `snapshot_schedule`; **T8**
-(Tekton Chains) will need a `policies` extension point that does not exist
-yet (see T8's entry — corrected 2026-09-14) — O4 should account for it,
+(build provenance, reshaped — no Chains) will need a `policies` extension
+point that does not exist yet (see T8's entry — corrected 2026-09-14) —
+O4 should account for it,
 not assume it's already there to preserve.
 
 ### Kyverno module — accumulating design inputs — P2/P3, planning session
@@ -719,6 +883,13 @@ per-run def pinning is unfinished until this ships. **Trigger:** a 2nd
 uses whatever `ci-{tasks,pipelines}` last reconciled from `main` —
 acceptable for a single-operator dev cluster, **not** a pin.
 
+**Folded in from the old T8 scope (2026-09-14):** once the bundles exist,
+sign them with a dedicated key
+([ADR 0014](docs/adr/0014-tekton-defs-are-oci-bundles-in-ci.md)). Moved
+here rather than staying in T8 because it was silently depending on this
+item shipping first with no recorded trigger — the correct trigger is R5's
+own, above, not T8's.
+
 ### T7d — production repoint — deferred
 
 **T7d — production repoint (DEFERRED).** Trigger = `environments/production/`
@@ -774,7 +945,8 @@ ADR 0023 — `frontend:publish` is the only consume gate now).
 enforcement benefit; this is where the benefit lands. `vexctl`
 (`aqua:openvex/vexctl`) is already pinned.
 
-**Priority:** P3 · **Depends on:** T8 (Chains signing infra).
+**Priority:** P3 · **Depends on:** T8 (build-provenance signing infra —
+reshaped 2026-09-14, no Chains involved).
 
 ### Publish a multi-arch image once a real amd64 consumer exists
 
@@ -859,7 +1031,8 @@ next chart-pin gate touch, or a dedicated tooling-consolidation session.
 
 ### Upgrade cosign signing to public trust (Fulcio/keyless or published key)
 
-**What:** Move both cosign keys (approval, Chains provenance) from
+**What:** Move both cosign keys (approval, build provenance — T8, no
+Chains) from
 mechanically-required-only signing (OpenBao Transit-backed, unpublished)
 to a publicly verifiable trust chain — Fulcio/keyless signing, or at
 minimum a published public key with a real registration/verification story
