@@ -125,6 +125,24 @@ spec:
         tag: "v1.19.1@sha256:67a48e62a8d8f8120c86914ff822b90017c54054c7b64ef8a1555645e9d9761e"
     reportsController:
       replicas: 1
+      # T7c R3: the background PolicyReport scanner runs the same
+      # attestation-verification code as admissionController but is a
+      # SEPARATE pod with its own trust store — the admissionController
+      # mount above does not cover it. Found live: PolicyReports showed
+      # ERROR (x509: unknown authority) against zot images even though
+      # actual admission (the enforcement path) verified correctly. Same
+      # ConfigMap, same mount shape as admissionController above — see that
+      # block's comment for why `extraVolumes`/`extraVolumeMounts`, not
+      # `caCertificates.volume`.
+      extraVolumes:
+        - name: toolbox-ca-bundle
+          configMap:
+            name: toolbox-ca-bundle
+      extraVolumeMounts:
+        - name: toolbox-ca-bundle
+          mountPath: /etc/ssl/certs/ca-certificates.crt
+          subPath: ca-certificates.crt
+          readOnly: true
       image:
         registry: "ghcr.io"
         tag: "v1.19.1@sha256:c0eee97b9b44a0dd35805d56b358fa52548480f79d4944602b9609538eccd64c"
