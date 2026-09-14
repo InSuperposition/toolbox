@@ -1,185 +1,118 @@
 # TODOS
 
-## Debt
+Open work, phase sequencing, and planning-session triggers (CLAUDE.md §
+Docs layout). Completed work lives in commit messages, PRs, and ADRs —
+this file keeps only a git-log-density pointer to it, not a diary.
 
-### Local OpenBao unseal-key storage — ✅ DONE (ADR 0010 + 0011)
+## Table of contents
 
-Resolved on `feat/openbao-machine-global-and-gate`: one machine-global
-pitchfork daemon that auto-unseals from a `0600` `seal.key` file; the root
-token and recovery key are `0600` files too; `mise [env]` injects
-`VAULT_TOKEN`; `fnox` + the keychain are removed from the stack entirely.
-No memorized secret, no recurring manual step. `pitchfork.toml`-rewrite and
-`fnox.toml`-rewrite hazards documented (F7/F8). `gh` token expiry is still
-open — folded into "Auth + multi-member DX".
+**Reference / runbooks** (no priority band — standing procedures, not
+open work):
 
-### Scripts-policy audit of the T5 / T5b shell — reduction pass — ✅ DONE
+- `How to rotate the T5 approval-key` — the rotation procedure, done once
+  so far.
 
-Round 1 (`feat/openbao-machine-global-and-gate`): `hk.pkl` + `mise run
-check` gate (was missing entirely); `export-approval-pubkey.sh` deleted →
-one-line mise task; `openbao-preflight.sh` advice trimmed; `bootstrap` /
-`reset` simplified (no `fnox`, no `security`, atomic file writes).
+**P2**
 
-Round 2 (this eng-reviewed reduction pass — 3 pushes):
+- *secrets/auth*
+  - `Dev CA (toolbox-dev-ca) rotation runbook + rotationPolicy decision`
+  - `Auth + multi-member DX` — deferred, trigger + pre-picked direction
+    recorded (includes the folded-in gh token expiry gap)
+  - `T-DR` — declarative disaster recovery for the in-cluster OpenBao
+  - `zot registry auth` — credential-free today, real auth deferred
+  - `Flux / registry CA trust — could a mesh solve this structurally?`
+- *tofu modules*
+  - `Retrofit vm-orbstack, cluster-k0sctl, secret-openbao to digest-pinning`
+- *Tekton/CI*
+  - `T8 — Tekton Chains provenance`
+- *Kyverno/Cilium*
+  - `Cilium — planning session needed`
+  - `Plan B — Timoni + Kyverno + Crossplane boundary` — shipped M1→X1→K1→M3,
+    Deferred table is the open half
+  - `Kyverno module — accumulating design inputs`
+- *cv_frontend hosting*
+  - `Decide public hosting for cv_frontend`
 
-Eng-reviewed (+ Codex outside voice), 3 pushes on `main`, plan
-`~/.claude/plans/polymorphic-twirling-minsky.md`:
+**P3**
 
-- **Push 1** (`ebdaf92`) — `attestation-verify.sh`: deleted the
-  `case "$err" in` cosign-stderr classifier (a cosign bump would silently
-  reclassify a trust failure). One terminal "attestation verification
-  failed" line + cosign's own output to the log; cosign's
-  `--type/--check-claims/--digest` call unchanged (Codex: don't
-  re-implement it in jq). attestation-verify.bats 9→11.
-- **Push 2** (`813509b`) — `attestation-sign.sh` §7:
-  `cosign attest --no-upload --bundle` + `oras attach
-  --disable-path-validation --format go-template --template '{{.digest}}'`
-  → deterministic `ATT_DIGEST`; deleted the `oras discover` diff +
-  predicate-match candidate loop (~35 lines, net −21). `oras attach` sets
-  `artifactType` but not the `predicateType` annotation — nothing in-repo
-  reads it (consumer decodes the DSSE layer; ADR 0006).
-- **Push 3** — consistency only. `openbao-reset.sh` stale
-  `bootstrap-openbao.sh` comments → `openbao-bootstrap.sh`.
-  **Commit C (frontend readiness) was DROPPED:** the plan's premise
-  ("redundant poll, move to config") is wrong — pitchfork 2.24's `ready_*`
-  poll is UNBOUNDED (verified: a never-ready `ready_cmd` hangs `pitchfork
-  restart` forever), and `pitchfork restart --delay 0` + no daemon
-  readiness broke the happy-path [docker] deploy tests (container not
-  observed serving within the poll window). Current state — `ready_port =
-  44100` on the daemon + a 30s poll in `frontend-deploy.sh` — works and is
-  tested. Revisit only if the cv_frontend crash actually hangs a deploy in
-  practice (Remix likely binds the port then crashes on a request →
-  `ready_port` passes → the poll reports "did NOT come ready", no hang).
+- *Tekton/CI*
+  - `A real resolved-dependency-graph boundary check`
+  - `T7a-follow-up — rename frontend-*/attestation-* to <tool>-<verb>`
+  - `R5 — OCI-bundle distribution of the ci/ defs`
+  - `T7d — production repoint`
+  - `Pin-drift guard: host mise.toml vs ci/tasks/* step images`
+  - `Tekton Dashboard`
+  - `T10 — VEX hardening`
+  - `Publish a multi-arch image once a real amd64 consumer exists`
+- *Kyverno/Cilium*
+  - `Kyverno ImageValidatingPolicy for real admission-time enforcement` —
+    now specifically the production-cluster instantiation
+- *tooling cleanup*
+  - `Remove crane from the stack entirely`
+  - `Upgrade cosign signing to public trust`
 
-**KEPT (rejected reductions):** `openbao-preflight.sh` (5-state floor,
-reviewed 4c), `attestation-sign.sh` orchestration, `frontend-serve.sh` (the
-`docker run &` + trap dance IS the documented-correct shape — pitchfork
-`exec docker run` orphans the container), `openbao-{reset,snapshot}.sh`,
-`check-coverage.sh`, the `sign_image`/`run_sign` 6-line overlap (`tests/lib`
-can't name a concern — `boundary-testlib-concern-ref`), the `TOOLBOX_*`
-seams.
+## Recently closed
 
-### `openbao-bootstrap.sh` OpenBao-identity guard — ✅ DONE (fix/openbao-identity-guard)
+Newest first. Git-log density — commit/PR references, not a transcript.
+Full detail lives in the referenced PRs, ADRs, and commit messages.
 
-**Was:** `openbao-bootstrap.sh` `bao status … '.initialized == true'`
-treated ANY initialised `bao` on `$LISTEN` as ours → a foreign
-`bao server` on `:8200`, or a stale per-worktree daemon
-(`toolbox-sealed-8200-stale-worktree`), got the 2nd `tofu apply` + pubkey
-export.
+- **T-ADR9 — ADR-0009 pitchfork demo had no reachable registry — RESOLVED**
+  (PR #45 escalation → PR #46 fix). T7c R4's GHCR package deletion broke the
+  ADR-0009 pitchfork demo's restart path (no reachable registry, and no
+  route to the in-cluster zot either). Resolved by retiring the demo
+  outright — [ADR 0023](docs/adr/0023-retire-adr-0009-pitchfork-demo.md):
+  `frontend-deploy.sh`/`frontend-serve.sh`/`current-image.txt` deleted,
+  `frontend:publish` is the only consumer now. Named cost kept, not papered
+  over: **the launch-time re-verify property has no replacement** —
+  Kyverno's admission-time check is the only re-verify point left, and it
+  never re-checks an already-admitted pod.
 
-**Fix:** before skipping init on `initialized == true`, require
-`$STATE_DIR/root.token` to authenticate against the running instance
-(`bao token lookup`). Miss → `exit 1` naming the likely cause, with
-`pitchfork list` / `ps aux | grep '[b]ao server'` hints. Negative-space:
-no new state file, no `cluster_id` fingerprint — reuses `root.token`,
-which must be valid for the rest of the script anyway. New bats case
-(openbao-bootstrap.bats 8→9): garbage `root.token` post-init → exit 1, no
-Transit provisioning.
+- **T7 — Tekton pipeline + distribution — DONE.**
+  - T7a — rootless BuildKit feasibility spike + `ci/` concern extraction
+    (PR #9); T7a-follow-up hygiene renames/lint/bats (PR #11) — its one
+    still-open item (the `frontend-*`/`attestation-*` rename) is promoted
+    to its own section below.
+  - T7b0–T7b3 — interim zot (PR #14), in-cluster git-clone→build Pipeline +
+    the hermetic-build fix (Z2+N1+N4, PR #15), scan-attach (PR #16), the
+    blocking CRITICAL gate + CUE-rendered `PipelineRun` (PR #17). Live
+    end-to-end demo 2026-09-09.
+  - T7c Increments 0/1a/1b/2/3 — Flux-managed Tekton controller install,
+    self-managing flux-operator, `ci/{runtime,tasks,pipelines}` + zot
+    reconciled from `main`, ADR 0015 doc sweep (PRs #18–#22).
+  - T7c Increment 4 — in-cluster OpenBao raft StatefulSet, ADR 0016
+    (PRs #23–#30).
+  - T7c distribution tail R1a→R1b-ii-c — HTTPS zot, trust-manager CA
+    bundle, host CA trust, the `crane`→`oras` swap (PRs #36–#40).
+  - R2/R3/R4 (2026-09-14) — repointed M3 delivery to zot (PR #41); one
+    documented end-to-end acceptance run, and a live-found
+    `kyverno-reports-controller` CA gap **fixed in PR #42**; the GitHub
+    Actions build workflow + both GHCR packages retired (PRs #43–#44). The
+    T7 arc is fully closed. R5 and T7d are the two deliberately-deferred
+    tails — promoted to their own sections below, not lost.
+  - The other live finding worth keeping: R4's GHCR deletion broke the
+    ADR-0009 demo's restart path the same day — see T-ADR9, above.
 
-## Infrastructure
+- **T9a — `mise run check` in CI — DONE** (PR #7, `7ae5ad0`).
+  `.github/workflows/check.yml` runs the full `hk` `check` hook
+  (shellcheck, tofu, cue, ls-lint, ast-grep, bats, check-coverage) on every
+  push/PR, report-only, no branch protection (solo repo). **Revisit
+  trigger:** a second committer joins the repo — then a PR-gated
+  `required_status_checks` flow earns its keep.
 
-### Repo restructure — strict ownership boundaries — ✅ DONE (P0–P5)
+- **Repo restructure — strict ownership boundaries — DONE (P0–P5).**
+  File-placement rule applied repo-wide in phased PRs, `mise run check`
+  green at every phase. Design + rationale: ADR 0012, ADR 0013,
+  `docs/designs/repo-structure.md`.
 
-**What:** Apply the file-placement rule (`docs/designs/repo-structure.md`,
-ADR 0012/0013) repo-wide in phased typed PRs. Each phase = one PR (P1 = up
-to 4), `mise run check` green on its own.
+- **Scripts-policy audit reduction pass — DONE** (Round 1 on
+  `feat/openbao-machine-global-and-gate`; Round 2 — 3 pushes on `main`:
+  `ebdaf92`, `813509b`, a consistency-only push 3). Kept
+  `openbao-preflight.sh`'s 5-state floor, `attestation-sign.sh`'s
+  orchestration shape, and `frontend-serve.sh`'s `docker run &` + trap
+  dance as reviewed-correct; dropped the cosign-stderr classifier and the
+  `oras discover` predicate-diff loop (~35 lines, net −21).
 
-Reviewed plan (eng review + 2 codex passes, `NO UNRESOLVED DECISIONS`):
-`~/.claude/plans/repo-restructure-boundaries.md` — the authority for
-per-task files, verification, and rationale. Summary here; do not
-duplicate detail.
-
-| task | phase | what | status |
-|---|---|---|---|
-| T1 | 0 | `repo-structure.md` + CLAUDE.md § File Placement + ADR 0012/0013 — no code | ✅ done |
-| T2a | 1a | pin `ls-lint` (`aqua:loeffel-io/ls-lint`) + `ast-grep` (`aqua:ast-grep/ast-grep`); `.ls-lint.yml` + `sgconfig.yml` + `rules/boundary-*.yml` for the **current** tree; wire both into `hk.pkl` fast layer | ✅ done |
-| T2b | 1b | `tests/lib/{scratch,registry}.bash`; per-`tests/`-dir `helper.bash` loader (F2 resolved simpler — no `setup_suite.bash` / `BATS_LIB_PATH`); `deploy/frontend/tests/` → `deploy/frontend/scripts/tests/` | ✅ done |
-| T2c | 1c | `tests/check-coverage.sh` (disk vs `manifest.txt` vs `hk … --plan --json`) + `tests/check-coverage.bats` mutation test; `tofu-init` ordered prereq (`depends`) in `hk.pkl`; clean-checkout validation | ✅ done |
-| T2d | 1d | `tests/lib/ports.bash`; OpenBao bats take a free port (was fixed :8397-8399); `run.sh`/`consume.sh` gain `TOOLBOX_FRONTEND_{HOST_PORT,CONTAINER}` seams (baked into `scratch_frontend`'s `pitchfork.toml` env); dropped `bootstrap.bats` machine-wide `pitchfork clean`; scoped `deploy.bats` teardown | ✅ done |
-| T3 | 2 | OpenBao `git mv` → `environments/local/{openbao,scripts}/`, `source = "./openbao"` (label kept — `tofu plan` = No changes), `lib/openbao.sh` + `openbao-snapshot.sh` extracted, `hk` tofu globs widened to `environments/**`, `modules/README.md`, `.ls-lint.yml` `**/scripts/lib` override, openbao bats adopt `scratch_copy` + `pitchfork clean --daemon` | ✅ done |
-| T4 | 3 | `openbao-*` mise tasks → `local:openbao:*` (+ new `local:openbao:stop`); every `mise run openbao-*` ref rewritten (scripts, bats, docs, ADRs, pitchfork.toml). `approve`/`consume`/`verify-approval`/`export-approval-pubkey` → `attestation:*`/`frontend:*` deferred to Phase 4 (renamed with their script moves). | ✅ done |
-| T5a–d | 4 | **ONE PR** (commits 4a→4d) — extract `attestation/` (sign/verify/preflight/cue/pub + `lib/attestation.sh`); split `deploy/frontend/` (`frontend-deploy.sh` / `frontend-serve.sh` + `lib/frontend.sh`'s `TOOLBOX_ATTESTATION_VERIFY` seam, default resolved via the mise.toml marker — no lint exception); `openbao-preflight.bats` **5-state** + corrected static-seal advice (init check before seal check); `openbao-bootstrap.sh` calls `mise run attestation:export-pubkey` (drops the `REPO_ROOT` climb + both ast-grep exceptions). Real CI run 34127037520 green (21/21). | ✅ done |
-| T6 | 5 | docs-accuracy sweep — `digest-as-source-of-truth.md` (paths, task names, the machine-global-daemon layout, 5-state preflight, the `TOOLBOX_ATTESTATION_VERIFY` seam, no-keychain honesty); ADRs 0004/0005/0006/0009/0011 name refs; `main.tf` comments (`openbao-bootstrap.sh`); link-check clean. | ✅ done |
-
-**Phase 1b–1d carry-overs** (not blockers):
-
-- ~~`environments/local/tests/*.bats` adopt `scratch_copy` in Phase 2~~ —
-  done (Phase 2 moved the dir to `environments/local/scripts/tests/` and
-  they now use `scratch_copy`).
-- ~~`tests/lib/assert.bash` not created yet~~ — created in T9a
-  (`file_mode()`, GNU+BSD `stat`), sourced by
-  `environments/local/scripts/tests/helper.bash`. Other `[ "$status" -eq
-  N ]` checks stay as-is.
-- ~~**C4** (`attestation/` scratch + a default-`TOOLBOX_ATTESTATION_VERIFY`
-  case)~~ — done in Phase 4b: `scratch_frontend` copies both `attestation/`
-  + `deploy/frontend/` + a `mise.toml` marker, every scratch test runs on
-  the un-overridden seam, and `frontend-serve.bats` has an explicit
-  positive default-seam case.
-- `frontend_isolation` names the container `toolbox-frontend-test-$$-<n>`;
-  the real deploy still defaults to `toolbox-frontend` / host port 44100.
-- ~~**Re-run the clean-checkout check after Phase 2** (C5)~~ — T9a's
-  `.github/workflows/check.yml` runs `mise install && mise run check` on a
-  fresh runner checkout every push/PR; run 34144986089 green covers this.
-- `check-coverage.sh` cross-checks `hk`'s scheduled **count** of `.bats`
-  files, not the exact filenames (hk's `--plan --json` gives `fileCount`,
-  not a file list). A same-count swap (drop A, add B, no manifest edit)
-  would pass the count check but fail the disk-vs-manifest diff, so it is
-  still caught — just by view 2, not view 3.
-
-**Lint exceptions — all cleared as of Phase 4d:**
-
-- ~~`.ls-lint.yml` ignores `run.sh` / `approve.sh` / `consume.sh`~~ — gone
-  (4a renamed `approve.sh`/`verify-approval.sh` → `attestation-*`; 4b
-  renamed `run.sh`/`consume.sh` → `frontend-serve.sh`/`frontend-deploy.sh`).
-  `.ls-lint.yml` has **no** `ignore:` entries for source files now.
-- ~~`rules/boundary-shell-{deploy-ref,concern-climb}.yml` exclude
-  `openbao-bootstrap.sh`~~ — gone (4d: it calls `mise run
-  attestation:export-pubkey`, no `deploy/` ref, no `REPO_ROOT` climb).
-  `boundary-shell-concern-climb.yml` still ignores `**/tests/**` (test
-  fixtures legitimately reach across concerns); that is permanent, not an
-  exception.
-- **HCL not covered.** `ast-grep` ships no Terraform grammar, so the tofu
-  unit's forbidden edges are not machine-checked. Folds into the deferred
-  resolved-graph planning session below.
-
-**Merge order:** all phases (P0–P5) landed on `main` (solo repo). Done.
-
-**Effort:** ~1d human total (CC-assisted ~6h). **Priority:** P1.
-**Depends on:** nothing.
-
-### A real resolved-dependency-graph boundary check — planning session
-
-**What:** Run `/plan-eng-review` on replacing (or backstopping) the
-`ls-lint` + `ast-grep` boundary **lint** with a check that validates the
-allowed-edge set against a **resolved** dependency graph, not literal path
-strings.
-
-**Why:** the lint shipped in the restructure (T2a) is honestly scoped — it
-catches literal path strings, relative climbs, and `source`/exec of a
-literal. It does **not** catch a path assembled from variables,
-`source "$x"` resolution, or cross-language task references (its `ast-grep`
-rules are per-language; TOML/Pkl task refs are uncovered). A boundary
-violation built from a variable passes the gate today.
-
-**Candidates to evaluate:** a generated manifest validated by
-`conftest`/OPA (Rego); `tofu graph` for the HCL layer; whether CUE or
-Timoni (already in the stack) can express and validate the edge set; a
-purpose-built resolver. Weigh each against "one more tool" — the lint may
-be enough paired with review.
-
-**Already covered (Plan B X1, ADR 0018):** the one hard tofu edge — no
-`kubernetes_*` / `kubernetes_manifest` resource — is the `no-kubernetes-tf`
-hk step (`tests/check-tf-boundary.sh`, a `git grep`). This session backstops
-only that one; the rest of the HCL layer stays review-only.
-
-**Context:** Codex 2nd-pass finding CX2, user decision CX1=A (ship the
-scoped lint + documented limits + this deferred session).
-`docs/designs/repo-structure.md` § Enforcement / Honest scope.
-
-**Effort:** planning ~1 session; implementation unknown until the approach
-is chosen.
-**Priority:** P3
-**Depends on:** the restructure landed (the lint is the thing being
-backstopped).
+## Open work
 
 ### How to rotate the T5 `approval-key` (procedure — done once, 2026-09-06)
 
@@ -246,6 +179,13 @@ single operator. The 2026-09-06 T5 eng review filed this as
 known-deferred P2, not urgent. The only forcing function for the human gap
 is a second approver.
 
+**Folded in from the retired "Local OpenBao unseal-key storage" section:**
+its one live loose end was gh token expiry — the personal `gh auth token`
+copied into the pipeline-pod's `docker-registry` Secret (the row above) has
+no rotation/renewal story; it silently expires with no scheduled renewal.
+Covered by trigger 2 below (a shared runner / CI service account is the
+real fix, not a manual re-copy).
+
 **Reopen when ANY of:**
 1. A second person needs to sign an approval verdict (the real trigger for
    the human gap).
@@ -286,538 +226,6 @@ interim auth: `attestation-sign.sh` signs with the root `VAULT_TOKEN` (the
 **Effort (when reopened):** planning ~1 session; implementation ~1-2d human
 **Priority:** P2 · **Depends on:** a trigger above.
 
-### T7 Phase-2 (Tekton) — re-cut, planned 2026-09-08
-
-**Planning done.** `/plan-eng-review` (2026-09-08, ×2) + Codex outside voice
-re-cut the arc around a **composable `ci/` concern**. T7a plan:
-`~/.claude/plans/t7a-buildkit-in-cluster-proof.md`. **T7b re-cut plan (2026-09-08):**
-`~/.claude/plans/t7b-pipeline-recut.md`. Key decisions
-([ADR 0014](docs/adr/0014-tekton-defs-are-oci-bundles-in-ci.md)):
-
-- Builder = **BuildKit, daemonless, rootless** (`buildctl-daemonless.sh` in
-  the TaskRun pod — no buildkitd Deployment/Service). Chosen over
-  `docker buildx --driver=kubernetes` (heavier — manages a pod) and
-  kaniko/buildah. Registry cache, not a PVC. **KEDA scale-to-zero dropped** —
-  no standing builder to scale.
-- Reusable Tekton defs live in a new top-level **`ci/`** concern, **not
-  `modules/`**. Per-consumer instantiation lives in `deploy/<consumer>/`.
-  **The distribution mechanism** (`tkn bundle push` + bundles-resolver vs
-  Flux `OCIRepository`) is **decided in the T7c pre-plan**, not T7b — whichever
-  reconciler T7c picks owns the digest pin + cosign-signing the defs
-  (2026-09-08 eng review). ADR 0014's intent (digest-pinned, cosign-signable
-  defs, version = digest) stands; only the push mechanism is deferred.
-- Tekton controller + `zot` installs are `environments/local/` concerns
-  (interim `mise` task now, Flux `OCIRepository`/`Kustomization` in T7c), not `ci/`.
-- byte-level build reproducibility → **T8** (with Chains provenance).
-- `deploy/frontend/Dockerfile` line 1 `# syntax=` **pinned by digest** in T7a
-  (Codex: unpinned frontend = input-trust hole, distinct from timestamp
-  reproducibility).
-- **`deploy/frontend/pipelinerun.cue`** renders the on-demand `PipelineRun`
-  (T7b3, DONE) — **plain CUE + `cue export -t`, not a Timoni module** (a
-  PipelineRun is fire-and-forget; Timoni's footprint only pays off for a
-  reconciled Instance). The first real Timoni module is the `cv_frontend` **app
-  deployment**, during/after T7c.
-
-**T7a — rootless BuildKit feasibility spike, then the `ci/` concern.**
-_Prove first._ **Step 1 ✓ PASSED 2026-09-08** — daemonless rootless BuildKit
-built `cv_frontend` in-cluster (orb k8s v1.35.6, Tekton Pipelines v1.6.0)
-and pushed `linux/arm64` by digest to GHCR; `docker pull` of that digest
-verified. Minimum pod posture: `runAsUser 1000`, `seccomp: Unconfined`,
-`allowPrivilegeEscalation: true` (file-cap `newuidmap`), `caps drop [ALL]
-add [SETUID,SETGID]`, `BUILDKITD_FLAGS=--oci-worker-no-process-sandbox`
-(required). NOT privileged, no `SYS_ADMIN`; `hostUsers: false` unavailable
-(Tekton `podTemplate` has no such field). Full result + proven Task config
-in `~/.claude/plans/t7a-buildkit-in-cluster-proof.md` § "Step 1 — SPIKE
-RESULT". Tekton v1.6.0 kept for Step 2.
-**Step 2 ✓ DONE** — `ci/` concern extracted: `ci/tasks/buildkit-build.yaml`
-(spike-proven posture, parameterised, consumer-agnostic, **one step —
-pinned `command`/`args`, no `script:` block**; pushes under a per-run tag,
-`tekton-taskrun.sh` does `oras resolve` for the digest + the
-`ci_is_strict_digest` guard) + `ci/runtime/namespace.yaml` (no RBAC,
-`automountServiceAccountToken: false`, PSA `privileged`) +
-`ci/scripts/{tekton-taskrun,kubeconform-scan,chainsaw-test}.sh` + `lib/ci.sh` +
-20 bats cases + a `[k8s]`-gated chainsaw scenario (webhook accepts the Task,
-no `script:` field, posture-drift guard) + `rules/boundary-ci.yml` +
-`hk.pkl` kubeconform (fast) / chainsaw (heavy) steps + `mise` tasks
-`ci:taskrun` & `local:tekton:install` (pinned Tekton v1.6.0) + Tekton v1
-CRD schema vendored at `ci/tests/crd-schemas/`.
-[ADR 0014](docs/adr/0014-tekton-defs-are-oci-bundles-in-ci.md).
-_Carry-over:_ machine-global `orb-k8s` pitchfork daemon — the stanza is
-**documented** in `environments/local/README.md` § Tekton; auto-registration
-is deferred to a future `local:bootstrap` aggregate (P2). The full
-build→push chainsaw assertions need a registry cred — folded into T7b's
-credential-light `git-clone` Task. A proper Tekton `IMAGE_DIGEST` result is
-deferred to T7b too (see below). Answered: rootless viability, in-cluster
-GHCR push auth, pod privilege posture.
-
-**T7a-follow-up — `ci/` concern script hygiene.** _P2._ From the PR #9
-review; branch `ci/t7a-followup-hygiene`.
-- ✅ **Renamed `ci/scripts/*.sh` to `<tool>-<verb>`** (`f492f5c` + `dffef3f`):
-  `ci-taskrun` → `tekton-taskrun`, `ci-kubeconform` → `kubeconform-scan`,
-  `ci-chainsaw` → `chainsaw-test`; `lib/ci.sh` stays. Full ref sweep + the
-  per-run cluster-object prefix.
-- ✅ **Recurrence lint** (`69a2cff`): `rules/boundary-no-embedded-shell.yml`
-  (`ast-grep`, `language: yaml`) fails `mise run check` on a `script:`
-  block under `ci/tasks|runtime|pipelines/`.
-- ✅ **bats for `tekton-taskrun.sh`** (`b67fa34`): `common_prefix`
-  (grandparent / component boundary / identical dirs / `STAGE_ROOT == /`),
-  `cleanup` (`--teardown` scoped to this run's objects, never the
-  namespace; `--keep` deletes nothing), `DCJ_FILE` mode 600.
-- ❌ **actionlint + check.yml `run:` tidy** — dropped. GitHub Actions is
-  not the source of truth (Tekton is); no new tooling for the transitional
-  workflows.
-- ➡️ **Extract the `tekton-taskrun.sh` PV/PVC + TaskRun heredocs** — moved
-  to **T7b**. Shell must never author YAML (hard rule); T7b's staging
-  rewrite (git-clone Task + `PipelineRun`) replaces the heredocs with
-  committed Tekton YAML anyway, so fixing them separately first is wasted.
-- **Open — rename `frontend-*` / `attestation-*` to `<tool>-<verb>`** (P3,
-  own task). `frontend-deploy.sh` / `frontend-serve.sh` /
-  `attestation-sign.sh` / `attestation-verify.sh` use the concern name and
-  now contradict the (unchanged, enforced) Scripts Policy. No single tool
-  drives them (cosign + oras + openbao; docker + the verify seam) — the
-  rename needs thought, and it touches `mise.toml` tasks, `pitchfork.toml`,
-  ADRs, README, bats.
-
-**T7b — the working in-cluster Pipeline (re-cut 2026-09-08).**
-Full plan + eng-review report: `~/.claude/plans/t7b-pipeline-recut.md`. Scope
-was **the working Pipeline + an end-to-end demo only** — the OCI-bundle
-distribution (R5) stays deferred; `build-cv-frontend.yml` retirement
-happened in T7c R4 (2026-09-14), once the T7c pre-plan's distribution
-tail (R1-R3) proved the in-cluster path stable end to end. Sub-phased,
-each ships + tests on its own:
-
-- **T7b0** — interim **zot** on orb (pulled forward from T7d). ✅ **DONE.**
-  `environments/local/zot/zot.yaml` (one multi-doc manifest, image pinned by
-  digest `sha256:56230c…`, credential-free, **GC off** which subsumes
-  `deleteUntagged: false`) + `mise run local:zot:{install,wait,uninstall}` +
-  `zot-manifests.bats` (7) + a `kubeconform-zot` hk step + `environments/local/README.md`
-  § zot. **Live verify passed 2026-09-08** on `orb start k8s` (v1.35.6): host
-  NodePort reach `localhost:30500/v2/` → HTTP 200; host + in-cluster
-  (`zot.zot.svc.cluster.local:5000`) `oras` push/pull round-trips; native OCI 1.1
-  Referrers (`oras discover` tree); exposure is the NodePort only (no
-  Ingress/LoadBalancer). Threat model: single-user VM, all cluster writers
-  trusted; the P2 "zot registry auth" TODO opens real auth. **zot left running**
-  for T7b1.
-- **T7b1** — ✅ **DONE.** `ci/tasks/git-clone.yaml` (blobless shallow clone at a
-  pinned SHA, anonymous; reuses the pinned `moby/buildkit:rootless` image — it
-  ships `git`, so ONE image digest for the whole pipeline; steps run as root — the
-  OrbStack `local-path` PVC is not group-writable under `fsGroup`, verified) +
-  `buildkit-build.yaml` rewired (drop `TAG` + `dockerconfig` workspace + the `gh`
-  Secret; push `$(IMAGE):$(APP_REVISION)` to zot, `registry.insecure=true`; **no
-  Tekton result**) + `ci/pipelines/build-scan-approve.yaml` (`clone-app →
-  clone-defs → build`, one `volumeClaimTemplate` workspace, subPath binding) +
-  `ci/tests/crd-schemas/pipeline_v1.json` + `ci/tests/build-pipeline/chainsaw-test.yaml`
-  + `ci/README.md` § Workspaces + **deleted `tekton-taskrun.sh` + `ci:taskrun` +
-  its 18 bats + the two heredocs**.
-  **Live-verified 2026-09-08** on `orb start k8s`: `clone-app` + `clone-defs`
-  Succeeded (`cv_frontend@db174d91`, `toolbox@3210363` into `shared/app` +
-  `shared/defs`); the `build` step mounted both workspaces, loaded the Dockerfile
-  from `shared/defs/deploy/frontend/`, and buildkit began solving with the
-  spike-proven posture — then hit **docker.io unreachable over IPv6** fetching the
-  `# syntax=docker/dockerfile:1@sha256:` frontend (environmental egress, same as
-  the T7a spike needed a network day). chainsaw green (webhook + no-`script:` +
-  posture + DAG).
-- **T7b1-followup — hermetic build (deterministic; prereq for T7b2+)** — P1,
-  **DONE 2026-09-08** (see § Status below).
-  Investigation 2026-09-08 (`/investigate`): the intermittent `build` failure is
-  **not** our defs. This OrbStack cluster gives pods a working `AF_INET6` stack +
-  AAAA DNS but **no routable IPv6 egress** (node's only v6 is the non-routable
-  ULA `fd07:b51a:cc66::2`); CoreDNS `loadbalance` shuffles the A/AAAA answer, so
-  any Go registry client (buildkit/containerd remotes, **and zot's own
-  `regclient`** — both verified) can pick an unreachable AAAA and hard-fail
-  `connect: network is unreachable`. ~50% per external image fetch. A separate
-  ~10% `git-clone` failure is `Could not resolve host: github.com (Timeout while
-  contacting DNS servers)` — the OrbStack DNS proxy timing out.
-  **Fix (chosen — Z2 + N1 + N4). DONE — see § Status below.**
-  - **Z2 — seed zot + buildkit mirror.** `mise run frontend:seed` =
-    `ci/scripts/registry-seed.sh deploy/frontend/Dockerfile` — `crane copy`
-    (`crane` now pinned in `mise.toml`) every `# syntax=` + `FROM …@sha256:`
-    ref **read straight from the Dockerfile at run time** into the T7b0 zot
-    (no committed seed-manifest → no drift possible; the script is the single
-    reader). Runs on the host, where IPv4 works. The `build` Task mounts the
-    `buildkitd-config` workspace (`ci/runtime/buildkitd-mirror.yaml`, a
-    ConfigMap) at `/cfg` and adds `--config /cfg/buildkitd.toml` to
-    `BUILDKITD_FLAGS`; that file mirrors `docker.io` + `gcr.io` →
-    `zot.zot.svc.cluster.local:5000`. buildkit then never contacts
-    docker.io/gcr.io — **build-time egress shrinks to zot only** (security
-    win). Rejected: zot `onDemand` sync (its `regclient` inherits the same
-    IPv6 bug + zot #3795 docker.io-auth + #2584 tag@digest); Dockerfile
-    `FROM` rewrites (couples the app Dockerfile to infra). The seed script is
-    consumer-agnostic (Dockerfile is an arg); only the `frontend:seed` mise
-    task binds the consumer path, same as `frontend:deploy`.
-  - **N1 — one-shot privileged `disable-ipv6` step** first in both `git-clone`
-    and `buildkit-build` (a Tekton step, not an initContainer — steps share
-    the pod netns and run in order, so step 0 setting `sysctl -w
-    net.ipv6.conf.{all,default,lo}.disable_ipv6=1` covers every later step).
-    Removes the pod's v6 addrs, **DNS/AAAA untouched**, every dialer then uses
-    v4. The `ci` ns is already PSA `privileged`; the build/clone work steps
-    stay rootless — `disable-ipv6` is the only privileged container, asserted
-    by the chainsaw test. Kept even with the mirror bound (belt + suspenders,
-    and covers the mirror ever being unbound). Rejected: `no-aaaa` dnsConfig
-    (changes resolution semantics — kept as the documented rollback); CoreDNS
-    AAAA suppression (cluster-wide); `hostAliases` (Cloudflare/AWS IPs rotate).
-  - **N4 — `retries: 2` on `clone-app` + `clone-defs`** in the Pipeline — the
-    only lever for the DNS-timeout mode (N1 doesn't touch it); the failure is
-    fast (~6s) so cheap. The build has no external egress left to retry.
-  - **Not viable:** seeding the `moby/buildkit` step image into zot — the
-    OrbStack kubelet refuses http zot (`http: server gave HTTP response to HTTPS
-    client`). That pod image stays a docker.io pull; it is node-cached after
-    first pull and resolves via `registry-1.docker.io` (A-heavy) — low one-time
-    risk, accepted.
-  - **Durable:** the Cilium planning session (this file) settles single- vs
-    dual-stack; a v4-only Cilium datapath makes N1 unnecessary. Do not
-    pre-commit.
-  - **Status — DONE (2026-09-08, PR #15 branch).** `ci/runtime/buildkitd-mirror.yaml`
-    (ConfigMap), `ci/scripts/registry-seed.sh` + `frontend:seed` task + `crane`
-    pin, `disable-ipv6` step 0 on `git-clone` + `buildkit-build`,
-    `buildkitd-config` workspace on the build Task + Pipeline,
-    `retries: 2` on `clone-app`/`clone-defs`. `registry-seed.bats` (6 cases,
-    manifest updated). chainsaw updated: step counts 3/2, the new
-    `git-clone-only-the-sysctl-step-is-privileged` step, `buildkitd-config` in
-    `pipeline-shape`. **Live: `mise run frontend:seed` populated zot (3 base
-    images, digests preserved); `build-scan-approve` ran 3/3 Succeeded with
-    the new specs** — `disable-ipv6` step logged `net.ipv6.conf.*.disable_ipv6
-    = 1` on both build + clone pods, buildkit resolved all three `FROM` refs
-    from the mirror in 0.0s (no external egress), zero `network is
-    unreachable`. `mise run check` green. Docs swept (`ci/README.md` §
-    Deterministic builds on OrbStack, `repo-structure.md`,
-    `digest-as-source-of-truth.md`, `deploy/frontend/README.md`).
-- **T7b2 — DONE 2026-09-08 (branch `t7b2-scan-attach`).** `ci/tasks/scan-attach.yaml`
-  — one Task, 5 steps, pinned `command`/`args`, no `script:`:
-  `disable-ipv6` (step 0 — trivy's vuln-DB pull is external, `/investigate`
-  option A, "keep it simple for now") → `trivy image --format json` →
-  `trivy image --format cyclonedx --skip-db-update` (native SBOM, keeps CVE
-  ratings; shared `--cache-dir` on the workspace → **one DB pull**) →
-  `oras attach` `application/vnd.trivy.report+json` →
-  `oras attach` `application/vnd.cyclonedx+json`. Never blocks (no
-  `--exit-code` — the CRITICAL gate is T7b3). `TRIVY_INSECURE` /
-  `oras --plain-http=` carry `$(REGISTRY_INSECURE)`. Wired `runAfter: [build]`
-  in `build-scan-approve.yaml` (`shared` workspace). Images pinned by digest
-  (`aquasec/trivy:0.74.0`, `ghcr.io/oras-project/oras:v1.3.4`); `disable-ipv6`
-  reuses the node-cached `moby/buildkit:rootless`. chainsaw updated (webhook
-  accepts 4 defs, `scan-attach` 5 steps / no `script:`,
-  `scan-attach-only-the-sysctl-step-is-privileged`, DAG adds `scan-attach`).
-  Docs swept. **Cilium note updated:** 3rd `disable-ipv6` Task + a newly
-  observed gap (step 0's sysctl doesn't reach buildkit's rootless build-exec
-  netns — `npm ci` still hung once in ~4 runs) — a 4th Task, or k0s replacing
-  OrbStack, is the trigger to make the Cilium datapath call.
-  **Live: `build-scan-approve` ran 2/2 Succeeded** (1 earlier attempt killed
-  after `npm ci` hung ~4m — the build-netns gap above). scan-attach's 5 steps
-  all `Completed/0`; `oras discover localhost:30500/cv-frontend:db174d91`
-  shows both referrers on `sha256:7bda3c3e…` —
-  `application/vnd.trivy.report+json` + `application/vnd.cyclonedx+json`.
-  `mise run check` green.
-- **T7b3 — DONE 2026-09-09 (branch `t7b3-gate-timoni`).** Plan
-  `~/.claude/plans/t7b3-gate-cue-render.md` (ENG CLEARED, 9 Codex findings
-  folded). Shipped:
-  - `ci/tasks/gate.yaml` — one step,
-    `trivy convert --scanners=vuln --exit-code=2 --severity=CRITICAL --format=table scan.json`,
-    reads the same `scan.json` `scan-attach` attached. **`--exit-code=2`, not 1**
-    (plan A4 correction): trivy returns 1 for a match AND an internal error, so 2
-    marks the CRITICAL verdict and 1 stays "gate errored". No `disable-ipv6` /
-    privileged step — reads a local file. Wired `runAfter: [scan-attach]`.
-  - `deploy/frontend/pipelinerun.cue` — **plain CUE, not a Timoni module**
-    (plan D1): a PipelineRun is fire-and-forget, so Timoni's module + bundle +
-    ~1.3 MB vendored `cue.mod` footprint doesn't pay off. `_rev` / `_defsRev`
-    are hex-regex `@tag` injection points → `cue export` fails closed on a
-    missing / non-hex value. One place holds both registry hostnames.
-  - `deploy/frontend/scripts/frontend-build.sh` (`mise run frontend:build`) —
-    preflight (context / Pipeline+gate / buildkitd CM / zot / `frontend:seed`) →
-    `cue export -t` → `kubectl create` (namespaced `ci`, 15m timeout) →
-    poll `.status.conditions[Succeeded]` off `Unknown` (client bound ~16m) →
-    success: `oras resolve` + `frontend_strict_digest` (exit 5 on non-canonical),
-    print this run's scan-report referrer digest, delete the run, print the
-    `attestation:sign` line; failure: keep the run, classify by the `gate` step's
-    exitCode (2 = loud CRITICAL box, 1 = "gate ERRORED not a verdict", else a
-    task failed before the gate). `lib/frontend.sh` gained `frontend_kube` /
-    `frontend_tkn` (context + `-n ci` pinned), `frontend_strict_digest`,
-    `frontend_host_image`.
-  - chainsaw: accepts the 5 defs, `gate` 1 step / no `script:` / unprivileged,
-    DAG gains `gate`; **G1** — standalone `gate` TaskRun vs
-    `fixtures/scan-{critical,clean,malformed}.yaml` asserting the step exitCode
-    (2 / 0 / 1). Ran live green.
-  - `ci/tests/crd-schemas/pipelinerun_v1.json` vendored; `frontend-build.bats`
-    (24 cases) renders the real cue file + kubeconforms it.
-  - **First real Timoni module = the `cv_frontend` app deployment**, authored
-    during/after T7c once the Flux reconciliation model + ADR 0009 (pitchfork vs
-    k8s) are settled. The build/clone Task `podTemplate` (the `disable-ipv6`
-    step + `buildkitd.toml` workspace) stays plain committed YAML under `ci/` —
-    it is **not** Timoni-rendered (superseded: the earlier "Timoni renders the
-    podTemplate" note assumed the deploy/frontend module would exist at T7b3).
-  - **End-to-end demo — RUN 2026-09-09 (live, orb k8s).**
-    `mise run frontend:build -- db174d91` → the full DAG ran in-cluster
-    (`clone-app → clone-defs → build → scan-attach → gate`, all Succeeded, gate
-    3s), `frontend-build.sh` resolved `sha256:15f93475…`, printed this run's
-    scan-report referrer `sha256:6709e3b2…`, deleted the run, printed the
-    `attestation:sign` line, exit 0. `mise run attestation:sign` then signed it
-    (attestation `sha256:35df3a31…`) — its evidence summary shows the **same**
-    scan-report referrer `sha256:6709e3b2…`, so the build → sign evidence chain
-    is intact (A5). **Failure path:** `mise run frontend:build --
-    0000…0000` (non-existent SHA) → clone-app Failed → "PipelineRun … failed
-    (Failed) before the gate ran", run KEPT with inspect commands, exit 1.
-    `frontend:deploy` not re-run here — unchanged since T5b (live sign→verify
-    round-trip already proven), and `cv_frontend`'s Remix v3
-    `IMPORT_OUTSIDE_FILE_MAP` crash is an honest PASS of the mechanism (ADR
-    0009). The gate's CRITICAL-block path is proven by chainsaw G1 (exitCode 2 →
-    TaskRun Failed) + `frontend-build.bats` (exitCode 2 → loud override box).
-  - **P3 follow-ups opened by this PR** (see § "T7b3 P3 follow-ups" below):
-    the exact scan-referrer digest threaded through `attestation:sign` →
-    `frontend:deploy` (evidence integrity, Codex #4); `frontend-deploy.sh`
-    readiness tightened to HTTP 2xx + expected body (Codex #8).
-
-**The digest is never a Tekton result** — tasks address the image by
-`$(IMAGE):$(APP_REVISION)`, ordering is `runAfter`, and `oras resolve` produces
-the immutable digest once at the operator boundary (the only value-consumer,
-`attestation:sign`, runs outside the pipeline). This removes an extract script, a
-`results:` block, `--metadata-file` choreography, and `enable-api-fields: alpha`.
-ADR 0001 holds — the signed chain still pins the digest.
-
-Effort: ~5–6 days across T7b0–T7b3 (T7a's "simple" bits each ran long).
-
-**T7b3 P3 follow-ups** (opened by the T7b3 eng + Codex review, not blocking):
-
-- **Exact scan-referrer digest through the sign → deploy chain** — P3. Today
-  `attestation-sign.sh` picks the `last`-of-type `vnd.trivy.report+json`
-  referrer; on a byte-identical rebuild (same digest) several can co-exist, so
-  the pick is arbitrary. `frontend-build.sh` mitigates by printing this run's
-  referrer digest for the operator to eyeball. Full fix: a new positional arg
-  threaded `attestation:sign` → predicate `scanReportRef` → `frontend:deploy`.
-  Touches the signer's signature + `frontend-deploy.sh` — its own PR. (Codex #4,
-  reclassified **evidence integrity**, not auth.)
-- **Tighten `frontend-deploy.sh` readiness** — P3. `frontend-deploy.sh:~67`
-  accepts any non-`000` HTTP code as "serving". D6 keeps the T5b stance (a
-  `cv_frontend` runtime crash is an honest PASS of the *mechanism*); tightening
-  to HTTP 2xx + an expected body is a separate change to the consume seam.
-  (Codex #8 original.)
-
-**T7c — local Flux.** Pre-plan DONE (`~/.claude/plans/t7c-substrate-ordering.md`,
-ADR 0015): `GitRepository` + plain YAML, per-path `kustomization.yaml`
-inventories, Flux precedes the in-cluster OpenBao move, Crossplane not
-sequenced. **Increments 0/1a/1b/2 SHIPPED** (PRs #18–#21): checksum-gated
-Tekton install (the *controller* stays on `tekton-install.sh`, a named Flux
-prerequisite) → digest-pinned self-managing flux-operator + `FluxInstance` +
-chainsaw harness → Flux reconciles `zot` + `ci/{runtime,tasks,pipelines}` from
-`main`. The build *run* stays operator-triggered (`frontend-build.sh`), **not**
-Flux-reconciled — Pipelines-as-Code is the eventual git-event trigger, still
-deferred.
-_Remaining T7c:_ **Increment 4 — in-cluster OpenBao.** SHIPPED
-([ADR 0016](docs/adr/0016-local-openbao-in-cluster-statefulset.md)):
-`environments/local/openbao/` is a tofu-owned raft StatefulSet — Phase-A
-`helm_release`, the `openbao-bootstrap.sh` bridge (source selection,
-key-preserving `raft snapshot restore -force`, `approval-key` never
-rotated), Phase-C `vault_*` (`sops` AES key + `flux_sops` k8s-auth role).
-The host `pitchfork` daemon is retired. `/plan-eng-review` (2026-09-10)
-split the rest into **Plan B** and **T-DR** (separate sections below). T8
-(Tekton Chains provenance) is now unblocked — the in-cluster OpenBao serves
-pods over TLS. Plan:
-`~/.claude/plans/t7c-increment4-in-cluster-openbao.md` § "ENG REVIEW — PLAN
-SPLIT".
-_Observability (from the CI-log-visibility review):_ persist **failed-step
-logs beyond `tkn taskrun logs`** via **Tekton Results** (needs log-collection +
-a durable-storage backend, not just the API). **Not** Tekton Chains. Acceptance
-test: a failed step's logs are retrievable *after* the TaskRun + Pod are
-deleted. Mirrors the GHA-side fix (`check.yml` uploads
-`$HK_STATE_DIR/{output.log,hk.log}`).
-_Flux scope note (from `/investigate` 2026-09-08):_ Flux reconciles the
-T7b1-followup `ci/runtime/buildkitd-mirror.yaml` ConfigMap (done, Increment 2).
-The host seed (`mise run frontend:seed` → `ci/scripts/registry-seed.sh`) stays
-a host step for now (it needs host IPv4 egress); moving it in-cluster as a Job
-that re-runs on a `deploy/frontend/Dockerfile` `FROM`-digest change is still
-open. Once Cilium's datapath is settled (Cilium planning session), revisit
-whether the seed + mirror is still load-bearing or just an optimization.
-
-**T7c/T7d distribution tail — RESCOPED 2026-09-10** (`/plan-eng-review` +
-Codex; plan `~/.claude/plans/t7c-distribution-t7d.md`). Codex killed the
-first framing (the Flux-synced git SHA is **not** a per-run def pin — Flux
-tracks mutable `main`). The real blocker: the in-cluster build pushes to the
-plain-HTTP zot, Kyverno referrer discovery needs HTTPS. Chunked, blocker
-first:
-
-- **R1a (SPIKE)** — ✅ DONE 2026-09-10, **GO**. Kyverno's admission
-  controller can trust the dev CA for the HTTPS zot pull via chart values
-  (`caCertificates`), `allowInsecureRegistry=false`. The mount replaces the
-  whole trust store → need a merged bundle → trust-manager (ADR 0022).
-- **R1b-i** — ✅ DONE 2026-09-10, PR #36 (`c12760e`). trust-manager install
-  (Flux `HelmRelease` + `trust-manager.lock` + `trust-manager-reconcile`
-  chainsaw + ADR 0022).
-- **R1b-ii** — eng-reviewed 2026-09-10, split 4 ways
-  (`~/.claude/plans/t7c-distribution-t7d.md` § "R1b-ii ENG REVIEW"):
-  - **R1b-ii-a** — ✅ MERGED (#37, `4e6e073`). `zot-tls` leaf + the
-    trust-manager `toolbox-ca-bundle` Bundle → the Kyverno/`ci` CA
-    ConfigMap. Chainsaw-verified live (GitRepository temporarily
-    repointed at the branch). Found + fixed a live bug along the way: the
-    chart's `admissionController.caCertificates.volume` path crash-loops
-    (a ConfigMap volume can't bind onto an existing file without
-    `subPath`, and that branch never adds one) — fixed via
-    `extraVolumes`/`extraVolumeMounts` with an explicit `subPath` instead.
-  - **R1b-ii-b** — ✅ MERGED (#38). Host trust install: `zot-trust.sh` +
-    `mise run local:zot:trust` (node dockerd file + a PEM-validated,
-    atomic, idempotent concat `zot-bundle.crt`) + `SSL_CERT_FILE` `[env]`.
-    Honor-matrix probed live (ephemeral HTTPS zot): `curl` honors
-    `SSL_CERT_FILE`; `oras` doesn't but has `--ca-file`; `cosign attest`
-    doesn't but has `--registry-cacert` (`cosign verify-blob-attestation`
-    never touches a registry — n/a); **`crane` and `flux push artifact`
-    honor neither the env var nor any CA-file flag** — Go's darwin x509
-    reads the System keychain, not `SSL_CERT_FILE`, and neither tool
-    exposes an override (only `--insecure`, which skips verification
-    entirely). Full matrix + the crane gap in
-    `~/.claude/plans/t7c-distribution-t7d.md` § R1b-ii-b.
-  - **R1b-ii-c** — the honor probe found `crane` and `flux push artifact`
-    honor neither `SSL_CERT_FILE` nor any CA-file flag (only `--insecure`,
-    Go's darwin x509 reads the System keychain). Deep-researched
-    (`~/.claude/plans/t7c-distribution-t7d.md` § "R1b-ii-c PRE-PLAN",
-    2026-09-11) rather than guessed — a Go 1.27 bump alone does **not**
-    fix it (GODEBUG defaults key off go-containerregistry's own `go.mod`,
-    pinned at `go 1.25.0`).
-    - **✅ SHIPPED** — the one `crane copy` in `registry-seed.sh` swapped
-      for `oras cp` (`--to-plain-http` today, becomes `--to-ca-file`
-      unchanged elsewhere when zot flips to HTTPS — one flag, no new
-      script). `oras`'s CA scoping is per-endpoint (confirmed from
-      `oras-project/oras` source), so the public docker.io/gcr.io source
-      keeps system trust while only zot gets the dev CA later. `crane`
-      stays pinned for `openbao-verify.sh` (public registries only,
-      unaffected).
-    - **Still open — `flux push artifact`.** No fix found (flux2 can't be
-      source-built — a `replace` directive blocks `go install`; `oras
-      push` would mean hand-building flux's OCI layer, adding scripting
-      against the "reduce scripting" steer). **Decision (2026-09-11):**
-      keep `--insecure-registry` on that one call as a time-boxed interim
-      — **not** a permanent accept. macOS/login-keychain trust would fix
-      it but is explicitly declined for now (DX cost — a password prompt
-      on every install/rotation; a CA-file approach is cleaner). See the
-      three new planning-session items below.
-    - **✅ SHIPPED 2026-09-11 — the HTTPS cutover.** `environments/local/zot/zot.yaml`:
-      `http.tls` off the `zot-tls` leaf (R1b-ii-a), BOTH probes `scheme:
-      HTTPS`, Service `ClusterIP` (NodePort dropped — one name everywhere,
-      `zot.zot.svc.cluster.local:5000`, host included via OrbStack's
-      direct routing). `OCIRepository frontend`: `insecure: false` +
-      `certSecretRef` → a CA-only `zot-flux-ca` Secret
-      (`environments/local/flux/kustomization.yaml` `secretGenerator` off
-      a **committed** `toolbox-dev-ca-public.crt` (named `-public` — an
-      X.509 cert is public-key material, no secrecy lost; the private key
-      never left the in-cluster `toolbox-dev-ca` Secret) — trust-manager
-      only emits
-      ConfigMaps without widening its RBAC via `secretTargets`, "grant
-      read access to all secrets in the cluster" per its own chart values;
-      not worth that for one Secret. Same accepted trade-off as ADR 0022's
-      committed-copy-goes-stale-on-a-key-rotation case — moot given the
-      10y CA duration). `build-scan-approve` Pipeline: new `ca-bundle`
-      workspace (the trust-manager `toolbox-ca-bundle` ConfigMap already
-      in ns `ci`, R1b-ii-a) bound into BOTH `build` (buildkitd.toml's zot
-      entry: `ca = [...]` replaces `http = true`) and `scan-attach`
-      (`TRIVY_CACERT` + `oras --ca-file`); `REGISTRY_INSECURE` default
-      flipped to `false`. `registry-seed.sh` + `frontend-build.sh`'s host
-      `oras discover`/`resolve` calls: `--to-ca-file`/`--ca-file` pointed
-      at `zot-trust.sh`'s already-written CA (no second fetch).
-      `flux push artifact` keeps `--insecure-registry` — confirmed live it
-      skip-verifies over real TLS rather than forcing plain HTTP, so the
-      earlier interim decision holds functionally, not just as an accepted
-      risk. **Live-verified end to end, not just `mise run check`**: a
-      real `mise run frontend:build` ran build → scan → attach → gate →
-      resolve clean through the new CA wiring against the real cv_frontend
-      repo; `OCIRepository frontend` re-fetched over HTTPS with
-      `certSecretRef` trust; reverted to `main` afterward, zot back to
-      plain-HTTP/NodePort confirmed clean.
-- **R2** — repoint `current-image.txt` / `timoni.lock` / `pipelinerun.cue`
-  `#image` / the IVPol glob to `zot.zot.svc:5000/cv-frontend*`; re-sign.
-  **Scoped to the M3 in-cluster Flux delivery path only** (2026-09-14): the
-  ADR-0009 pitchfork docker-demo consumer of `current-image.txt` stays
-  pinned to GHCR — its `docker run --rm` container sits on the default
-  bridge network and got `no route to host` for zot's ClusterIP
-  (`192.168.194.237:5000`), unlike the host shell (which OrbStack bridges
-  into the cluster network directly) or an actual k8s pod. Real infra gap,
-  not a script bug — see T-ADR9 below.
-- **R3** — ✅ **DONE (2026-09-14).** One documented end-to-end acceptance
-  run (zot only), each hop + digest asserted, in
-  `environments/local/README.md`. Closes T7b's deferred end-to-end demo.
-  Surfaced + fixed live along the way: `kyverno-reports-controller` (the
-  background PolicyReport scanner, separate pod from `admissionController`)
-  had no zot CA trust — observability-path only, real admission
-  enforcement was unaffected.
-- **R4** — ✅ **DONE (2026-09-14).** Deleted
-  `.github/workflows/build-cv-frontend.yml` + the doc sweep (`ci/README.md`,
-  `deploy/frontend/README.md`, `digest-as-source-of-truth.md`, ADR 0003,
-  `CLAUDE.md`). The GHCR `cv-frontend` (public) and `cv-frontend-spike`
-  (private) packages are deleted — user ran `gh auth refresh -s
-  delete:packages`, `gh api -X DELETE /users/InSuperposition/packages/
-  container/{cv-frontend,cv-frontend-spike}`, verified empty after. R4
-  fully closed.
-- **R5 (DEFERRED)** — OCI-bundle distribution of the `ci/` defs
-  (`tkn bundle push`, self-contained Pipeline + Task closure, `@sha256:`
-  resolver pins). This is ADR 0014's stated end state, recorded UNFINISHED —
-  per-run def pinning is unfinished until this ships. **Trigger:** a 2nd
-  `ci/` consumer, OR `environments/production/`. Until then a `PipelineRun`
-  uses whatever `ci-{tasks,pipelines}` last reconciled from `main` —
-  acceptable for a single-operator dev cluster, **not** a pin.
-
-**T7d — production repoint (DEFERRED).** Trigger = `environments/production/`
-exists (needs `cluster-k0sctl`, unbuilt). Nothing to repoint until then. With
-R1 done, production's zot is HTTPS + the dev-CA pattern from day one
-(production swaps the CA `issuerRef` for a real backend, leaves the leaves).
-T7d = a `TODOS.md` checklist next to O4/O5, no estimate.
-
-**Priority:** P2 · **Depends on:** ~~T5 + T5b~~ done. **T7b0–T7b3** ✓ →
-**T7c pre-plan + Increments 0/1a/1b/2** ✓ → Increment 4 (in-cluster OpenBao) ✓
-→ distribution tail `R1a ✓ → R1b-i ✓ → R1b-ii ✓ (flux push's --insecure-registry
-interim accepted, not blocking) → R2 ✓ → R3 ✓ → R4 ✓`; **the T7 arc is
-fully closed.** R5 + T7d deferred, no trigger yet.
-
-### T-ADR9 — ADR-0009 pitchfork demo has no reachable registry — **P1, escalated 2026-09-14**
-
-**What:** the ADR-0009 local pitchfork docker demo (`frontend-deploy.sh` /
-`frontend-serve.sh`) reads the same `current-image.txt` as the M3 in-cluster
-Flux delivery path, but its plain `docker run --rm` container (and its
-host-side launch re-verify, `attestation-verify.sh`) sits on docker's
-default bridge network — not bridged into the OrbStack k8s pod network the
-way the host shell or an actual pod is. Repointing it to the in-cluster
-zot (`zot.zot.svc.cluster.local:5000`, T7c R2) fails at launch: `no route
-to host` on zot's ClusterIP. R2 (2026-09-14) scoped the zot repoint to M3
-only and left this demo pinned to GHCR, on the stated assumption that
-"GHCR stays reachable."
-
-**That assumption broke the same day.** T7c R4 (2026-09-14, same session)
-deleted the GHCR `cv-frontend`/`cv-frontend-spike` packages entirely — R4's
-own plan never cross-checked that the ADR-0009 demo was still relying on
-that registry. Confirmed live: `oras manifest fetch
-ghcr.io/insuperposition/cv-frontend@sha256:fd02f152...` now 404s ("not
-found"). The `frontend` pitchfork daemon is running fine right now off a
-locally-cached docker image, but has **zero working restart path**: a
-crash, `pitchfork restart`, or a re-run of `mise run frontend:deploy`
-would hit the launch re-verify against a deleted GHCR package (retryable
-error, bounded retries, then a stopped daemon) — and it cannot fall back
-to zot either, per the network gap above. This is the Operational
-Lifecycle Trace "process restart" case with **no working manual recovery
-step today**, not just an inconvenience — CLAUDE.md's planning gate marks
-that a flaw to fix, not a feature to document.
-
-**Options, undecided (a and c now clearly cheaper than before given zot
-already carries a currently-signed image from this session's R2/R3 work,
-if the network gap gets solved):** (a) attach the demo container + its
-host-side verify step to whatever network OrbStack uses to bridge the
-host into the cluster (if one is attachable via `docker run --network` or
-similar for the verify step too — the verify step is the harder half,
-it's not even in a container); (b) re-establish a live GHCR image (build +
-push + sign a fresh one) as a stopgap, then still decide a/c — cheap but
-re-creates the exact dependency R4 just spent effort retiring; (c) retire
-the ADR-0009 demo outright now that M3's in-cluster Flux delivery is live
-and proven — the docker demo predates it and may now be redundant
-negative space, not a gap to fill; **this option now looks strongest**
-given (a) real cost/complexity is unresolved and (b) is a step backward.
-
-**Depends on:** R2 + R4 merged (both are). **Priority:** P1 — an active
-consumer's restart path is currently broken, discovered via a live
-`gh api -X DELETE` + `oras manifest fetch` probe, not assumed.
-
-**✅ RESOLVED (2026-09-14), option (c) taken.** The ADR-0009 pitchfork
-demo is retired, not repaired — [ADR 0023](docs/adr/0023-retire-adr-0009-pitchfork-demo.md).
-`frontend-deploy.sh`/`frontend-serve.sh`/`[daemons.frontend]`/
-`frontend:deploy`/`current-image.txt` all deleted; the daemon was stopped
-first. The in-cluster Flux path (`frontend:publish`) is the only consumer
-now. Named cost, not papered over: the launch-time re-verify property the
-pitchfork path had (ADR 0019's distinguishing claim for it) has no
-replacement — Kyverno's admission-time check is the only re-verify point
-left, and it never re-checks an already-admitted pod.
-
 ### T-DR — declarative disaster recovery for the in-cluster OpenBao — P2, planning session
 
 **What:** design the full recovery story for the in-cluster OpenBao once the
@@ -840,47 +248,6 @@ system is unbuilt, and the backup-mechanism choice resurfaces at Plan B's
 **Depends on:** Plan A merged. **Overlaps:** Plan B O5 (`snapshot_schedule`).
 **Priority:** P2. Surfaced by `/plan-eng-review` 2026-09-10 (+ Codex #6/#7).
 
-### Plan B — Timoni + Kyverno + Crossplane boundary — P2, ENG CLEARED 2026-09-10
-
-**What:** the deferred half of the T7c Increment 4 replan, re-scoped by
-`/plan-eng-review` 2026-09-10 (Step 0 complexity trigger, then a scope cut,
-then Kyverno added for correct ordering). Full reviewed plan + 12
-implementation tasks: `~/.claude/plans/plan-b-timoni-kyverno-crossplane.md`
-(seed: `~/.claude/plans/t7c-increment4-in-cluster-openbao.md` §§ REPLAN v2 /
-CODEX REVIEW 2026-09-10).
-
-**Ship order: `M1 → X1 → K1 → M3`.** Each = 1 PR = 1 squash commit.
-**✅ ALL MERGED — Plan B ship arc COMPLETE 2026-09-10:** M1 #31 (`b4c0b0c`),
-X1 #32 (`d286867`), K1 #33 (`1dc6e91`), M3 #34 (`2c6a1e1`). Live on `main`:
-Flux reconciles Kyverno + the `ImageValidatingPolicy` + the `frontend`
-OCIRepository/Kustomizations; `cv-frontend` runs 1/1 in ns `frontend`,
-admitted by the approval policy. `chainsaw-{kyverno,frontend}` pass
-post-merge. K1 pins Kyverno v1.19.1 (ADR 0020); M3 publish is a host step
-(`mise run frontend:publish`, ADR 0021 — no timoni image). Only the
-**Deferred** rows below remain.
-
-- **M1 #31** (`b4c0b0c`) — `deploy/frontend/timoni/` CUE module (Deployment/Service/SA, typed `#Config`, full-`@sha256` image constraint + negative fixture), `timoni mod vet` hk step (no kubeconform — one validator per concern). **ADR 0019** (amends 0009; states the Timoni-over-plain-CUE capability).
-- **X1 #32** (`d286867`) — **ADR 0018**: the in-cluster pipeline is render (Timoni/CUE) → reconcile (Flux) → enforce (Kyverno) → provision (Crossplane, if activated) — *stages*, not rivals. tofu `kubernetes_*` **banned** via `tests/check-tf-boundary.sh` + `no-kubernetes-tf` hk step (ast-grep 0.45.3 has no HCL grammar). `XConsumerEnvelope` dropped.
-- **K1 #33** (`1dc6e91`) — Kyverno v1.19.1 via Flux (`kyverno.lock` — chart NOT cosign-signed → digest pin, images `tag@digest`; `kyverno-policy` split Kustomization) + one **`ImageValidatingPolicy`** verifying the `cv_frontend` approval attestation at admission (`failurePolicy: Fail`, deny-only; namespace label `toolbox.dev/cv-frontend: approval-enforced` + `cv-frontend*` glob; preserves the ADR-0006 contract — predicate type + verdict-approved + subject digest). **ADR 0020** narrows the "production only" deferral. `attestation-sign.sh` now writes `dev.sigstore.bundle.{content,predicateType}` annotations so Kyverno's `cosign.GetBundles` discovers the referrer. Image + attestation source = **GHCR** (Kyverno referrer discovery fails on plain-HTTP zot — T12). `kubeconform-kyverno` (vendored IVPol schema) + `chainsaw-kyverno` (`[k8s]`, admit-approved + deny-unsigned; deny *variants* = the T6 spike + `attestation-verify.bats`). T6 spike: kyverno#16435 fixed since v1.19.0; zero SIGSEGV; semantic equivalence to `attestation-verify.sh` proven.
-- **M3 #34** (`2c6a1e1`) — **ADR 0021**: publish is a host step (`mise run frontend:publish` — verify seam → `timoni build` → `flux push --output json`), NOT a Tekton Task (`timoni` ships no container image). Three digests: `D_img` / `D_att` / `D_man` in `deploy/frontend/timoni.lock`, re-pinned per publish in a PR. `environments/local/flux/frontend.yaml` = `OCIRepository frontend` (pulls `D_man` from the in-cluster zot, `insecure: true`, `ref.digest`, no `spec.verify`) + `frontend-ns` Kustomization (`deploy/frontend/k8s/`, PSA restricted + the approval label) + `frontend` Kustomization (`dependsOn: [frontend-ns, kyverno-policy]`, `wait: false` — known boot crash). `chainsaw-frontend`: `frontend-delivery` (D_img digest, container started, policy admitted — delivery not health) + `frontend-reconcile` (dependsOn chain). Live on `main`: `cv-frontend` runs 1/1 in ns `frontend`.
-
-**Op note:** the interim zot is ephemeral + GC-off — recreate loses `D_man` → re-run `frontend:publish` + re-pin (like `frontend:seed`).
-
-**Deferred (own triggers):**
-
-| Item | Trigger |
-|---|---|
-| **O4 / O5** — extract `modules/secret-openbao/` (`moved` blocks — `deletion_allowed=false` on `sops`/`extra` keys makes `tofu destroy` fail partway) + `ha` / `awskms`\|`transit` unseal / `snapshot_schedule` / `tls_issuer` presets. **ADR 0017**. | `environments/production/openbao/` becomes real planned work (the true 2nd consumer — one consumer is not a module, `modules/README.md`). ADR 0012 stands until then. O4 planning also picks up a dedicated OpenBao Transit `manifest-signing` key for the M3 artifact. |
-| **Crossplane install** (core + `provider-*` + a Composition + its own ADR) | a consumer declares backing infra it does not own (bucket / DB / queue / DNS as a CR) — **not** a directory count. |
-| **G1** — Flux SOPS (`--sops-vault-configmap` + ConfigMap + `spec.decryption`) | a named secret needs SOPS decryption. Plan A's Phase C left the OpenBao side (`sops` key, `flux_sops` role) ready. |
-| **Manifest authorization** (Codex #7) — scoped RBAC for the `frontend` kustomize-controller SA + a defined rendered-manifest review path (image approval ≠ authz of the manifests around it) | own review/session. |
-| **Kyverno `ci`-namespace privilege policies** (PSA scalpel, build-pod securityContext) | `cluster-k0sctl` built + the Cilium planning session done. |
-| **`chainsaw-frontend` HTTP-200 assertion** | the cv_frontend Remix v3 boot crash is fixed (cv_frontend repo). |
-
-**Depends on:** Plan A merged (done, `a3b5a24`). **Priority:** P2. Related:
-**T-DR** overlaps K1's snapshot needs / O5's `snapshot_schedule`; **T8**
-(Tekton Chains) uses the `policies` seam O4 must preserve.
-
 ### zot registry auth — planning session — P2
 
 **What:** design real auth for the local (and eventual production) zot. T7b0
@@ -893,34 +260,6 @@ zot's OIDC/LDAP, an OpenBao-issued short-lived credential. **First step:** decid
 whether this folds into the deferred "Auth + multi-member DX" session (likely) or
 stays separate. **Depends on:** T7b0 (zot exists). **Triggers with:** a 2nd
 operator, a shared cluster, or `environments/production/`.
-
-### Remove `crane` from the stack entirely — planning session — P3
-
-**What:** `crane`'s zot-facing use is gone (R1b-ii-c swapped `registry-seed.sh`
-to `oras cp`); the one remaining call is `openbao-verify.sh`'s `crane digest`
-against a public chart registry (quay.io/ghcr.io — real HTTPS, system trust,
-unaffected by the CA-file gap). Investigate whether that call can move to
-`oras` (or `helm show chart`/`helm pull --digest`, since it's specifically a
-Helm OCI chart digest check) so `google/go-containerregistry` drops out of
-`mise.toml` altogether — one fewer pinned tool, one fewer thing with its own
-Go-toolchain/CA quirks to reason about.
-
-**Why:** every pinned tool is a maintenance surface (CLAUDE.md § Tool
-Boundaries — one job per tool); if `oras` already covers the one remaining
-job, keeping `crane` around too is redundant coverage the repo's own
-constraints call out as a smell, not a strict-overlap violation to ignore.
-
-**Also fold in:** a broader look at where else a dedicated single-purpose
-CLI could collapse into an already-pinned tool the same way — OpenBao's own
-tooling surface (`bao` CLI vs. direct API calls the scripts already make in
-places) is the other candidate worth the same question in the same session.
-
-**First step:** confirm `oras`/`helm` can do a digest-only chart-pin check
-without pulling the full chart (matching `openbao-verify.sh`'s current
-cheap-check shape) before committing to the swap.
-
-**Depends on:** R1b-ii-c (crane's zot use) landed. **Triggers with:** the
-next chart-pin gate touch, or a dedicated tooling-consolidation session.
 
 ### Flux / registry CA trust — could a mesh or another pinned tool solve this structurally? — planning session — P2
 
@@ -960,17 +299,51 @@ data — same discipline as the R1b-ii-c pre-plan):**
 the problem is real before reaching for a bigger structural tool.
 **Triggers with:** a dedicated planning/research session, not blocking R2–R4.
 
-### Pin-drift guard: host `mise.toml` vs `ci/tasks/*` step images — P3
+### Retrofit vm-orbstack, cluster-k0sctl, secret-openbao to digest-pinning
 
-**What:** keep `trivy`/`oras`/`tkn` versions synced between the host toolchain
-(`mise.toml`) and the Tekton Task step images (T7b2 introduces the second pin
-site). **Why:** a scan running a different `trivy` than the linter is a
-silent-wrong-result bug — the class the repo exists to prevent. **First step:**
-**research common conventions** — renovate/dependabot grouped updates, a
-generated lockfile both sides consume, running `mise` *inside* the Task images,
-Tekton image refs as params from one manifest — then iterate + innovate, rather
-than reflexively adding another `mise run check` step. Pins move ~quarterly.
-**Depends on:** T7b2.
+**What:** Pin the three existing OpenTofu modules' git sources by commit SHA
+instead of a mutable tag, matching the pattern proven in the
+digest-as-source-of-truth pipeline.
+
+**Why:** Closes the gap this whole design is about — for the modules that
+actually provision production infra, not just the CI pipeline wedge.
+
+**Context:** Deliberately out of scope for the pipeline wedge — it proves
+the pattern on `deploy/frontend/` first. Once Phase 1-2 are proven, apply
+the same `ref=<sha>` convention here.
+`docs/adr/0001-digest-is-the-trust-boundary.md` frames git commit SHA as
+the digest-equivalent for git-sourced modules.
+
+**Effort:** M
+**Priority:** P2
+**Depends on:** digest-as-source-of-truth Phase 1-2 landing and proving out
+
+### T8 — Tekton Chains provenance — P2, planning session
+
+**What:** Install Tekton Chains on the Phase-2 cluster; add a second OpenBao
+Transit key (`chains-provenance-key`) with an access policy that denies it
+`transit/sign` on `approval-key`; verify automatic signed SLSA provenance
+per build (`cosign verify-attestation --key <chains-pubkey>`).
+
+**Why:** the third supply-chain leg (how the build happened), signed
+mechanically. `environments/local/openbao` already has an empty `policies`
+input for the scoped policy.
+
+**First task — RESOLVED:** the loopback blocker is gone. The in-cluster
+OpenBao (ADR 0016) serves pods over TLS at
+`https://openbao.openbao.svc.cluster.local:8200` with k8s-ServiceAccount
+auth. Chains adds a `chains-provenance-key` Transit key + a scoped policy
+(deny `transit/sign` on `approval-key`) + a `chains` k8s-auth role — the
+`transit_keys` / `policies` extension points on `environments/local/openbao`
+are the seam.
+
+**Also in T8:** sign the `ci/` OCI bundles with a dedicated key
+([ADR 0014](docs/adr/0014-tekton-defs-are-oci-bundles-in-ci.md)); land
+byte-level build reproducibility (`SOURCE_DATE_EPOCH`,
+`--output rewrite-timestamp=true`) alongside provenance + independent
+rebuild verification.
+
+**Priority:** P2 · **Depends on:** T7 (all of T7a–T7d) shipped.
 
 ### Cilium — planning session needed — P2
 
@@ -1004,7 +377,8 @@ the session:
   `gcr.io`, `ghcr.io`, the OpenBao listener, and the API server all need
   explicit `ToFQDNs` / CIDR allow rules. The A/AAAA set a policy must allow is
   entangled with the single/dual-stack choice above — design them together.
-- **Interim (pre-Cilium) is handled in T7b1-followup** (this file, DONE): Z2
+- **Interim (pre-Cilium) is handled in T7b1-followup** (DONE, see the T7
+  summary above): Z2
   (seed zot from the host + a `buildkitd.toml` mirror so the build stops
   touching docker.io/gcr.io) + N1 (a `disable-ipv6` privileged step 0 on the
   `git-clone` + `buildkit-build` pods). Revisit once Cilium lands: a **v4-only
@@ -1045,32 +419,169 @@ whether Kyverno's admission webhook and Cilium's policy engine overlap.
 **Depends on:** T7c (local Flux — Cilium installs through it). **Priority:** P2
 · runs after the T7 arc, likely alongside the Kyverno module design.
 
-### T8 — Tekton Chains provenance — P2, planning session
+### Plan B — Timoni + Kyverno + Crossplane boundary — P2
 
-**What:** Install Tekton Chains on the Phase-2 cluster; add a second OpenBao
-Transit key (`chains-provenance-key`) with an access policy that denies it
-`transit/sign` on `approval-key`; verify automatic signed SLSA provenance
-per build (`cosign verify-attestation --key <chains-pubkey>`).
+**Shipped 2026-09-10, ship arc COMPLETE:** `M1 → X1 → K1 → M3`, each 1 PR
+= 1 squash commit — **M1** #31 (`b4c0b0c`, `deploy/frontend/timoni/` CUE
+module + `timoni mod vet` gate, ADR 0019); **X1** #32 (`d286867`, ADR
+0018 — render→reconcile→enforce→provision pipeline staging, tofu
+`kubernetes_*` banned); **K1** #33 (`1dc6e91`, Kyverno v1.19.1 via Flux +
+one `ImageValidatingPolicy` gating `cv_frontend` at admission, ADR 0020);
+**M3** #34 (`2c6a1e1`, `mise run frontend:publish` host step delivers via
+Flux OCIRepository/Kustomization into ns `frontend`, ADR 0021). Live on
+`main`: `cv-frontend` runs 1/1 in ns `frontend`, admitted by the approval
+policy; `chainsaw-{kyverno,frontend}` pass post-merge.
 
-**Why:** the third supply-chain leg (how the build happened), signed
-mechanically. `environments/local/openbao` already has an empty `policies`
-input for the scoped policy.
+**Op note:** the interim zot is ephemeral + GC-off — recreate loses
+`D_man` → re-run `frontend:publish` + re-pin (like `frontend:seed`).
 
-**First task — RESOLVED:** the loopback blocker is gone. The in-cluster
-OpenBao (ADR 0016) serves pods over TLS at
-`https://openbao.openbao.svc.cluster.local:8200` with k8s-ServiceAccount
-auth. Chains adds a `chains-provenance-key` Transit key + a scoped policy
-(deny `transit/sign` on `approval-key`) + a `chains` k8s-auth role — the
-`transit_keys` / `policies` extension points on `environments/local/openbao`
-are the seam.
+**Deferred (own triggers):**
 
-**Also in T8:** sign the `ci/` OCI bundles with a dedicated key
-([ADR 0014](docs/adr/0014-tekton-defs-are-oci-bundles-in-ci.md)); land
-byte-level build reproducibility (`SOURCE_DATE_EPOCH`,
-`--output rewrite-timestamp=true`) alongside provenance + independent
-rebuild verification.
+| Item | Trigger |
+|---|---|
+| **O4 / O5** — extract `modules/secret-openbao/` (`moved` blocks — `deletion_allowed=false` on `sops`/`extra` keys makes `tofu destroy` fail partway) + `ha` / `awskms`\|`transit` unseal / `snapshot_schedule` / `tls_issuer` presets. **ADR 0017**. | `environments/production/openbao/` becomes real planned work (the true 2nd consumer — one consumer is not a module, `modules/README.md`). ADR 0012 stands until then. O4 planning also picks up a dedicated OpenBao Transit `manifest-signing` key for the M3 artifact. |
+| **Crossplane install** (core + `provider-*` + a Composition + its own ADR) | a consumer declares backing infra it does not own (bucket / DB / queue / DNS as a CR) — **not** a directory count. |
+| **G1** — Flux SOPS (`--sops-vault-configmap` + ConfigMap + `spec.decryption`) | a named secret needs SOPS decryption. Plan A's Phase C left the OpenBao side (`sops` key, `flux_sops` role) ready. |
+| **Manifest authorization** (Codex #7) — scoped RBAC for the `frontend` kustomize-controller SA + a defined rendered-manifest review path (image approval ≠ authz of the manifests around it) | own review/session. |
+| **Kyverno `ci`-namespace privilege policies** (PSA scalpel, build-pod securityContext) | `cluster-k0sctl` built + the Cilium planning session done. |
+| **`chainsaw-frontend` HTTP-200 assertion** | the cv_frontend Remix v3 boot crash is fixed (cv_frontend repo). |
 
-**Priority:** P2 · **Depends on:** T7 (all of T7a–T7d) shipped.
+**Depends on:** Plan A merged (done, `a3b5a24`). **Priority:** P2. Related:
+**T-DR** overlaps K1's snapshot needs / O5's `snapshot_schedule`; **T8**
+(Tekton Chains) uses the `policies` seam O4 must preserve.
+
+### Kyverno module — accumulating design inputs — P2/P3, planning session
+
+Collects what the Kyverno module must cover before it is built (CLAUDE.md
+§ Tool Boundaries pins Kyverno for admission policy; mechanics are deferred —
+§ Deferred). Runs after `cluster-k0sctl` exists (the production cluster —
+enforcing policy on the throwaway OrbStack dev cluster is not the point), and
+likely alongside the Cilium planning session (this file — the two policy
+engines' overlap is an open question there).
+
+Known inputs so far:
+
+- **Scope the `ci` namespace privileged allowance** — duplicates a row
+  already in Plan B's Deferred table ("Kyverno `ci`-namespace privilege
+  policies", this file, Plan B section above) — see there for the trigger,
+  not restated here.
+- **Build-pod posture enforcement** (from `ci/README.md` § Residual privilege
+  surface). The spike-proven `buildkit-build` `securityContext` ceiling
+  (`SETUID`/`SETGID` only, `seccomp: Unconfined`, `allowPrivilegeEscalation`,
+  `--oci-worker-no-process-sandbox`) is currently guarded by a chainsaw
+  drift-test. A Kyverno policy scoped to `ns=ci` could enforce it at admission —
+  deny anything looser, and deny `SYS_ADMIN`/`SYS_PTRACE`/`privileged` on the
+  build step outright.
+- **ImageValidatingPolicy** — the approval-referrer admission check (its own
+  entry below).
+
+**Design lens (from `/investigate`):** prefer Timoni-render / Flux-reconcile for
+*delivering* config (git-visible, reviewable); reserve Kyverno for *enforcing*
+invariants at admission (deny what shouldn't exist). Do not use Kyverno-mutate
+to inject workarounds — an invisible admission rewrite is worse for review than
+rendered YAML.
+
+**Depends on:** `cluster-k0sctl` module built; the Cilium planning session (run
+first — its datapath choice may delete the `disable-ipv6` input).
+
+### Decide public hosting for cv_frontend
+
+**What:** Choose where the actual public `cv_frontend` site lives for a
+hiring manager to visit — separate from any local demo/proof deploy (the
+T5b `pitchfork`-supervised Docker container was retired — see
+[ADR 0023](docs/adr/0023-retire-adr-0009-pitchfork-demo.md)).
+
+**Why:** Anything running on this dev Mac — whether the earlier
+k8s-namespace plan or T5b's retired pitchfork container — is tied to a
+single machine staying on, not a reasonable uptime story for a public site.
+Candidates worth evaluating: Vercel/Netlify (Remix has first-class
+adapters for both), or the eventual `cluster-k0sctl` production cluster
+once it exists.
+
+**Context:** T5b deployed/ran `cv_frontend` from a verified image for proof
+purposes only, deliberately not for real public hosting, before being
+retired. See [ADR 0023](docs/adr/0023-retire-adr-0009-pitchfork-demo.md)
+for the demo-vs-real-hosting distinction — it still holds.
+
+**Effort:** S (research + decision) / M (actual setup)
+**Priority:** P2
+**Depends on:** digest-as-source-of-truth T5b (demo/proof deploy) proven
+
+### A real resolved-dependency-graph boundary check — planning session
+
+**What:** Run `/plan-eng-review` on replacing (or backstopping) the
+`ls-lint` + `ast-grep` boundary **lint** with a check that validates the
+allowed-edge set against a **resolved** dependency graph, not literal path
+strings.
+
+**Why:** the lint shipped in the restructure (T2a) is honestly scoped — it
+catches literal path strings, relative climbs, and `source`/exec of a
+literal. It does **not** catch a path assembled from variables,
+`source "$x"` resolution, or cross-language task references (its `ast-grep`
+rules are per-language; TOML/Pkl task refs are uncovered). A boundary
+violation built from a variable passes the gate today.
+
+**Candidates to evaluate:** a generated manifest validated by
+`conftest`/OPA (Rego); `tofu graph` for the HCL layer; whether CUE or
+Timoni (already in the stack) can express and validate the edge set; a
+purpose-built resolver. Weigh each against "one more tool" — the lint may
+be enough paired with review.
+
+**Already covered (Plan B X1, ADR 0018):** the one hard tofu edge — no
+`kubernetes_*` / `kubernetes_manifest` resource — is the `no-kubernetes-tf`
+hk step (`tests/check-tf-boundary.sh`, a `git grep`). This session backstops
+only that one; the rest of the HCL layer stays review-only.
+
+**Context:** Codex 2nd-pass finding CX2, user decision CX1=A (ship the
+scoped lint + documented limits + this deferred session).
+`docs/designs/repo-structure.md` § Enforcement / Honest scope.
+
+**Effort:** planning ~1 session; implementation unknown until the approach
+is chosen.
+**Priority:** P3
+**Depends on:** the restructure landed (the lint is the thing being
+backstopped).
+
+### T7a-follow-up — rename `frontend-*` / `attestation-*` to `<tool>-<verb>` — P3
+
+**Open — rename `frontend-*` / `attestation-*` to `<tool>-<verb>`** (P3,
+own task). `frontend-build.sh` / `frontend-publish.sh` /
+`attestation-sign.sh` / `attestation-verify.sh` use the concern name and
+contradict the (unchanged, enforced) Scripts Policy. No single tool
+drives them (tekton + oras + cue; cosign + oras + openbao) — the rename
+needs thought, and it touches `mise.toml` tasks, ADRs, README, bats.
+(`frontend-deploy.sh`/`frontend-serve.sh`, the other two originally named
+here, are gone — ADR 0023 retired them, not renamed them.)
+
+### R5 — OCI-bundle distribution of the `ci/` defs — deferred
+
+**R5 (DEFERRED)** — OCI-bundle distribution of the `ci/` defs
+(`tkn bundle push`, self-contained Pipeline + Task closure, `@sha256:`
+resolver pins). This is ADR 0014's stated end state, recorded UNFINISHED —
+per-run def pinning is unfinished until this ships. **Trigger:** a 2nd
+`ci/` consumer, OR `environments/production/`. Until then a `PipelineRun`
+uses whatever `ci-{tasks,pipelines}` last reconciled from `main` —
+acceptable for a single-operator dev cluster, **not** a pin.
+
+### T7d — production repoint — deferred
+
+**T7d — production repoint (DEFERRED).** Trigger = `environments/production/`
+exists (needs `cluster-k0sctl`, unbuilt). Nothing to repoint until then. With
+R1 done, production's zot is HTTPS + the dev-CA pattern from day one
+(production swaps the CA `issuerRef` for a real backend, leaves the leaves).
+T7d = a `TODOS.md` checklist next to O4/O5, no estimate.
+
+### Pin-drift guard: host `mise.toml` vs `ci/tasks/*` step images — P3
+
+**What:** keep `trivy`/`oras`/`tkn` versions synced between the host toolchain
+(`mise.toml`) and the Tekton Task step images (T7b2 introduces the second pin
+site). **Why:** a scan running a different `trivy` than the linter is a
+silent-wrong-result bug — the class the repo exists to prevent. **First step:**
+**research common conventions** — renovate/dependabot grouped updates, a
+generated lockfile both sides consume, running `mise` *inside* the Task images,
+Tekton image refs as params from one manifest — then iterate + innovate, rather
+than reflexively adding another `mise run check` step. Pins move ~quarterly.
+**Depends on:** T7b2.
 
 ### Tekton Dashboard — P3, deferred
 
@@ -1092,54 +603,6 @@ is a lateral-movement target without a network policy.
 
 **Priority:** P3 · **Depends on:** T7a (Tekton installed). Blocked for
 production on the Cilium + Kyverno module builds.
-
-### T9a — `mise run check` in CI — ✅ DONE (merged, PR #7, `7ae5ad0`)
-
-**What:** `.github/workflows/check.yml` — every push and every PR to main
-runs `mise run check` (the hk `check` hook: shellcheck, pkl, tofu
-fmt/validate/test, cue fmt, ls-lint, ast-grep, bats, check-coverage). One
-definition (`hk.pkl`), two entry points. Report-only (no branch
-protection). Also fixed the one Linux portability break (`stat -f '%A'` →
-`tests/lib/assert.bash` `file_mode()`), made the `[docker]` bats cases
-CI-fatal instead of skip-on-no-docker, added failure diagnostics
-(`bats --print-output-on-failure`, un-silenced docker fixtures), and a
-pitchfork-supervisor pre-start step (the lazily-spawned supervisor
-inherited `hk`'s output pipe and hung it for 25 min — run 34142628643).
-
-**Verified:** warm run 34144986089 green (4m); negative test 34145802826
-red naming the suite; `[docker]` cases execute (no silent skip).
-
-**Branch protection — deliberately NOT added.** Solo repo: the only admin
-is the maintainer, so `enforce_admins=false` exempts every ordinary push
-(not just emergencies) and `enforce_admins=true` adds a recurring
-break-glass ritual the Operational Lifecycle Trace flags as a flaw. CI
-`check` stays advisory. **Revisit trigger:** a second committer joins the
-repo — then a PR-gated `required_status_checks` flow earns its keep.
-
-### T9b — per-commit bisect-safety history gate — ✅ RESOLVED BY POLICY (no code)
-
-**Outcome:** dropped. The bisect-safety goal is met by a **squash-merge
-policy** instead of a per-commit replay workflow. The repo now allows
-squash merges only (merge-commit + rebase disabled, head branch
-auto-deleted, `gh api` repo settings), so every push to `main` is one
-commit and `check.yml` (T9a) verifying that commit == full per-commit
-`git bisect` safety, for free.
-
-**Why not build the standing matrix:** ~7 min runner time per intermediate
-commit on every push, redundant with `check.yml` on the tip/merge, low hit
-rate for a solo dev who commits carefully and runs `mise run check` per
-phase by hand, and a 3rd workflow + dynamic matrix + enumerate script +
-aggregate job to keep green. Negative space beats it.
-
-**If bisect through pre-policy merge commits is ever needed** (`4510b1a`
-etc. never ran `mise run check` in isolation): `git bisect run` with a
-predicate that does `mise install && mise run check`, exit 125 to
-`git bisect skip` on an infra/install failure. Pay the cost only when
-actually bisecting; no standing CI. Not built — write it if the need
-appears.
-
-**Recorded in:** `CLAUDE.md` § CI check gate & merge policy;
-`docs/designs/digest-as-source-of-truth.md` § Phasing.
 
 ### T10 — VEX hardening — P3, post-T8
 
@@ -1180,91 +643,12 @@ the real work)
 **Depends on:** an actual amd64 deploy or demo target; digest-as-source-of-
 truth T5/T5b proven on arm64 first
 
-### Decide public hosting for cv_frontend
+### Kyverno ImageValidatingPolicy for real admission-time enforcement — production cluster
 
-**What:** Choose where the actual public `cv_frontend` site lives for a
-hiring manager to visit — separate from the demo/proof deploy T5b adds (a
-standalone `pitchfork`-supervised Docker container on this dev Mac —
-`docs/adr/0009-demo-consumer-is-local-container-not-k8s.md`).
-
-**Why:** Anything running on this dev Mac — whether the earlier
-k8s-namespace plan or T5b's pitchfork container — is tied to a single
-machine staying on, not a reasonable uptime story for a public site.
-Candidates worth evaluating: Vercel/Netlify (Remix has first-class
-adapters for both), or the eventual `cluster-k0sctl` production cluster
-once it exists.
-
-**Context:** T5b deploys/runs `cv_frontend` from a verified image for proof
-purposes only, deliberately not for real public hosting. See
-`docs/adr/0009-demo-consumer-is-local-container-not-k8s.md` for the
-demo-vs-real-hosting distinction.
-
-**Effort:** S (research + decision) / M (actual setup)
-**Priority:** P2
-**Depends on:** digest-as-source-of-truth T5b (demo/proof deploy) proven
-
-
-### Retrofit vm-orbstack, cluster-k0sctl, secret-openbao to digest-pinning
-
-**What:** Pin the three existing OpenTofu modules' git sources by commit SHA
-instead of a mutable tag, matching the pattern proven in the
-digest-as-source-of-truth pipeline.
-
-**Why:** Closes the gap this whole design is about — for the modules that
-actually provision production infra, not just the CI pipeline wedge.
-
-**Context:** Deliberately out of scope for the pipeline wedge — it proves
-the pattern on `deploy/frontend/` first. Once Phase 1-2 are proven, apply
-the same `ref=<sha>` convention here.
-`docs/adr/0001-digest-is-the-trust-boundary.md` frames git commit SHA as
-the digest-equivalent for git-sourced modules.
-
-**Effort:** M
-**Priority:** P2
-**Depends on:** digest-as-source-of-truth Phase 1-2 landing and proving out
-
-### Kyverno module — accumulating design inputs — P2/P3, planning session
-
-Collects what the Kyverno module must cover before it is built (CLAUDE.md
-§ Tool Boundaries pins Kyverno for admission policy; mechanics are deferred —
-§ Deferred). Runs after `cluster-k0sctl` exists (the production cluster —
-enforcing policy on the throwaway OrbStack dev cluster is not the point), and
-likely alongside the Cilium planning session (this file — the two policy
-engines' overlap is an open question there).
-
-Known inputs so far:
-
-- **Scope the `ci` namespace privileged allowance** (from `/investigate`
-  2026-09-08). T7b1-followup adds one privileged step (`disable-ipv6`, step 0,
-  runs `sysctl -w net.ipv6.conf.{all,default,lo}.disable_ipv6=1`, then exits)
-  to the `git-clone` + `buildkit-build` pods — the interim IPv6 workaround.
-  Today the `ci` ns is blanket PSA `privileged`. A Kyverno `validate` policy
-  should turn that into a scalpel: permit `privileged: true` **only** on a
-  container named `disable-ipv6` whose command is `sysctl`, and deny every
-  other privileged container in `ns=ci`. This hardens N1 and is the right
-  long-term home for it. (Note: if the Cilium planning session settles on a
-  v4-only datapath, the `disable-ipv6` step goes away and this input is moot —
-  sequence Kyverno after Cilium.)
-- **Build-pod posture enforcement** (from `ci/README.md` § Residual privilege
-  surface). The spike-proven `buildkit-build` `securityContext` ceiling
-  (`SETUID`/`SETGID` only, `seccomp: Unconfined`, `allowPrivilegeEscalation`,
-  `--oci-worker-no-process-sandbox`) is currently guarded by a chainsaw
-  drift-test. A Kyverno policy scoped to `ns=ci` could enforce it at admission —
-  deny anything looser, and deny `SYS_ADMIN`/`SYS_PTRACE`/`privileged` on the
-  build step outright.
-- **ImageValidatingPolicy** — the approval-referrer admission check (its own
-  entry below).
-
-**Design lens (from `/investigate`):** prefer Timoni-render / Flux-reconcile for
-*delivering* config (git-visible, reviewable); reserve Kyverno for *enforcing*
-invariants at admission (deny what shouldn't exist). Do not use Kyverno-mutate
-to inject workarounds — an invisible admission rewrite is worse for review than
-rendered YAML.
-
-**Depends on:** `cluster-k0sctl` module built; the Cilium planning session (run
-first — its datapath choice may delete the `disable-ipv6` input).
-
-### Kyverno ImageValidatingPolicy for real admission-time enforcement
+**Dev-cluster half already shipped:** Plan B K1 / ADR 0020 put one
+`ImageValidatingPolicy` live on the OrbStack dev cluster, gating
+`cv_frontend` at admission. This item is now specifically the
+**production**-cluster instantiation of the same mechanism.
 
 **What:** A Kyverno policy on the production cluster that rejects any image
 digest lacking a validly-signed approval referrer at real k8s admission
@@ -1288,6 +672,34 @@ environment.
 **Priority:** P3
 **Depends on:** cluster-k0sctl module built, digest-as-source-of-truth
 Phase 2-3 proven
+
+### Remove `crane` from the stack entirely — planning session — P3
+
+**What:** `crane`'s zot-facing use is gone (R1b-ii-c swapped `registry-seed.sh`
+to `oras cp`); the one remaining call is `openbao-verify.sh`'s `crane digest`
+against a public chart registry (quay.io/ghcr.io — real HTTPS, system trust,
+unaffected by the CA-file gap). Investigate whether that call can move to
+`oras` (or `helm show chart`/`helm pull --digest`, since it's specifically a
+Helm OCI chart digest check) so `google/go-containerregistry` drops out of
+`mise.toml` altogether — one fewer pinned tool, one fewer thing with its own
+Go-toolchain/CA quirks to reason about.
+
+**Why:** every pinned tool is a maintenance surface (CLAUDE.md § Tool
+Boundaries — one job per tool); if `oras` already covers the one remaining
+job, keeping `crane` around too is redundant coverage the repo's own
+constraints call out as a smell, not a strict-overlap violation to ignore.
+
+**Also fold in:** a broader look at where else a dedicated single-purpose
+CLI could collapse into an already-pinned tool the same way — OpenBao's own
+tooling surface (`bao` CLI vs. direct API calls the scripts already make in
+places) is the other candidate worth the same question in the same session.
+
+**First step:** confirm `oras`/`helm` can do a digest-only chart-pin check
+without pulling the full chart (matching `openbao-verify.sh`'s current
+cheap-check shape) before committing to the swap.
+
+**Depends on:** R1b-ii-c (crane's zot use) landed. **Triggers with:** the
+next chart-pin gate touch, or a dedicated tooling-consolidation session.
 
 ### Upgrade cosign signing to public trust (Fulcio/keyless or published key)
 
