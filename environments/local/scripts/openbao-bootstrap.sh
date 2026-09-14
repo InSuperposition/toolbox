@@ -289,6 +289,12 @@ echo "==> Phase A — tofu apply helm_release.openbao (state: $TFSTATE)"
 export TF_VAR_kube_context="$CONTEXT"
 export TF_VAR_openbao_endpoint="$ENDPOINT"
 export TF_VAR_openbao_ca="$CA_FILE"
+# T8 — build provenance (TODOS.md): the one extra Transit key this bridge
+# provisions via the var.transit_keys extension point. Every successful
+# bootstrap run already re-snapshots the raft store (refresh_bundle_from_cluster,
+# below) and backs up tfstate, so this key's disaster-recovery story is
+# covered by the existing flow — no separate capture step needed.
+export TF_VAR_transit_keys='[{"name":"chains-provenance-key","type":"ecdsa-p256"}]'
 tofu -chdir="$UNIT_DIR" init -input=false >/dev/null
 tofu -chdir="$UNIT_DIR" apply -auto-approve -input=false \
 	-state="$TFSTATE" -target=helm_release.openbao

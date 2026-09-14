@@ -65,6 +65,13 @@ image: #image
 		// terminal condition rather than orphaning pods.
 		timeouts: pipeline: "15m"
 		pipelineRef: name:  "build-scan-approve"
+		// T8 (TODOS.md): only provenance-sign runs as provenance-signer —
+		// every other PipelineTask keeps the ci namespace's default SA.
+		// The role it authenticates to is scoped to chains-provenance-key
+		// only (environments/local/openbao/main.tf), never approval-key.
+		taskRunSpecs: [
+			{pipelineTaskName: "provenance-sign", serviceAccountName: "provenance-signer"},
+		]
 		params: [
 			{name: "IMAGE", value: #image.inCluster},
 			{name: "APP_REPO_URL", value: "https://github.com/InSuperposition/cv_frontend.git"},

@@ -208,3 +208,34 @@ resource "vault_kubernetes_auth_backend_role" "flux_sops" {
   token_policies                   = [vault_policy.flux_sops_decrypt.name]
   token_ttl                        = var.sops_auth.token_ttl_seconds
 }
+
+# T8 — build provenance (TODOS.md). Sign AND read (round-2 Codex outside-
+# voice finding: `sign` alone omits the pubkey-read path cosign's hashivault
+# KMS client needs just to run at all — sigstore/sigstore v1.10.8
+# pkg/signature/kms/hashivault/client.go). Never `approval-key` — this is a
+# separate key, `vault_transit_secret_backend_key.extra["chains-provenance-key"]`,
+# not the restore-managed one.
+resource "vault_policy" "chains_provenance_sign" {
+  name = "chains_provenance_sign"
+
+  policy = <<-HCL
+    path "transit/sign/chains-provenance-key" {
+      capabilities = ["update"]
+    }
+    path "transit/keys/chains-provenance-key" {
+      capabilities = ["read"]
+    }
+  HCL
+
+  depends_on = [helm_release.openbao]
+}
+
+resource "vault_kubernetes_auth_backend_role" "chains_provenance" {
+  backend                          = vault_auth_backend.kubernetes.path
+  role_name                        = "chains_provenance"
+  bound_service_account_names      = [var.chains_auth.service_account_name]
+  bound_service_account_namespaces = [var.chains_auth.service_account_namespace]
+  audience                         = var.openbao_endpoint
+  token_policies                   = [vault_policy.chains_provenance_sign.name]
+  token_ttl                        = var.chains_auth.token_ttl_seconds
+}

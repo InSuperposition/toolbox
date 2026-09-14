@@ -3,7 +3,7 @@
 # Flux's kustomize-controller auto-generates a recursive inventory when a
 # reconciled path has no kustomization.yaml — that walk would reach the
 # chainsaw Test CRs + fixtures under ci/tests/**. This file enumerates ONLY
-# the four reusable Tekton Task defs, the same reason
+# the reusable Tekton Task defs, the same reason
 # environments/local/flux/kustomization.yaml is explicit.
 #
 # ci/ owns this file (the per-path inventory of its own defs);
@@ -15,4 +15,5 @@ resources:
   - buildkit-build.yaml
   - gate.yaml
   - git-clone.yaml
+  - provenance-sign.yaml
   - scan-attach.yaml

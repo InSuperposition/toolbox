@@ -57,6 +57,22 @@ setup() {
 	[ "$status" -ne 0 ]
 }
 
+@test "checksum matches -> also patches feature-flags to enable-api-fields=alpha (T8 stdoutConfig)" {
+	run "$SW"
+	[ "$status" -eq 0 ]
+	grep -q -- '--context testctx patch configmap feature-flags -n tekton-pipelines --type merge -p {"data":{"enable-api-fields":"alpha"}}' "$KLOG"
+}
+
+@test "the feature-flags patch runs AFTER the verified apply, never before" {
+	run "$SW"
+	[ "$status" -eq 0 ]
+	apply_line="$(grep -n -- 'apply --server-side' "$KLOG" | head -1 | cut -d: -f1)"
+	patch_line="$(grep -n -- 'patch configmap feature-flags' "$KLOG" | head -1 | cut -d: -f1)"
+	[ -n "$apply_line" ]
+	[ -n "$patch_line" ]
+	[ "$apply_line" -lt "$patch_line" ]
+}
+
 @test "checksum mismatch -> exit 1 and nothing is applied" {
 	sed -i.bak 's/^sha256=.*/sha256=0000000000000000000000000000000000000000000000000000000000000000/' "$LOCK"
 	run "$SW"

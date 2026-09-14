@@ -134,3 +134,18 @@ variable "sops_auth" {
   })
   default = {}
 }
+
+# T8 — build provenance (TODOS.md). Binds a NEW, narrowly-scoped k8s-auth
+# role to the provenance-sign Tekton Task's own ServiceAccount (owned by
+# `ci/runtime/`, this unit never creates it — a cross-concern reference by
+# name only, not a file edge). Short TTL: signing happens once, immediately,
+# same reasoning as sops_auth.
+variable "chains_auth" {
+  description = "Binds the OpenBao k8s-auth role `chains_provenance` to the provenance-sign Task's ServiceAccount (`ci/runtime/provenance-signer-sa.yaml`). token_ttl in SECONDS."
+  type = object({
+    service_account_name      = optional(string, "provenance-signer")
+    service_account_namespace = optional(string, "ci")
+    token_ttl_seconds         = optional(number, 300) # 5m
+  })
+  default = {}
+}

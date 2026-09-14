@@ -1,7 +1,14 @@
-# T7b1/T7b2/T7b3 — the in-cluster build pipeline:
-#   clone-app -> clone-defs -> build -> scan-attach -> gate.
+# T7b1/T7b2/T7b3/T8 — the in-cluster build pipeline:
+#   clone-app -> clone-defs -> build -> scan-attach -> provenance-sign -> gate.
 # `gate` (ci/tasks/gate.yaml) runs last and fails the run on a CRITICAL
 # finding, reading the same scan.json scan-attach attached as evidence.
+# `provenance-sign` (T8, TODOS.md) runs sequentially after `scan-attach`,
+# not in parallel with it — both would write to the same `shared` PVC from
+# separate pods; sequential avoids a concurrent-mount question this repo
+# hasn't needed to answer yet, at the cost of one extra step's latency on
+# a single-node dev cluster. It sits BEFORE `gate` (like `scan-attach`) —
+# evidence is attached regardless of the scan verdict, same reasoning as
+# scan-attach's own comment below.
 #
 # Consumer-agnostic (ADR 0014, rules/boundary-ci.yml): every concrete value
 # is a param. The per-consumer PipelineRun that binds cv_frontend's repo
@@ -120,8 +127,19 @@ spec:
       workspaces:
         - { name: shared, workspace: shared }
         - { name: ca-bundle, workspace: ca-bundle }
-    - name: gate
+    - name: provenance-sign
       runAfter: [scan-attach]
+      taskRef:
+        name: provenance-sign
+      params:
+        - { name: IMAGE, value: $(params.IMAGE) }
+        - { name: APP_REVISION, value: $(params.APP_REVISION) }
+        - { name: REGISTRY_INSECURE, value: $(params.REGISTRY_INSECURE) }
+      workspaces:
+        - { name: shared, workspace: shared }
+        - { name: ca-bundle, workspace: ca-bundle }
+    - name: gate
+      runAfter: [provenance-sign]
       taskRef:
         name: gate
       workspaces:
