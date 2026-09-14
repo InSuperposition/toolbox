@@ -361,9 +361,13 @@ rationale: `docs/adr/`. Open work and phase sequencing: `TODOS.md`.
 
 Shape: distroless Dockerfile build (`docs/adr/0007`) → trivy scan + SBOM +
 scan-report referrers → cosign-signed approval gate backed by OpenBao
-Transit (`docs/adr/0004`). Phase 1 (shipped) runs as GitHub Actions + GHCR
-on a native `linux/arm64` runner; Phase 2+ moves to Tekton
-Pipelines/Chains + `zot` on OrbStack's k8s (`docs/adr/0003`, deferred).
+Transit (`docs/adr/0004`). Phase 2 (shipped) runs as Tekton
+Pipelines on OrbStack's k8s, delivering into the in-cluster `zot`
+(`docs/adr/0003`, T7c). Phase 1 (GitHub Actions + GHCR on a native
+`linux/arm64` runner) proved the pipeline shape first and was retired
+once Phase 2 proved stable end to end (T7c R4). Tekton Chains provenance
+is Phase 3, still deferred (T8, blocked on the in-cluster OpenBao move
+past its loopback listener).
 [Pipelines-as-Code](https://pipelinesascode.com/) (not raw Tekton
 Triggers/EventListener) remains the already-researched *webhook-triggering*
 mechanism for if/when this pipeline moves from on-demand to webhook-driven.

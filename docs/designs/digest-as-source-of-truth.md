@@ -58,9 +58,13 @@ build ─▶ scan+gate ─▶ evidence referrers ─▶ human approval ─▶ co
    digest-pinned distroless Node image from `deploy/frontend/Dockerfile`
    ([ADR 0007](../adr/0007-distroless-dockerfile-not-buildpacks.md)),
    `linux/arm64` only ([ADR 0008](../adr/0008-arm64-only.md)), pushed to
-   the registry by digest. Phase 1 runs this as a GitHub Actions workflow
-   on a native `ubuntu-24.04-arm` runner
-   (`.github/workflows/build-cv-frontend.yml`).
+   the registry by digest. Phase 2's daemonless rootless BuildKit runs this
+   in-cluster (`ci/` — the `build-scan-approve` Pipeline, T7b3) against the
+   in-cluster zot; Phase 1's GitHub Actions workflow
+   (`.github/workflows/build-cv-frontend.yml`, a native `ubuntu-24.04-arm`
+   runner pushing to GHCR) proved the pipeline shape first and was retired
+   once T7c's distribution phase (R4) proved the in-cluster path stable
+   end to end.
 
 2. **Scan + gate** — `trivy image` produces a JSON scan report and a
    CycloneDX SBOM, both attached to the image digest as OCI 1.1 referrers
@@ -302,9 +306,11 @@ independently (Gall's Law). The full sequencing lives in `TODOS.md`.
   Increment 0 (checksum-gated Tekton install) → 1a/1b (Flux bootstrap +
   chainsaw) → 2 (Flux reconciles `zot` + `ci/{runtime,tasks,pipelines}` from a
   `GitRepository`) all shipped; Increment 4+ (in-cluster OpenBao) is a
-  separate plan. **Distribution phase** — pin + cosign-sign the defs as OCI
-  bundles, retire `build-cv-frontend.yml`. **T7d** — production repoint. Full
-  detail in `TODOS.md`.
+  separate plan. **Distribution phase (T7c R1-R4) — shipped**: zot HTTPS,
+  the in-cluster delivery path (M3) repointed from GHCR to zot, the
+  documented end-to-end acceptance run, and `build-cv-frontend.yml`
+  retired. **R5 (deferred)** — pin + cosign-sign the `ci/` defs as OCI
+  bundles. **T7d** — production repoint. Full detail in `TODOS.md`.
 
   **T7a Step 1 spike result (2026-09-08, orb k8s v1.35.6, Tekton Pipelines
   v1.6.0):** daemonless rootless BuildKit built `cv_frontend` in-cluster and

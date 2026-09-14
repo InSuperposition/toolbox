@@ -380,10 +380,11 @@ review; branch `ci/t7a-followup-hygiene`.
 
 **T7b — the working in-cluster Pipeline (re-cut 2026-09-08).**
 Full plan + eng-review report: `~/.claude/plans/t7b-pipeline-recut.md`. Scope
-is **the working Pipeline + an end-to-end demo only** — the OCI-bundle
-distribution and `build-cv-frontend.yml` retirement are **deferred to a phase
-after the T7c pre-plan** (that pre-plan decides the reconciler, which owns the
-pin mechanism). Sub-phased, each ships + tests on its own:
+was **the working Pipeline + an end-to-end demo only** — the OCI-bundle
+distribution (R5) stays deferred; `build-cv-frontend.yml` retirement
+happened in T7c R4 (2026-09-14), once the T7c pre-plan's distribution
+tail (R1-R3) proved the in-cluster path stable end to end. Sub-phased,
+each ships + tests on its own:
 
 - **T7b0** — interim **zot** on orb (pulled forward from T7d). ✅ **DONE.**
   `environments/local/zot/zot.yaml` (one multi-doc manifest, image pinned by
@@ -726,12 +727,20 @@ first:
   (`192.168.194.237:5000`), unlike the host shell (which OrbStack bridges
   into the cluster network directly) or an actual k8s pod. Real infra gap,
   not a script bug — see T-ADR9 below.
-- **R3** — one documented end-to-end acceptance run (zot only), each hop +
-  digest asserted. Closes T7b's deferred end-to-end demo.
-- **R4** — delete `.github/workflows/build-cv-frontend.yml` + the GHCR
-  `cv-frontend*` packages + the verified doc sweep. Gated on R3. **Do not
-  carry `build-cv-frontend.yml`'s embedded `run:` shell** (`:48` `tr`,
-  `:98` digest-extract + `case`) into anything.
+- **R3** — ✅ **DONE (2026-09-14).** One documented end-to-end acceptance
+  run (zot only), each hop + digest asserted, in
+  `environments/local/README.md`. Closes T7b's deferred end-to-end demo.
+  Surfaced + fixed live along the way: `kyverno-reports-controller` (the
+  background PolicyReport scanner, separate pod from `admissionController`)
+  had no zot CA trust — observability-path only, real admission
+  enforcement was unaffected.
+- **R4** — ✅ **DONE (2026-09-14).** Deleted
+  `.github/workflows/build-cv-frontend.yml` + the doc sweep (`ci/README.md`,
+  `deploy/frontend/README.md`, `digest-as-source-of-truth.md`, ADR 0003,
+  `CLAUDE.md`). **GHCR `cv-frontend*` package deletion still pending** —
+  this session's `gh` token lacks `delete:packages`; needs
+  `gh auth refresh -s delete:packages` (interactive) before
+  `gh api -X DELETE` can run.
 - **R5 (DEFERRED)** — OCI-bundle distribution of the `ci/` defs
   (`tkn bundle push`, self-contained Pipeline + Task closure, `@sha256:`
   resolver pins). This is ADR 0014's stated end state, recorded UNFINISHED —
@@ -749,7 +758,9 @@ T7d = a `TODOS.md` checklist next to O4/O5, no estimate.
 **Priority:** P2 · **Depends on:** ~~T5 + T5b~~ done. **T7b0–T7b3** ✓ →
 **T7c pre-plan + Increments 0/1a/1b/2** ✓ → Increment 4 (in-cluster OpenBao) ✓
 → distribution tail `R1a ✓ → R1b-i ✓ → R1b-ii ✓ (flux push's --insecure-registry
-interim accepted, not blocking) → R2 → R3 → R4`; R5 + T7d deferred.
+interim accepted, not blocking) → R2 ✓ → R3 ✓ → R4 ✓ (package deletion
+pending — see R4 above)`; the T7 arc is functionally complete. R5 + T7d
+deferred, no trigger yet.
 
 ### T-ADR9 — ADR-0009 pitchfork demo vs. in-cluster zot — P3, planning session
 

@@ -41,9 +41,8 @@ our reusable code — they are `environments/local/`'s concern (interim
 | `ci/` | **what** the build does — the Tekton Task/Pipeline graph, parameterised, consumer-agnostic | content digest (the distribution mechanism — `tkn bundle` vs Flux `OCIRepository` — is decided in the T7c pre-plan; `TODOS.md` T7) |
 | `.github/workflows/` | **where/when** it runs — the GitHub-hosted runner, the trigger | the workflow file on the branch |
 
-Phase 1's `.github/workflows/build-cv-frontend.yml` is retired in the
-post-T7c distribution phase, once the pinned in-cluster path is stable
-(`TODOS.md` T7).
+Phase 1's `.github/workflows/build-cv-frontend.yml` was retired once the
+pinned in-cluster path (T7c) proved stable end to end (`TODOS.md` T7, R4).
 
 ## Files
 
