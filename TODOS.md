@@ -629,11 +629,14 @@ dedicated planning/research session, not blocking R2–R4.
 
 **What:** a corrected, cited map of every identity boundary in the repo
 today, plus an ordered, small-transaction rollout of SPIFFE/SPIRE where it
-closes an *already-open* gap — not a rewrite. Full plan:
-`~/.claude/plans/let-s-go-with-the-steady-treehouse.md`. Owns and is
-cross-referenced from: "zot registry auth", "Flux / registry CA trust",
-"Auth + multi-member DX", T8, and the Cilium planning-session entry
-(all this file).
+closes an *already-open* gap — not a rewrite. Full plan: this entry
+(inline, below) — the plan-file path previously cited here
+(`~/.claude/plans/let-s-go-with-the-steady-treehouse.md`) was overwritten
+by an unrelated, already-shipped "remove crane" plan and no longer holds
+SPIRE content (found 2026-09-15); this section is the sole source of
+record. Owns and is cross-referenced from: "zot registry auth", "Flux /
+registry CA trust", "Auth + multi-member DX", T8, and the Cilium
+planning-session entry (all this file).
 
 **Why now:** the sharpest, most concrete, already-self-diagnosed gap in
 the stack — `docs/designs/digest-as-source-of-truth.md` § Trust boundary
@@ -664,10 +667,15 @@ not pattern-matched from training data):**
   Real options: `jwt` auth + JWT-SVID (works today, but JWT-SVIDs are
   bearer tokens — SPIFFE's own spec: proof-of-possession is via TLS for
   X.509-SVID, not achievable the same way for a bearer JWT) vs. `cert`
-  auth + X.509-SVID mTLS (stronger, matches "JWT isn't secure enough" —
-  but whether OpenBao's `cert` backend extracts identity from a URI SAN
-  rather than only CN is **unverified** — Phase 0 spikes this before any
-  real wiring).
+  auth + X.509-SVID mTLS. **RESOLVED by Phase 0 (2026-09-15, ADR 0024):**
+  `cert` auth rejected — OpenBao 2.6.2's `cert` backend unconditionally
+  builds the identity alias from the client cert's Common Name, and
+  SPIFFE X.509-SVIDs carry no CN by spec; login fails with `"missing name
+  in alias"` even when `allowed_uri_sans` correctly matches (live-verified:
+  a mismatched SVID is correctly rejected with a different error, `"no
+  chain matching all constraints"`, proving the URI SAN gate itself works
+  — it's alias creation afterward that hard-fails, with no config
+  workaround). Phase 3 targets `jwt` auth + JWT-SVID instead.
 - **Registry-CA-trust "mesh" question** — Cilium's Mutual Authentication
   is confirmed pod-to-pod only, explicitly incompatible with external/host
   mTLS ([docs.cilium.io](https://docs.cilium.io/en/stable/network/servicemesh/mutual-authentication/mutual-authentication/)) —
@@ -680,10 +688,12 @@ not pattern-matched from training data):**
 
 **Phases (each its own PR, gated on the previous phase's verification):**
 
-0. **Spike** — throwaway SPIRE Server + Agent; confirm OpenBao `cert` auth
-   extracts a SPIFFE ID from an X.509-SVID's URI SAN. Decides whether
-   Phase 3 targets `cert` auth or falls back to `jwt` auth. No production
-   wiring; a finding, not code.
+0. **Spike — DONE (2026-09-15, ADR 0024).** Throwaway SPIRE Server +
+   Agent + throwaway OpenBao container (all Docker, teardown after);
+   confirmed OpenBao `cert` auth cannot authenticate a stock SPIFFE
+   X.509-SVID (no CN → `"missing name in alias"`). **Phase 3 targets
+   `jwt` auth + JWT-SVID**, not `cert`. No production wiring landed;
+   this was a finding, not code.
 1. **SPIRE Server + Agent in-cluster; zot mTLS** — new concern directory
    `environments/local/spire/` (sibling to `openbao/`, same tofu-unit
    skeleton). SPIRE's intermediate cert issued via OpenBao's PKI secrets
@@ -696,6 +706,14 @@ not pattern-matched from training data):**
    CLI tools (`flux push`, `oras`, `frontend-publish.sh`,
    `registry-seed.sh`) present an X.509-SVID to zot instead of per-CLI
    `--ca-file` patchwork. Closes "Flux / registry CA trust."
+   **Blocker flagged (2026-09-15, found as a side effect of Phase 0):**
+   SPIRE ships no darwin release binaries at all — only
+   `linux-{amd64,arm64}-musl` tarballs and a windows zip (confirmed via
+   the GitHub releases API for spiffe/spire v1.11.0). "Host-side SPIRE
+   Agent... on the dev Mac" cannot use a host-native binary as written;
+   needs a different mechanism (a host-run Linux container, a VM, or
+   reconsidering the approach) before this phase is planned further. Not
+   solved — flagged only.
 3. **OpenBao signing identity** — gated on Phase 0. `attestation-sign.sh`
    authenticates via the host SVID → OpenBao `cert` (or `jwt`, if the
    spike fails) auth → a policy scoped to `transit/sign/approval-key`
