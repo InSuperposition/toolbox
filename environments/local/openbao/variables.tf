@@ -149,3 +149,19 @@ variable "chains_auth" {
   })
   default = {}
 }
+
+# SPIRE Phase 1 (TODOS.md). Binds a NEW, narrowly-scoped k8s-auth role to
+# the future spire-server ServiceAccount (created by the `spire` Helm
+# release, PR 2 — not yet created; this unit never creates it, a
+# cross-concern reference by name only, not a file edge). Short TTL: the
+# vault upstreamAuthority plugin logs in, signs its intermediate CSR, and
+# is done — same reasoning as sops_auth/chains_auth.
+variable "spire_auth" {
+  description = "Binds the OpenBao k8s-auth role `spire_server` to the future spire-server ServiceAccount (`environments/local/spire/`, PR 2). token_ttl in SECONDS."
+  type = object({
+    service_account_name      = optional(string, "spire-server")
+    service_account_namespace = optional(string, "spire")
+    token_ttl_seconds         = optional(number, 300) # 5m
+  })
+  default = {}
+}
