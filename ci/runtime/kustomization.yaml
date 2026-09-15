@@ -14,3 +14,4 @@ resources:
   - namespace.yaml
   - buildkitd-mirror.yaml
   - provenance-signer-sa.yaml
+  - spiffe-helper-config.yaml

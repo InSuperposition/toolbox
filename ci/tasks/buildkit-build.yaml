@@ -44,8 +44,16 @@
 #     zot is HTTPS with a cert-manager dev CA, so the default is `false` and
 #     that same buildkitd.toml `ca = [...]` entry covers both directions
 #     (buildkitd resolves push and mirror-pull trust by hostname, not by
-#     direction). No `dockerconfig` workspace either way (zot is
-#     credential-free; `TODOS.md` § "zot registry auth" is the P2 follow-up).
+#     direction).
+#   * zot now requires a valid SPIFFE client cert to push (SPIRE Phase 1
+#     PR 3, ADR 0025/0026 — no longer credential-free). The `fetch-svid`
+#     step below fetches a fresh SVID from the local node's spire-agent
+#     Workload API (a hostPath socket — the `spiffe-csi-driver` isn't
+#     enabled yet) via the pinned `spiffe-helper` binary, writing it to a
+#     fixed path `buildkitd-mirror.yaml`'s zot entry already points its
+#     `keypair` at. `daemon_mode = false` (fetch once, exit) is correct
+#     here — this Task's steps run sequentially in one pod lifetime, well
+#     under a fresh SVID's default TTL, so no rotation/reload is needed.
 #   * The build CONTEXT is the `source` workspace (the app checkout, staged
 #     by the `git-clone` Task). The DOCKERFILE is `$(params.DOCKERFILE_DIR)`
 #     within the `build-defs` workspace (a separate toolbox checkout — the
@@ -189,6 +197,32 @@ spec:
         - "net.ipv6.conf.all.disable_ipv6=1"
         - "net.ipv6.conf.default.disable_ipv6=1"
         - "net.ipv6.conf.lo.disable_ipv6=1"
+    # Fetches this Task's SPIFFE SVID before the build runs — zot now
+    # requires it to push (SPIRE Phase 1 PR 3). No embedded shell: the
+    # pinned `spiffe-helper` binary is invoked directly, same as every
+    # other step in this Task. runAsUser MUST match the `build` step's
+    # (1000) — live-verified: spiffe-helper's key file is 0600, owned by
+    # whoever wrote it; a UID mismatch between this step and `build` is
+    # a real "permission denied" reading it, not a hypothetical.
+    - name: fetch-svid
+      image: ghcr.io/spiffe/spiffe-helper:0.11.0@sha256:1c92e5998ad3621e3323f25aabe40f5a88ba730ee0edb248aa8c943ca504e8a2
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+      command: ["/spiffe-helper"]
+      args:
+        - -config
+        - /spiffe-helper-cfg/helper.hcl
+      volumeMounts:
+        - name: spiffe-helper-config
+          mountPath: /spiffe-helper-cfg
+          readOnly: true
+        - name: spire-agent-socket
+          mountPath: /run/spire/agent-sockets
+          readOnly: true
+        - name: svid-certs
+          mountPath: /svid-certs
     - name: build
       image: docker.io/moby/buildkit:rootless@sha256:80b15f0735e87bab7bf59ec4d695dfb4a7cfb25521cf56dc75d6f256285b63ef
       securityContext:
@@ -206,6 +240,10 @@ spec:
           value: /tekton/home
         - name: BUILDKITD_FLAGS
           value: "$(params.BUILDKITD_FLAGS) --config /cfg/buildkitd.toml"
+      volumeMounts:
+        - name: svid-certs
+          mountPath: /svid-certs
+          readOnly: true
       command: ["buildctl-daemonless.sh"]
       args:
         - build
@@ -231,3 +269,19 @@ spec:
           .["containerimage.digest"]
           | if test("^sha256:[0-9a-f]{64}$") then . else error("malformed digest") end
         - /tekton/home/build-metadata.json
+  # Task-owned infra mounts, not consumer-parameterized (unlike the
+  # `workspaces` above) — same class as `disable-ipv6`'s hardcoded
+  # sysctl values. spire-agent's Workload API socket is a hostPath since
+  # the spiffe-csi-driver isn't enabled yet (ADR 0026); the ConfigMap
+  # and emptyDir are `ci/`-owned, fixed, referenced by name directly
+  # (same footing as `provenance-signer-sa.yaml`, not per-consumer data).
+  volumes:
+    - name: spiffe-helper-config
+      configMap:
+        name: spiffe-helper-config
+    - name: spire-agent-socket
+      hostPath:
+        path: /run/spire/agent-sockets
+        type: DirectoryOrCreate
+    - name: svid-certs
+      emptyDir: {}

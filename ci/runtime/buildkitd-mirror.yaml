@@ -11,6 +11,14 @@
 # (already reconciled into ns `ci`, T7c R1b-ii-a/ADR 0022) so a CA
 # rotation flows through without touching this file.
 #
+# The zot entry's `keypair` (SPIRE Phase 1 follow-up, TODOS.md "Wire
+# buildkit-build's real Task...") IS baked in here, unlike `ca` above —
+# the path is a build-time constant (the `fetch-svid` step in
+# buildkit-build.yaml always writes to this same emptyDir mount), not
+# something that rotates independently of a Task/ConfigMap change the
+# way the CA does. zot now requires this cert to push (SPIRE Phase 1
+# PR 3, ADR 0025/0026).
+#
 # INTERIM + LOCAL-SPECIFIC. The mirror target (`zot.zot.svc.cluster.local:5000`)
 # is this dev cluster's zot; a production pipeline binds its own ConfigMap to
 # the build Task's `buildkitd-config` workspace. Once the Cilium module's
@@ -32,3 +40,6 @@ data:
       mirrors = ["zot.zot.svc.cluster.local:5000"]
     [registry."zot.zot.svc.cluster.local:5000"]
       ca = ["/ca/ca-certificates.crt"]
+      [[registry."zot.zot.svc.cluster.local:5000".keypair]]
+        key = "/svid-certs/svid_key.pem"
+        cert = "/svid-certs/svid.pem"

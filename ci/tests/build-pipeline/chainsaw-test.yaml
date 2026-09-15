@@ -86,7 +86,7 @@ spec:
               metadata:
                 name: buildkit-build
               spec:
-                (length(steps)): 3
+                (length(steps)): 4
                 (steps[?script != null]): []
         - assert:
             resource:
@@ -129,6 +129,8 @@ spec:
                     securityContext:
                       privileged: true
                       runAsUser: 0
+                  - name: fetch-svid
+                    (securityContext.privileged || 'unset'): unset
                   - name: build
                     securityContext:
                       runAsUser: 1000
