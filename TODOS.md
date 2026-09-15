@@ -38,8 +38,9 @@ open work):
   - `Auth + multi-member DX` — deferred, trigger + pre-picked direction
     recorded (includes the folded-in gh token expiry gap)
   - `T-DR` — declarative disaster recovery for the in-cluster OpenBao
-  - `zot registry auth` — credential-free today, direction decided
-    (SPIRE Phase 1), not yet landed
+  - `zot registry auth` — CLOSED (2026-09-15, SPIRE Phase 1 PR 3) —
+    mTLS enforced, mechanism proven live; buildkit's own Task wiring is a
+    separate new follow-up item
   - `Flux / registry CA trust` — direction decided (SPIRE Phase 2), not
     yet landed
   - `SPIRE — phased workload-identity rollout` — planning-session output,
@@ -584,26 +585,53 @@ OpenBao) is done, see Recently Closed; this item is fully actionable
 now, just not yet scheduled. **Overlaps:** Plan B O5 (`snapshot_schedule`).
 **Priority:** P2. Surfaced by `/plan-eng-review` 2026-09-10 (+ Codex #6/#7).
 
-### zot registry auth — P2
+### zot registry auth — CLOSED (2026-09-15, SPIRE Phase 1 PR 3)
 
-**What:** design real auth for the local (and eventual production) zot. T7b0
-ships it **credential-free** on the single-user OrbStack VM — fine solo, not
-fine with a second operator or a shared cluster (any workload can push an
-image or attach a referrer; `attestation-sign.sh` selects evidence by
-`last`-of-artifactType).
+**What it was:** T7b0 shipped zot **credential-free** on the single-user
+OrbStack VM — any workload could push an image or attach a referrer.
 
-**Decision already made, not still open:** SPIFFE/SPIRE mTLS — see `SPIRE —
-phased workload-identity rollout` below, Phase 1, for the citation and
-verdict (duplicated here once, before that entry existed; cut in this pass).
-Rejected alternatives, not restated there: a static htpasswd Secret, zot's
-OIDC/LDAP, an OpenBao-issued short-lived credential — each needs its own
-credential-issuance/rotation story SPIRE's Workload API already gives for
-free.
+**Closed by:** zot now requires a valid SPIFFE client cert (mTLS) to
+push (`create`); anonymous read stays open (zot's `VerifyClientCertIfGiven`
+listener mode, live-verified — a no-cert client is treated as anonymous,
+not rejected). One real, already-existing identity — the `ci` namespace's
+default ServiceAccount (what `buildkit-build`/`scan-attach` run as) — is
+registered declaratively via `spire-server`'s own default `ClusterSPIFFEID`
+(`controllerManager.enabled=true`, flipped back on from PR 2's negative-space
+choice). Live-proven end-to-end: a real pod running as that ServiceAccount
+fetched its SVID from the Workload API and pushed to zot via `oras`
+(`--cert-file`/`--key-file`); an anonymous push to the same repo was denied
+(`basic credential not found` / 401); anonymous read stayed unaffected (200).
 
-**First step:** decide whether this folds into the deferred "Auth +
-multi-member DX" session (likely) or stays separate. **Depends on:** SPIRE
-Phase 1 (below). **Triggers with:** a 2nd operator, a shared cluster, or
-`environments/production/`.
+**Not closed by this PR — a separate follow-up:** buildkitd's actual
+`ci/tasks/buildkit-build.yaml` Task does not yet present a rotating SVID
+during a real push (see the new "Wire buildkit-build's real Task..." item,
+below this section) — this PR proves the mechanism and registers the real
+identity; wiring the real Task is genuinely separate cross-concern work.
+
+### Wire buildkit-build's real Task to present a rotating SVID — P2
+
+**What:** `ci/tasks/buildkit-build.yaml`'s `build` step (running as the `ci`
+namespace's default ServiceAccount, now a registered SPIFFE identity per
+the closed "zot registry auth" item above) does not yet present that
+identity to zot during a real push — it still authenticates however it
+did before (nothing, credential-free reads/writes).
+
+**Why this is separate, harder work — confirmed live 2026-09-15:**
+`buildctl` (the client CLI) has no client-cert flag at all; buildkit's
+mTLS-to-registry config lives server-side in `buildkitd.toml`'s
+`[registry."zot.zot.svc.cluster.local:5000"]` block
+(`keyfile`/`certfile`/`ca`). SPIRE X.509-SVIDs rotate (default ~1h TTL) —
+static files written once at pod start would go stale — so this needs
+either the `spiffe-csi-driver` (currently `enabled: false` in
+`environments/local/spire/main.tf`) or a `spiffe-helper` sidecar rewriting
+the files on rotation, added to `ci/tasks/buildkit-build.yaml` (a
+different concern boundary than `environments/local/`). Confirm buildkitd
+(not just buildctl) actually honors the resulting `buildkitd.toml` client-cert
+config live before committing further.
+
+**Depends on:** "zot registry auth" (closed, above) — the identity and
+mTLS enforcement already exist; this is purely the buildkit-side wiring.
+**Priority:** P2.
 
 ### Flux / registry CA trust — P2
 
@@ -720,10 +748,20 @@ not pattern-matched from training data):**
    "could not parse trust bundle". End-to-end proven live: node
    attestation succeeds, spire-server's active CA is upstream-signed
    (`self_signed=false`), both ConfigMaps populated, chainsaw green.
-   **PR 3 — not started:** zot mTLS config + cross-namespace
-   bundle-ConfigMap wiring + a chainsaw assertion that a real registered
-   workload's SVID authenticates to zot end-to-end. Closes "zot registry
-   auth" once PR 3 lands.
+   **PR 3 — DONE (2026-09-15):** zot mTLS config (`http.auth.mtls` +
+   `http.accessControl`, live-verified against the real project-zot
+   v2.1.20 source — `identityAttributes` is a fallback chain,
+   `anonymousPolicy` is a field DISTINCT from `defaultPolicy` that
+   readiness probes actually need) + the cross-namespace bundle-ConfigMap
+   repoint (`bundlePublisher.k8sConfigMap.namespace = "zot"`) +
+   `controllerManager.enabled = true` (declarative registration via the
+   chart's own default `ClusterSPIFFEID`, reversing PR 2's negative-space
+   choice now that a real consumer exists). Live-proven end-to-end: a
+   real pod running as the `ci` namespace's default ServiceAccount
+   fetched its SVID and pushed to zot via `oras`; an anonymous push was
+   denied; anonymous read stayed unaffected. Closes "zot registry auth"
+   (above) for the mechanism — buildkit's own Task wiring is a separate
+   new follow-up item (below "zot registry auth").
 2. **Host-side SPIRE Agent** — `join_token` node attestation on the dev
    Mac, `pitchfork`-supervised (never a bare `spire-agent run &`). Host
    CLI tools (`flux push`, `oras`, `frontend-publish.sh`,

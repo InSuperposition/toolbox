@@ -17,10 +17,11 @@ set -euo pipefail
 #      shape: spire-crds' CRDs exist, spire-server is a StatefulSet with
 #      the overridden ServiceAccount name and the vault upstreamAuthority
 #      plugin wired to PR 1's OpenBao mount/role, spire-agent is a
-#      DaemonSet, the k8sPSAT TokenReview ClusterRole exists, and no
-#      controller-manager artifacts render (negative space — this PR's
-#      explicit `controllerManager.enabled = false` override, without
-#      which the umbrella chart's own default silently turns it on).
+#      DaemonSet, the k8sPSAT TokenReview ClusterRole exists, and (PR 3)
+#      the controller-manager's default ClusterSPIFFEID + its
+#      ValidatingWebhookConfiguration render — declarative registration
+#      for the ci-namespace consumer, not a hand-rolled entry-create
+#      script.
 #
 # hk runs this as the `spire-verify` step (check layer). It needs
 # network (helm pull) — same class as openbao-verify.sh. Offline /
@@ -133,7 +134,7 @@ values="$workdir/values.yaml"
 	echo '  serviceAccount:'
 	echo '    name: spire-server'
 	echo '  controllerManager:'
-	echo '    enabled: false'
+	echo '    enabled: true'
 	echo '  upstreamAuthority:'
 	echo '    vault:'
 	echo '      enabled: true'
@@ -152,6 +153,7 @@ values="$workdir/values.yaml"
 	echo '    k8sConfigMap:'
 	echo '      enabled: true'
 	echo '      format: pem'
+	echo '      namespace: zot'
 } >"$values"
 
 rendered="$workdir/rendered.yaml"
@@ -188,8 +190,10 @@ check "vault upstreamAuthority wired to PR 1's OpenBao mount/role" \
 	"grep -qF '\"pki_mount_point\": \"pki\"' '$rendered' && grep -qF '\"k8s_auth_mount_point\": \"kubernetes\"' '$rendered' && grep -qF '\"k8s_auth_role_name\": \"spire_server\"' '$rendered'"
 check "k8sPSAT TokenReview ClusterRole is present" \
 	"grep -qE 'resources: \\[tokenreviews\\]' '$rendered'"
-check "no controller-manager artifacts (negative space — explicit override)" \
-	"! grep -qE 'kind: ClusterSPIFFEID' '$rendered' && ! grep -qE 'kind: ValidatingWebhookConfiguration' '$rendered'"
+check "controller-manager's default ClusterSPIFFEID is present (PR 3 — declarative registration)" \
+	"grep -qE 'kind: ClusterSPIFFEID' '$rendered' && grep -qE 'kind: ValidatingWebhookConfiguration' '$rendered'"
+check "the default ClusterSPIFFEID covers ns ci (excludes only spire's own namespaces)" \
+	"grep -qF 'operator: NotIn' '$rendered'"
 
 [ "$fail" = 0 ] || die "rendered chart does not match the expected shape"
 

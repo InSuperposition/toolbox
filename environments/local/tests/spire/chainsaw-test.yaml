@@ -74,13 +74,36 @@ spec:
       try:
         # bundlePublisher.k8sConfigMap (format=pem) — proves the OpenBao
         # sign-intermediate round-trip actually completed, not just "pod
-        # is Running".
+        # is Running". PR 3: repointed cross-namespace into ns "zot" —
+        # zot's mTLS listener verifies client SVIDs against this.
         - assert:
             resource:
               apiVersion: v1
               kind: ConfigMap
               metadata:
                 name: spire-bundle
-                namespace: spire
+                namespace: zot
               data:
                 ("bundle.crt" != null): true
+
+    - name: default-clusterspiffeid-covers-ci-namespace
+      try:
+        # PR 3: controllerManager.enabled=true — proves declarative
+        # registration is live, not just rendered (spire-verify.sh
+        # already proves the chart renders it; this proves the
+        # controller actually reconciled it in the real cluster).
+        - assert:
+            resource:
+              apiVersion: spire.spiffe.io/v1alpha1
+              kind: ClusterSPIFFEID
+              metadata:
+                name: spire-spire-default
+              spec:
+                namespaceSelector:
+                  matchExpressions:
+                    - key: kubernetes.io/metadata.name
+                      operator: NotIn
+                      values:
+                        - spire
+                        - spire-server
+                        - spire-system
