@@ -11,12 +11,27 @@
 # admit path and the common unsigned-image deny.
 #
 # Fixtures are REAL, on the in-cluster zot (T7c R2 — repointed from GHCR):
-#   - approved: cv-frontend@sha256:d0c92cb1... carries a real approval
-#     attestation signed by openbao://approval-key (annotated referrer)
+#   - approved: cv-frontend@sha256:fc86908bbe... carries a real approval
+#     attestation signed by openbao://approval-key (annotated referrer).
+#     This is the PLATFORM digest, not the index the tag resolves to —
+#     confirmed live, `/investigate` 2026-09-15: Kyverno's
+#     ImageValidatingPolicy has no platform-selection config and denies
+#     every index reference with "no child with platform linux/amd64"
+#     (BuildKit's `attest:provenance` opt, T8, makes every real push a
+#     multi-manifest index). `attestation-sign.sh` now resolves+signs
+#     this platform digest itself (`oras resolve --platform=linux/arm64`)
+#     — never hand-pin the index digest here again.
+#     Re-pinned 2026-09-15 (P3 TODOS.md item, then again for this fix) —
+#     the prior digest (sha256:d0c92cb1...) had been evicted from zot
+#     (404, unclear when); this is a re-approval of the same cv_frontend
+#     revision (db174d91), rebuilt fresh, mirroring
+#     deploy/frontend/timoni.lock's `image_ref` re-pin.
 #   - unsigned: cv-frontend@sha256:dc2d74b2... (a busybox stand-in pushed
 #     with no attestation — the deny path only cares that no referrer verifies)
-# Regenerate the approved one after an approval-key rotation:
-#   mise run attestation:sign -- zot.zot.svc.cluster.local:5000/cv-frontend@<digest>
+# Regenerate the approved one after an approval-key rotation, or if it
+# vanishes from zot again — attestation-sign.sh prints the PLATFORM
+# digest to use here, not the index digest you pass it:
+#   mise run attestation:sign -- zot.zot.svc.cluster.local:5000/cv-frontend@<INDEX-digest>
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -58,7 +73,7 @@ spec:
                 restartPolicy: Never
                 containers:
                   - name: c
-                    image: zot.zot.svc.cluster.local:5000/cv-frontend@sha256:d0c92cb19745096d0a127f46ff691a3ea72a59d48e7e3b7d154d2466ebec62df
+                    image: zot.zot.svc.cluster.local:5000/cv-frontend@sha256:fc86908bbe750888b0bd79542012b7489077cd81fa4aeb9149f57007c99821f2
         - assert:
             resource:
               apiVersion: v1
@@ -68,7 +83,7 @@ spec:
               spec:
                 # the digest was NOT mutated (mutateDigest: false) and the
                 # pod exists == admission passed
-                (containers[0].image): zot.zot.svc.cluster.local:5000/cv-frontend@sha256:d0c92cb19745096d0a127f46ff691a3ea72a59d48e7e3b7d154d2466ebec62df
+                (containers[0].image): zot.zot.svc.cluster.local:5000/cv-frontend@sha256:fc86908bbe750888b0bd79542012b7489077cd81fa4aeb9149f57007c99821f2
 
     - name: an-unsigned-cv-frontend-pod-is-denied
       try:

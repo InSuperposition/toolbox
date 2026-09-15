@@ -4,6 +4,17 @@
 # and its pod's container actually started (pulled + ran, even though the
 # app then crashes) — NOT that the Deployment is Available or serving HTTP.
 # TODOS tracks adding the HTTP-200 assertion once cv_frontend is fixed.
+#
+# The pinned digest below is the PLATFORM digest (not the index the tag
+# resolves to) — `attestation-sign.sh` resolves+signs it internally now
+# (Kyverno amd64-index admission fix, `/investigate` 2026-09-15; see
+# environments/local/tests/kyverno/chainsaw-test.yaml's own header for the
+# full root cause). Steps 2 and 3 below assert THIS SAME digest on the
+# selected Pod, not just the `app.kubernetes.io/name` label alone — a
+# stale surviving Pod (scheduled before a redeploy, still Running) would
+# otherwise satisfy both assertions regardless of whether a NEW admission
+# attempt ever succeeded (Codex outside-voice finding, confirmed: this
+# test would have passed throughout the entire period this bug was live).
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -26,30 +37,15 @@ spec:
                   spec:
                     # the digest from deploy/frontend/timoni.lock (image_ref),
                     # NOT the manifest-artifact digest
-                    (contains(containers[0].image, 'sha256:d0c92cb19745096d0a127f46ff691a3ea72a59d48e7e3b7d154d2466ebec62df')): true
+                    (contains(containers[0].image, 'sha256:fc86908bbe750888b0bd79542012b7489077cd81fa4aeb9149f57007c99821f2')): true
 
     - name: the-pods-container-actually-started
       try:
         # `Scheduled` alone passes throughout ImagePullBackOff — assert the
         # container reached a running OR terminated state (or restarted),
-        # which proves the approved image pulled and ran.
-        - assert:
-            resource:
-              apiVersion: v1
-              kind: Pod
-              metadata:
-                namespace: frontend
-                labels:
-                  app.kubernetes.io/name: cv-frontend
-              (status.containerStatuses[0]):
-                (state.running != null || state.terminated != null || restartCount > `0`): true
-
-    - name: the-image-was-admitted-by-the-approval-policy
-      try:
-        # a Pod exists in ns `frontend` (PSA restricted + the approval label)
-        # running the cv_frontend image => K1's ImageValidatingPolicy, whose
-        # failurePolicy is Fail, evaluated and ADMITTED it. A denied image
-        # would leave the ReplicaSet unable to create any pod.
+        # which proves the approved image pulled and ran. Digest-scoped
+        # (not just the label) so a stale surviving Pod from before a
+        # redeploy can't satisfy this on its own.
         - assert:
             resource:
               apiVersion: v1
@@ -59,4 +55,24 @@ spec:
                 labels:
                   app.kubernetes.io/name: cv-frontend
               spec:
-                (contains(containers[0].image, 'cv-frontend')): true
+                (contains(containers[0].image, 'sha256:fc86908bbe750888b0bd79542012b7489077cd81fa4aeb9149f57007c99821f2')): true
+              (status.containerStatuses[0]):
+                (state.running != null || state.terminated != null || restartCount > `0`): true
+
+    - name: the-image-was-admitted-by-the-approval-policy
+      try:
+        # a Pod exists in ns `frontend` (PSA restricted + the approval label)
+        # running THIS digest => K1's ImageValidatingPolicy, whose
+        # failurePolicy is Fail, evaluated and ADMITTED it. A denied image
+        # would leave the ReplicaSet unable to create any pod. Digest-scoped,
+        # not just `cv-frontend` — see the digest-scoping note above.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: frontend
+                labels:
+                  app.kubernetes.io/name: cv-frontend
+              spec:
+                (contains(containers[0].image, 'sha256:fc86908bbe750888b0bd79542012b7489077cd81fa4aeb9149f57007c99821f2')): true

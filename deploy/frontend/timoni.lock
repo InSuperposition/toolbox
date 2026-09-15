@@ -23,10 +23,24 @@
 # over `zot.zot.svc.cluster.local:5000` HTTPS (T7c R1b-ii-c — the NodePort
 # is gone, host and in-cluster now resolve the same name).
 manifests_repo=cv-frontend-manifests
-manifest_digest=sha256:aad58cd36c5a6d2d86ded3285b7166d83afac314ca7c71d1e3cffc3a35cffad9
+manifest_digest=sha256:70136bd88a32fbb98a83f46da3b918f6aaddd2ac1f24ba83c5a2ea15c85d3e82
 manifest_revision=db174d91
 
 # The approved cv_frontend container image (D_img) + its approval
 # attestation (D_att). T7c R2 — repointed from GHCR to the in-cluster zot.
-image_ref=zot.zot.svc.cluster.local:5000/cv-frontend@sha256:d0c92cb19745096d0a127f46ff691a3ea72a59d48e7e3b7d154d2466ebec62df
-attestation_digest=sha256:c539bd5a51800535de7bd43b245e6278a1d597b5c7d21141d2ef184d126879a2
+# Re-pinned 2026-09-15, twice: first because the prior image_ref's
+# manifest bytes had been evicted from zot (404, unclear when); then
+# again for the Kyverno amd64-index admission fix (`/investigate` +
+# `/plan-eng-review`, same day) — `image_ref` is now the PLATFORM digest,
+# not the index the tag resolves to. Kyverno's ImageValidatingPolicy has
+# no platform-selection config of its own and denies every index
+# reference with "no child with platform linux/amd64" (BuildKit's
+# `attest:provenance` opt, T8, makes every real push a multi-manifest
+# index). `attestation-sign.sh` now resolves+signs the platform digest
+# internally (`oras resolve --platform=linux/arm64`) — this is what it
+# printed, not a value computed here. Both re-pins are the SAME
+# cv_frontend revision (db174d91), rebuilt fresh each time. Also fixes
+# the kyverno-reconcile and frontend-delivery chainsaw fixtures, which
+# now pin this same platform digest.
+image_ref=zot.zot.svc.cluster.local:5000/cv-frontend@sha256:fc86908bbe750888b0bd79542012b7489077cd81fa4aeb9149f57007c99821f2
+attestation_digest=sha256:f90f5398b68d805b19a4b3ec201edee1eb257660e62038bea15d4f03bffa7341

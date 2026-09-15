@@ -22,6 +22,20 @@ set -euo pipefail
 # reject sitting next to this approval, does not change what an
 # already-pinned consumer sees.
 #
+# Digest split (Kyverno amd64-index admission fix, `/investigate` +
+# `/plan-eng-review` 2026-09-15): the CLI argument is the INDEX digest
+# (`build`'s own IMAGE_DIGEST Pipeline result — TODOS.md "Run-scoped
+# build digest identity"). Evidence discovery (SBOM/scan referrers)
+# STAYS on that index — it is provably run-unique (embeds a per-run
+# provenance timestamp), unlike the platform digest, which CAN collide
+# across byte-identical rebuilds. The signed subject, the pushed bundle
+# referrer, and the printed `frontend:publish` line all use the PLATFORM
+# digest instead (`oras resolve --platform=linux/arm64`, resolved
+# internally, step 3 below) — Kyverno's ImageValidatingPolicy has no
+# platform-selection config of its own and denies every arm64-only index
+# reference with "no child with platform linux/amd64", so nothing past
+# signing may ever reference the index again.
+#
 # Interim auth (a per-member authn/authz design is a separate deferred task,
 # no trigger yet — TODOS.md "Auth + multi-member DX"): signing authenticates to OpenBao with
 # the root token in $VAULT_TOKEN (mise [env] reads the 0600 root.token file,
@@ -31,7 +45,8 @@ set -euo pipefail
 #
 # Exit codes: 0 ok · 1 operator aborted · 2 bad args · 3 OpenBao unavailable
 # (openbao-preflight.sh) · 4 build evidence missing · 5 predicate failed its
-# own schema · 6 signing / registry push failed.
+# own schema · 6 signing / registry push failed · 7 platform-digest
+# resolution failed (the given index has no linux/arm64 child).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null  # lib is exercised via attestation-sign.bats
@@ -89,6 +104,27 @@ elif attestation_is_cluster_registry "$REGISTRY_HOST"; then
 else
 	LOCAL_REGISTRY=0
 fi
+
+# The operator hands us the INDEX digest (`build`'s own IMAGE_DIGEST
+# Pipeline result — run-scoped build digest identity, TODOS.md), never a
+# tag. BuildKit's `attest:provenance` opt (T8) makes every real push a
+# multi-manifest index; nothing past this point should ever see that
+# index again — Kyverno's ImageValidatingPolicy has no `--platform`
+# config of its own and defaults to linux/amd64 resolving one, denying
+# every arm64-only image (confirmed live, `/investigate` 2026-09-15).
+# `oras resolve --platform` is the fix: a native flag, not a hand-rolled
+# parser — same one-liner `provenance-sign.yaml` already proved live for
+# the exact same problem. Evidence discovery below deliberately stays on
+# $IMAGE_REF (the index) — the index is provably run-unique (it embeds a
+# per-run provenance timestamp in its baked-in attestation entry), while
+# the PLATFORM digest can collide across byte-identical rebuilds; moving
+# evidence lookup here would reintroduce the exact `| last` ambiguity
+# `find_referrer()` below has no defense against (Codex outside-voice,
+# live-confirmed by re-running the broken kyverno-reconcile fixture).
+PLATFORM_REPO="${IMAGE_REF%@*}"
+PLATFORM_DIGEST="$(oras resolve "${ORAS_HTTP[@]}" --platform=linux/arm64 "$IMAGE_REF")" ||
+	{ echo "attestation-sign: could not resolve a linux/arm64 manifest from $IMAGE_REF" >&2; exit 7; }
+PLATFORM_REF="${PLATFORM_REPO}@${PLATFORM_DIGEST}"
 
 WORKDIR="$(mktemp -d)"
 cleanup() { rm -rf "$WORKDIR"; }
@@ -179,7 +215,7 @@ APPROVED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 # --- 5. Build + schema-check the predicate before signing ---
 jq -n \
-	--arg digest "$IMAGE_DIGEST" \
+	--arg digest "$PLATFORM_DIGEST" \
 	--arg verdict "$verdict" \
 	--arg reason "$reason" \
 	--arg approvedBy "$APPROVED_BY" \
@@ -212,7 +248,7 @@ if ! cosign attest \
 	--no-upload \
 	--bundle "$WORKDIR/att.bundle" \
 	"${COSIGN_CACERT[@]}" \
-	"$IMAGE_REF"; then
+	"$PLATFORM_REF"; then
 	echo "attestation-sign: cosign attest failed — no durable record was written" >&2
 	exit 6
 fi
@@ -238,19 +274,25 @@ if ! ATT_DIGEST="$(oras attach "${ORAS_HTTP[@]}" \
 		--annotation "dev.sigstore.bundle.predicateType=$TYPE" \
 		--disable-path-validation \
 		--format go-template --template '{{.digest}}' \
-		"$IMAGE_REF" "$WORKDIR/att.bundle:$BUNDLE_ARTIFACT_TYPE")" ||
+		"$PLATFORM_REF" "$WORKDIR/att.bundle:$BUNDLE_ARTIFACT_TYPE")" ||
 	[ -z "$ATT_DIGEST" ]; then
 	echo "attestation-sign: signed OK but the referrer push failed — treat this digest as NOT approved" >&2
 	exit 6
 fi
 
 # --- 8. Tell the operator what to record ---
+# Two digests shown deliberately: PLATFORM_DIGEST is what got signed and
+# is deployable (Kyverno/kubelet resolve it directly, no index); the
+# INDEX digest is the audit trail — which build's evidence this decision
+# was based on. Only PLATFORM_DIGEST goes in the "record it" line below
+# — that is the one value the next command (frontend:publish) needs.
 echo
 if [ "$verdict" = "approved" ]; then
-	echo "APPROVED  $IMAGE_DIGEST"
+	echo "APPROVED  $PLATFORM_DIGEST"
 else
-	echo "REJECTED  $IMAGE_DIGEST   (a signed record — consumers pinning this digest will refuse it)"
+	echo "REJECTED  $PLATFORM_DIGEST   (a signed record — consumers pinning this digest will refuse it)"
 fi
+echo "  (evidence build: $IMAGE_DIGEST)"
 echo "attestation digest: $ATT_DIGEST"
 echo
-echo "record it:  mise run frontend:publish -- $IMAGE_REF $ATT_DIGEST <revision>"
+echo "record it:  mise run frontend:publish -- $PLATFORM_REF $ATT_DIGEST <revision>"
