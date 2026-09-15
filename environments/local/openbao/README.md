@@ -38,7 +38,7 @@ retires `environments/local/openbao/`, renames this unit back to the bare
 - The chart is pinned. The OpenTofu helm provider cannot pin an OCI chart
   by digest ([hashicorp/terraform-provider-helm#1596](https://github.com/hashicorp/terraform-provider-helm/issues/1596)),
   so `main.tf` pins the **tag** and `openbao-verify.sh` + the bridge
-  assert `crane digest <tag>` == `openbao.lock`'s `chart_digest`
+  assert `oras resolve <tag>` == `openbao.lock`'s `chart_digest`
   (fail closed) before any `tofu apply`. The server **image** is digest-pinned
   directly, via `server.image.tag = "<tag>@sha256:<digest>"`.
 

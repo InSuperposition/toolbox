@@ -203,7 +203,7 @@ finish() {
 }
 
 # ── 1. preconditions (local checks first) ─────────────────────────────
-for bin in bao helm cosign tofu kubectl crane jq flux; do
+for bin in bao helm cosign tofu kubectl oras jq flux; do
 	command -v "$bin" >/dev/null || die "$bin not on PATH"
 done
 

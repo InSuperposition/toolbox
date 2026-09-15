@@ -176,10 +176,10 @@ local heavy = new Mapping<String, Step> {
     depends = "tofu-init"
   }
   // chart-pin gate for environments/local/openbao/ (ADR 0016).
-  // `crane digest <tag>` == openbao.lock's chart_digest (the OpenTofu helm
+  // `oras resolve <tag>` == openbao.lock's chart_digest (the OpenTofu helm
   // provider cannot pin an OCI chart by digest —
   // hashicorp/terraform-provider-helm#1596), then `helm template` BY DIGEST
-  // and assert the expected shape. Needs network (crane + helm pull) — like
+  // and assert the expected shape. Needs network (oras + helm pull) — like
   // the bats OpenBao suites — and self-skips (exit 0) offline /
   // registry-down, so a flapping registry does not red the check.
   ["openbao-verify"] {

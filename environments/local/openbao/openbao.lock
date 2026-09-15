@@ -11,7 +11,7 @@
 #   - environments/local/openbao/main.tf pins `chart_version` (a tag)
 #   - environments/local/scripts/openbao-verify.sh (the hk `openbao-verify`
 #     gate) AND the bootstrap bridge, before ANY
-#     `tofu apply`, run `crane digest <chart_repository>/<chart_name>:<chart_version>`
+#     `tofu apply`, run `oras resolve <chart_repository>/<chart_name>:<chart_version>`
 #     and assert it equals `chart_digest` below — fail closed on a mismatch.
 #   - the verify script also `helm template`s the chart BY DIGEST
 #     (`oci://…@<chart_digest>`, which the helm CLI accepts) for its
@@ -29,8 +29,8 @@
 # To bump the chart:
 #   1. pick the new chart version V
 #   2. helm show chart oci://ghcr.io/openbao/charts/openbao --version V   -> confirm appVersion
-#   3. crane digest ghcr.io/openbao/charts/openbao:V                      -> chart_digest
-#   4. crane digest quay.io/openbao/openbao:<new appVersion without the v>  -> image_digest
+#   3. oras resolve ghcr.io/openbao/charts/openbao:V                      -> chart_digest
+#   4. oras resolve quay.io/openbao/openbao:<new appVersion without the v>  -> image_digest
 #   5. update every line below + variables.tf defaults (chart_version, server_image_ref)
 #   6. re-run: mise run local:openbao:verify
 

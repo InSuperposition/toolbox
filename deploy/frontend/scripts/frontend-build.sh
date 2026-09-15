@@ -112,7 +112,7 @@ curl -sf -o /dev/null https://zot.zot.svc.cluster.local:5000/v2/ ||
 # present), so just run it. Uses the WORKING-TREE Dockerfile — the dirty
 # check below warns when that differs from the ref the pipeline will clone.
 echo "frontend-build: ensuring cv_frontend base images are in zot (mise run frontend:seed)"
-mise run frontend:seed || miss "base-image seed failed — see the crane output above"
+mise run frontend:seed || miss "base-image seed failed — see the registry-seed output above"
 
 if ! git -C "$ROOT" diff --quiet "$DEFS_REF" -- deploy/frontend/Dockerfile 2>/dev/null; then
 	echo "frontend-build: WARNING — deploy/frontend/Dockerfile differs from $DEFS_REF;" >&2

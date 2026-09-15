@@ -28,8 +28,8 @@
 #
 # To bump:
 #   1. pick version V (e.g. v1.21.2)
-#   2. crane digest quay.io/jetstack/charts/cert-manager:V              -> chart_digest
-#   3. crane digest quay.io/jetstack/cert-manager-controller:V          -> controller_image_digest
+#   2. oras resolve quay.io/jetstack/charts/cert-manager:V              -> chart_digest
+#   3. oras resolve quay.io/jetstack/cert-manager-controller:V          -> controller_image_digest
 #   4. …-webhook:V / …-cainjector:V / …-startupapicheck:V               -> the other three
 #   5. cosign verify --key <the pem above> --insecure-ignore-tlog quay.io/jetstack/charts/cert-manager@<chart_digest>
 #   6. update every line below + cert-manager-helmrelease.yaml

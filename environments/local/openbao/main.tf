@@ -110,7 +110,7 @@ resource "helm_release" "openbao" {
   # A tag, not a digest — the OpenTofu helm provider cannot pin an OCI chart
   # by digest (hashicorp/terraform-provider-helm#1596). openbao.lock
   # records the digest; openbao-verify.sh and the bridge both assert
-  # `crane digest <repo>/<name>:<chart_version>` == that digest and fail
+  # `oras resolve <repo>/<name>:<chart_version>` == that digest and fail
   # closed before any apply.
   version = var.chart_version
 

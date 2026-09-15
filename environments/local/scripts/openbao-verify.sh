@@ -8,10 +8,10 @@ set -euo pipefail
 # (hashicorp/terraform-provider-helm#1596), so this is where the digest
 # actually gets enforced:
 #
-#   1. `crane digest <repo>/<name>:<chart_version>` == openbao.lock's
+#   1. `oras resolve <repo>/<name>:<chart_version>` == openbao.lock's
 #      chart_digest — fail closed. (The bootstrap bridge,
 #      re-runs this same assertion immediately before `tofu apply`.)
-#   2. `crane digest <image_ref>:<image_tag>` == the lock's image_digest.
+#   2. `oras resolve <image_ref>:<image_tag>` == the lock's image_digest.
 #   3. `helm template` the chart BY DIGEST (`oci://…@<chart_digest>`) with
 #      the same value toggles main.tf sets and the committed
 #      templates/openbao.hcl.tftpl, then assert the rendered shape:
@@ -19,7 +19,7 @@ set -euo pipefail
 #      stanza, the seal + TLS mounts, and NO pod anti-affinity / PDB.
 #
 # hk runs this as the `openbao-verify` step (check layer). It needs
-# network (crane + helm pull) — same class as the bats OpenBao suites.
+# network (oras + helm pull) — same class as the bats OpenBao suites.
 # Offline / registry-down: prints a skip line and exits 0, like the [k8s]
 # gates, so a flapping registry.opentofu.org does not red the whole check.
 #
@@ -40,7 +40,7 @@ skip() {
 }
 val() { sed -n "s/^$1=//p" "$LOCK"; }
 
-command -v crane >/dev/null || die "crane not on PATH"
+command -v oras >/dev/null || die "oras not on PATH"
 command -v helm >/dev/null || die "helm not on PATH"
 [ -f "$LOCK" ] || die "lock file not found: $LOCK"
 [ -f "$TFTPL" ] || die "config template not found: $TFTPL"
@@ -60,19 +60,19 @@ seal_key_id="$(val static_seal_key_id)"
 case "$chart_digest" in sha256:*) ;; *) die "chart_digest is not sha256:<hex>: '$chart_digest'" ;; esac
 case "$image_digest" in sha256:*) ;; *) die "image_digest is not sha256:<hex>: '$image_digest'" ;; esac
 
-# crane wants a bare ref (no oci:// scheme).
+# oras wants a bare ref (no oci:// scheme).
 chart_ref_bare="${chart_repo#oci://}/$chart_name"
 
 # --- 1. chart tag resolves to the locked digest -------------------------
-echo "openbao-verify: crane digest $chart_ref_bare:$chart_version"
-got_chart="$(crane digest "$chart_ref_bare:$chart_version" 2>/dev/null)" ||
+echo "openbao-verify: oras resolve $chart_ref_bare:$chart_version"
+got_chart="$(oras resolve "$chart_ref_bare:$chart_version" 2>/dev/null)" ||
 	skip "cannot reach $chart_ref_bare (registry down / offline)"
 [ "$got_chart" = "$chart_digest" ] ||
 	die "chart tag $chart_version resolves to $got_chart, lock says $chart_digest — a mutated upstream tag or a stale lock"
 
 # --- 2. image tag resolves to the locked digest ------------------------
-echo "openbao-verify: crane digest $image_ref:$image_tag"
-got_image="$(crane digest "$image_ref:$image_tag" 2>/dev/null)" ||
+echo "openbao-verify: oras resolve $image_ref:$image_tag"
+got_image="$(oras resolve "$image_ref:$image_tag" 2>/dev/null)" ||
 	skip "cannot reach $image_ref (registry down / offline)"
 [ "$got_image" = "$image_digest" ] ||
 	die "image tag $image_tag resolves to $got_image, lock says $image_digest"
