@@ -11,8 +11,16 @@
 # the stored images; the Kustomization's `deletionPolicy: Orphan` keeps zot
 # running if that CR is deleted. A real teardown is a manual `kubectl delete`.
 #
-# Credential-free on the single-user OrbStack VM: no `auth` block. Stated
-# threat model + the P2 "zot registry auth" planning session: TODOS.md.
+# SPIFFE mTLS gates PUSH (SPIRE Phase 1 PR 3, TODOS.md "zot registry
+# auth"): `http.auth.mtls` + `http.accessControl` require a valid SVID
+# for `create`; anonymous READ stays open (zot's own TLS listener uses
+# `VerifyClientCertIfGiven`, live-verified against the real v2.1.20
+# source — a client presenting no cert is treated as anonymous, not
+# rejected, so existing pull paths are unaffected). The trusted CA is
+# spire-server's own published bundle (`bundlePublisher.k8sConfigMap`,
+# `environments/local/spire/main.tf`, repointed cross-namespace into
+# this namespace) — a DIFFERENT CA than `toolbox-dev-ca` below, which
+# only covers zot's OWN server TLS cert.
 #
 # T7c R1b-ii-c: HTTPS-only, the `zot-tls` leaf Certificate (T7c R1b-ii-a,
 # `environments/local/cert-manager/issuers.yaml`) off `toolbox-dev-ca`.
@@ -78,7 +86,25 @@ data:
         "port": "5000",
         "tls": {
           "cert": "/certs/tls.crt",
-          "key": "/certs/tls.key"
+          "key": "/certs/tls.key",
+          "cacert": "/spire-bundle/bundle.crt"
+        },
+        "auth": {
+          "mtls": {
+            "identityAttributes": ["URI", "CommonName"]
+          }
+        },
+        "accessControl": {
+          "repositories": {
+            "**": {
+              "policies": [{
+                "users": ["spiffe://toolbox.local/ns/ci/sa/default"],
+                "actions": ["read", "create"]
+              }],
+              "defaultPolicy": ["read"],
+              "anonymousPolicy": ["read"]
+            }
+          }
         }
       },
       "log": {
@@ -159,6 +185,9 @@ spec:
             - name: certs
               mountPath: /certs
               readOnly: true
+            - name: spire-bundle
+              mountPath: /spire-bundle
+              readOnly: true
             - name: data
               mountPath: /var/lib/registry
             - name: tmp
@@ -170,6 +199,9 @@ spec:
         - name: certs
           secret:
             secretName: zot-tls
+        - name: spire-bundle
+          configMap:
+            name: spire-bundle
         - name: data
           persistentVolumeClaim:
             claimName: zot-data

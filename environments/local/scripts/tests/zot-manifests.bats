@@ -5,7 +5,7 @@
 # Referrers proof rides with T7b1 (the first build Task that targets zot),
 # the same way T7a proved buildkit in a spike, not a lint.
 #
-# Catches a future regression: an un-pinned image, an accidental auth block,
+# Catches a future regression: an un-pinned image, mTLS silently dropped,
 # GC turned back on, or the exposure widened from NodePort to LoadBalancer —
 # `mise run check` goes red.
 
@@ -25,9 +25,23 @@ setup() {
 	[ "$status" -ne 0 ]
 }
 
-@test "the zot config has no auth block (credential-free is deliberate — guard against a half-applied one)" {
-	run grep -n '"auth"' "$ZOT"
-	[ "$status" -ne 0 ]
+@test "the zot config requires mTLS for push (SPIRE Phase 1 PR 3 — anonymous read stays open)" {
+	run grep -n '"mtls"' "$ZOT"
+	[ "$status" -eq 0 ]
+	run grep -n '"identityAttributes"' "$ZOT"
+	[ "$status" -eq 0 ]
+}
+
+@test "the zot accessControl grants create only to the registered ci-namespace identity" {
+	run grep -nF 'spiffe://toolbox.local/ns/ci/sa/default' "$ZOT"
+	[ "$status" -eq 0 ]
+	run grep -n '"defaultPolicy": \["read"\]' "$ZOT"
+	[ "$status" -eq 0 ]
+}
+
+@test "the zot accessControl grants anonymousPolicy read (distinct from defaultPolicy — live-verified: zot's authn layer only treats a no-cert request as anonymous when anonymousPolicy is set, defaultPolicy alone 401s the readiness probe)" {
+	run grep -n '"anonymousPolicy": \["read"\]' "$ZOT"
+	[ "$status" -eq 0 ]
 }
 
 @test "GC is off (subsumes deleteUntagged: false for the interim store)" {

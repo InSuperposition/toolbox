@@ -93,12 +93,12 @@ run "ca_cert_targets_the_dedicated_trust_manager_bundle" {
   }
 }
 
-run "bundle_publisher_stays_in_its_own_namespace_this_pr" {
+run "bundle_publisher_targets_zot_this_pr" {
   command = plan
 
   assert {
     condition     = strcontains(helm_release.spire.values[0], "\"format\": \"pem\"")
-    error_message = "bundlePublisher.k8sConfigMap.format must be pem — PR 3 (zot) needs bundle.crt, plain PEM"
+    error_message = "bundlePublisher.k8sConfigMap.format must be pem — zot needs bundle.crt, plain PEM"
   }
   assert {
     # Live-verified regression guard (2026-09-15): the agent's OWN
@@ -110,10 +110,22 @@ run "bundle_publisher_stays_in_its_own_namespace_this_pr" {
     error_message = "spire-agent.trustBundleFormat must match spire-server.bundlePublisher.k8sConfigMap.format (pem) — they read the same ConfigMap key"
   }
   assert {
-    # PR-3 guard: this PR must not jump ahead to cross-namespace bundle
-    # publishing (bundlePublisher.k8sConfigMap.namespace) — that repoint
-    # is PR 3's job, once zot exists as a consumer to test against.
-    condition     = !strcontains(helm_release.spire.values[0], "\"namespace\": \"zot\"")
-    error_message = "bundlePublisher.k8sConfigMap.namespace must stay unset in this PR — cross-namespace wiring to zot is PR 3's job"
+    # PR 3: repointed cross-namespace into ns "zot" — zot's mTLS
+    # listener verifies client SVIDs against this bundle.
+    condition     = strcontains(helm_release.spire.values[0], "\"namespace\": \"zot\"")
+    error_message = "bundlePublisher.k8sConfigMap.namespace must be zot — this is what zot's mTLS listener verifies client SVIDs against"
+  }
+}
+
+run "controller_manager_is_on_for_declarative_registration" {
+  command = plan
+
+  assert {
+    # PR 3 reverses PR 2's explicit negative-space choice: a real
+    # consumer (ci namespace's default ServiceAccount) now exists, and
+    # the chart's own default ClusterSPIFFEID already covers it —
+    # declarative registration over a hand-rolled entry-create script.
+    condition     = strcontains(helm_release.spire.values[0], "\"controllerManager\":\n    \"enabled\": true")
+    error_message = "spire-server.controllerManager.enabled must be true — PR 3 needs its default ClusterSPIFFEID for declarative registration of the ci-namespace consumer"
   }
 }

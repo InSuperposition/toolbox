@@ -76,27 +76,36 @@ locals {
         }
       }
 
-      # Publishes spire-server's own trust bundle to a ConfigMap in ITS
-      # OWN namespace (namespace left unset here) — repointing this
-      # cross-namespace to zot's is PR 3's job, once zot exists as a
-      # consumer to test against. format=pem (not the chart default
-      # "spiffe") so the published key is bundle.crt, plain PEM.
+      # PR 3 (TODOS.md "zot registry auth"): publishes spire-server's
+      # own trust bundle cross-namespace into ns "zot" — zot's mTLS
+      # listener verifies client SVIDs against this. RBAC (Role/
+      # RoleBinding) follows the SAME namespace value automatically
+      # (spire-server.bundle-namespace-bundlepublisher helper, confirmed
+      # no divergence risk during PR 2's research). format=pem (not the
+      # chart default "spiffe") so the published key is bundle.crt,
+      # plain PEM.
       bundlePublisher = {
         k8sConfigMap = {
-          enabled = true
-          format  = "pem"
+          enabled   = true
+          format    = "pem"
+          namespace = "zot"
         }
       }
 
-      # EXPLICIT false — live-rendering surfaced that the UMBRELLA
-      # chart's own values.yaml overrides this subchart's default
-      # (false) back to true, which would silently ship a
-      # controller-manager, a ValidatingWebhookConfiguration, 3
-      # ClusterSPIFFEID CRs, and install/upgrade/delete-hook Jobs. No
-      # ClusterSPIFFEID reconciliation in this PR (negative space) —
-      # registration entries are the future consumer PR's concern.
+      # PR 3: flipped back to true (PR 2 disabled this as negative space
+      # — "no consumer yet"). The `ci` namespace's default ServiceAccount
+      # (what buildkit-build/scan-attach actually run as) is now a real
+      # consumer needing a registration entry. Rather than hand-roll an
+      # imperative `spire-server entry create` script, this repo's
+      # declarative-first mandate points at the chart's OWN default
+      # ClusterSPIFFEID (spiffeIDTemplate
+      # "spiffe://{{.TrustDomain}}/ns/{{.PodMeta.Namespace}}/sa/{{.PodSpec.ServiceAccountName}}",
+      # namespaceSelector NotIn [spire, spire-server, spire-system]) —
+      # it already covers ns `ci` with zero extra CRs. Accepting the
+      # coupled webhook + install/upgrade/delete-hook Jobs as one chart
+      # feature, not selectively disabled.
       controllerManager = {
-        enabled = false
+        enabled = true
       }
     }
 
