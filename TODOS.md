@@ -80,13 +80,41 @@ open work):
   - `Kyverno ImageValidatingPolicy for real admission-time enforcement` —
     now specifically the production-cluster instantiation
 - *tooling cleanup*
-  - `Remove crane from the stack entirely`
+  - `OpenBao's own tooling surface — bao CLI vs. direct API calls`
+  - `openbao-verify.bats — convert error-path tests from live network to stubbed unit tests`
   - `Upgrade cosign signing to public trust`
 
 ## Recently closed
 
 Newest first. Git-log density — commit/PR references, not a transcript.
 Full detail lives in the referenced PRs, ADRs, and commit messages.
+
+- **Remove `crane` from the stack entirely — DONE** (`/plan-eng-review`,
+  1 Codex outside-voice pass). `crane`'s only remaining use
+  (`openbao-verify.sh`'s two digest-equality gates) swapped to `oras
+  resolve` — byte-identical digest output live-verified across 2
+  registries (ghcr.io, quay.io) and 3 failure classes (DNS-down,
+  malformed ref, not-found), plus the same bare-ref (no `oci://`
+  scheme) requirement. `google/go-containerregistry` dropped from
+  `mise.toml`. Codex's outside-voice pass found the plan's own file
+  inventory was incomplete (6 more files + a missed `command -v crane`
+  preflight line inside the script itself) — folded in before shipping,
+  13 files total: the script (2 calls + the preflight), the bootstrap
+  bridge's own preflight, `openbao-verify.bats`'s `online()` helper
+  (fixed to check both registries, closing the separate pre-existing
+  "online() checks only one of two registries" gap as a side effect),
+  a `zot-trust.sh` comment, 5 lock-file manual-regen runbook comments,
+  `variables.tf`/`main.tf`/`hk.pkl`/`repo-structure.md`/
+  `environments/local/README.md`'s own current-behavior descriptions,
+  and one unrelated pre-existing stale message in `frontend-build.sh`
+  (still said "crane output" though `registry-seed.sh` moved to `oras`
+  back in R1b-ii-c). Two follow-ups split out rather than folded in:
+  "OpenBao's own tooling surface — `bao` CLI vs. direct API calls" (the
+  item's own second half, genuinely separate scope) and
+  "openbao-verify.bats — convert error-path tests from live network to
+  stubbed unit tests" (a Codex finding on the bats suite's TOCTOU gap
+  and thin error-path coverage — real, but a test-architecture change
+  bigger than a tool swap).
 
 - **Kyverno amd64-index admission fix — DONE** (PR #55, `/investigate` +
   `/plan-eng-review`, 2 Codex outside-voice passes). Kyverno's
@@ -1163,35 +1191,40 @@ environment.
 **Depends on:** cluster-k0sctl module built, digest-as-source-of-truth
 Phase 2-3 proven
 
-### Remove `crane` from the stack entirely — planning session — P3
+### OpenBao's own tooling surface — `bao` CLI vs. direct API calls — planning session — P3
 
-**What:** `crane`'s zot-facing use is gone (R1b-ii-c swapped `registry-seed.sh`
-to `oras cp`); the one remaining call is `openbao-verify.sh`'s `crane digest`
-against a public chart registry (quay.io/ghcr.io — real HTTPS, system trust,
-unaffected by the CA-file gap). Investigate whether that call can move to
-`oras` (or `helm show chart`/`helm pull --digest`, since it's specifically a
-Helm OCI chart digest check) so `google/go-containerregistry` drops out of
-`mise.toml` altogether — one fewer pinned tool, one fewer thing with its own
-Go-toolchain/CA quirks to reason about.
+**What:** now that `crane` is gone (below, Recently Closed), the same
+"redundant coverage" question this repo's Tool Boundaries constraint
+raises for a whole pinned tool applies one level down: several scripts
+call OpenBao's HTTP API directly in places `bao` CLI already covers.
+Worth the same one-job-per-mechanism look, on its own — a genuinely
+different, smaller-grained question than the crane removal was.
 
-**Why:** every pinned tool is a maintenance surface (CLAUDE.md § Tool
-Boundaries — one job per tool); if `oras` already covers the one remaining
-job, keeping `crane` around too is redundant coverage the repo's own
-constraints call out as a smell, not a strict-overlap violation to ignore.
+**Why:** every direct-API call is a second way to do something the
+pinned `bao` CLI already does, the same maintenance-surface smell
+CLAUDE.md § Tool Boundaries calls out — not urgent, but worth a pass.
 
-**Also fold in:** a broader look at where else a dedicated single-purpose
-CLI could collapse into an already-pinned tool the same way — OpenBao's own
-tooling surface (`bao` CLI vs. direct API calls the scripts already make in
-places) is the other candidate worth the same question in the same session.
+**Depends on:** nothing blocking. **Triggers with:** a dedicated
+tooling-consolidation session.
 
-**First step:** confirm `oras`/`helm` can do a digest-only chart-pin check
-without pulling the full chart (matching `openbao-verify.sh`'s current
-cheap-check shape) before committing to the swap.
+### openbao-verify.bats — convert error-path tests from live network to stubbed unit tests — P3
 
-**Depends on:** nothing blocking — R1b-ii-c (crane's zot use) shipped (T7c
-distribution tail, Recently Closed); fully actionable now. **Triggers
-with:** the next chart-pin gate touch, or a dedicated tooling-consolidation
-session.
+**What:** `online()`'s reachability probe runs BEFORE the script's own
+separate live call (a TOCTOU gap — registry state can change between
+the two), and all 8 existing cases only prove behavior on a clean
+network, not how the gate specifically handles an auth failure, a cert
+failure, or a malformed ref (as opposed to a plain registry-down/
+not-found, which IS covered — verified live across 3 error classes
+during the crane-removal review, below). Found by Codex's outside voice
+during that review's plan pass; surfaced by, not blocking, that
+unrelated tool-consolidation PR.
+
+**Why:** stubbed unit tests would isolate error-branch coverage from
+live-registry flakiness and let each failure mode assert independently,
+instead of relying on whichever error a live registry happens to return
+that day.
+
+**Depends on:** nothing blocking. **Priority:** P3.
 
 ### Upgrade cosign signing to public trust (Fulcio/keyless or published key)
 

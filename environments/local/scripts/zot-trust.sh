@@ -14,7 +14,7 @@ set -euo pipefail
 #   2. `$XDG_STATE_HOME/toolbox/zot/zot-bundle.crt` — a concatenation of the
 #      macOS system root snapshot (`/etc/ssl/cert.pem`) + the dev CA, for
 #      HOST CLI calls (`mise.toml [env] SSL_CERT_FILE`). `curl` honors this
-#      env var directly; several pinned Go tools (`crane`, `flux push`,
+#      env var directly; several pinned Go tools (`flux push`,
 #      `cosign` without `--registry-cacert`) do NOT on this darwin
 #      toolchain — see the R1b-ii-b honor-matrix in
 #      `~/.claude/plans/t7c-distribution-t7d.md`. Those need a per-call

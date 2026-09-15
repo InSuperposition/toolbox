@@ -10,9 +10,9 @@
 #
 # To bump the operator:
 #   1. pick the new version V
-#   2. crane digest ghcr.io/controlplaneio-fluxcd/charts/flux-operator:$V        -> chart_digest
-#   3. crane digest ghcr.io/controlplaneio-fluxcd/flux-operator:v$V             -> operator_image_digest
-#   4. crane digest ghcr.io/controlplaneio-fluxcd/flux-operator-manifests:latest -> manifests_digest
+#   2. oras resolve ghcr.io/controlplaneio-fluxcd/charts/flux-operator:$V        -> chart_digest
+#   3. oras resolve ghcr.io/controlplaneio-fluxcd/flux-operator:v$V             -> operator_image_digest
+#   4. oras resolve ghcr.io/controlplaneio-fluxcd/flux-operator-manifests:latest -> manifests_digest
 #   5. cosign verify --certificate-oidc-issuer=$cosign_issuer \
 #        --certificate-identity-regexp="$cosign_identity_regexp" \
 #        ghcr.io/controlplaneio-fluxcd/charts/flux-operator:$V

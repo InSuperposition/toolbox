@@ -4,7 +4,7 @@
 # chart-pin gate. The guard must FAIL closed on a mutated digest / broken
 # lock, not only pass on the committed one.
 #
-# The digest-equality + render assertions need network (crane + `helm pull`).
+# The digest-equality + render assertions need network (oras + `helm pull`).
 # On a green network they run for real; offline / registry-down the script
 # prints a skip line and exits 0 (like the [k8s] gates) so a flapping
 # registry does not red `mise run check`. The lock-integrity cases
@@ -28,7 +28,12 @@ teardown() {
 }
 
 online() {
-	crane digest ghcr.io/openbao/charts/openbao:0.29.4 >/dev/null 2>&1
+	# Both refs the script itself depends on — a chart-only check let a
+	# quay.io-only outage pass this gate while the script's own image-digest
+	# call skipped internally, falsely failing "fails closed on a mutated
+	# image digest" (found 2026-09-14, fixed here alongside the oras swap).
+	oras resolve ghcr.io/openbao/charts/openbao:0.29.4 >/dev/null 2>&1 &&
+		oras resolve quay.io/openbao/openbao:2.6.2 >/dev/null 2>&1
 }
 
 @test "passes on the committed lock (or cleanly skips offline)" {

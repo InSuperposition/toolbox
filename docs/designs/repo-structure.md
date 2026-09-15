@@ -240,7 +240,7 @@ toolbox/
 │       │   ├── flux-bootstrap.sh                     T7c Inc.1a — the one-time acyclic bridge: cosign-verify chart digest → helm upgrade --install → apply FluxInstance
 │       │   ├── flux-chainsaw.sh  flux-kubeconform.sh T7c — the [k8s] chainsaw wrapper + the kubeconform-flux gate wrapper
 │       │   ├── cert-manager-kubeconform.sh           T7c Inc.4 — kubeconform-cert-manager wrapper (vendored cert-manager.io/v1 schemas)
-│       │   ├── openbao-verify.sh                     the chart-pin gate (crane digest == lock, then helm template by digest)
+│       │   ├── openbao-verify.sh                     the chart-pin gate (oras resolve == lock, then helm template by digest)
 │       │   ├── openbao-bootstrap.sh                  the one-time in-cluster bridge: pick source → ns + seal Secret → tofu apply Phase A → init → key-preserving -force restore → assert approval-key unchanged → tofu apply Phase C (ADR 0016)
 │       │   ├── openbao-chainsaw.sh                   [k8s] running-state wrapper (skips without a cluster / until the bridge has run)
 │       │   ├── openbao-snapshot.sh                   the in-cluster restore bundle (snap + seal.key + root.token)

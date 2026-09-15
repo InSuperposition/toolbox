@@ -42,7 +42,7 @@ variable "chart_name" {
 }
 
 variable "chart_version" {
-  description = "OpenBao chart version (a tag). The OpenTofu helm provider cannot pin an OCI chart by digest (hashicorp/terraform-provider-helm#1596) — it pins this tag and ignores any digest. The immutability guarantee is enforced OUT of band: openbao-verify.sh (the hk gate) and the bootstrap bridge, before `tofu apply`, both assert `crane digest <repo>/<name>:<chart_version>` == the chart_digest recorded in openbao.lock, and fail closed on a mismatch. Bump: update this AND openbao.lock together."
+  description = "OpenBao chart version (a tag). The OpenTofu helm provider cannot pin an OCI chart by digest (hashicorp/terraform-provider-helm#1596) — it pins this tag and ignores any digest. The immutability guarantee is enforced OUT of band: openbao-verify.sh (the hk gate) and the bootstrap bridge, before `tofu apply`, both assert `oras resolve <repo>/<name>:<chart_version>` == the chart_digest recorded in openbao.lock, and fail closed on a mismatch. Bump: update this AND openbao.lock together."
   type        = string
   default     = "0.29.4"
 }
