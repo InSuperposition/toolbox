@@ -694,13 +694,36 @@ not pattern-matched from training data):**
    X.509-SVID (no CN → `"missing name in alias"`). **Phase 3 targets
    `jwt` auth + JWT-SVID**, not `cert`. No production wiring landed;
    this was a finding, not code.
-1. **SPIRE Server + Agent in-cluster; zot mTLS** — new concern directory
-   `environments/local/spire/` (sibling to `openbao/`, same tofu-unit
-   skeleton). SPIRE's intermediate cert issued via OpenBao's PKI secrets
-   engine as upstream authority (keeps OpenBao as the one root of trust —
-   no third independent CA alongside `toolbox-dev-ca` and OpenBao's own
-   listener cert). SPIRE Agent DaemonSet, `k8s_psat` attestor. Closes
-   "zot registry auth."
+1. **SPIRE Server + Agent in-cluster; zot mTLS** — split into 3 PRs
+   (Gall's Law / bisect-safety). **PR 1 — DONE (2026-09-15, #64):**
+   OpenBao's `pki` mount as SPIRE's upstream authority (docs/adr/0025).
+   **PR 2 — DONE (2026-09-15, docs/adr/0026):** the
+   `environments/local/spire/` tofu unit (sibling to `openbao/`, same
+   skeleton) — SPIRE Server + Agent via one `helm_release` of the
+   upstream `spire` umbrella chart (`spire-crds` installs first, a
+   genuinely separate release), `k8s_psat` node attestation
+   (chart-default RBAC, no hand-authored roles), the intermediate cert
+   signed by PR 1's OpenBao role at runtime, a dedicated `trust-manager`
+   `Bundle` CR (`spire-vault-ca`) for OpenBao's own TLS trust, and an
+   explicit `controllerManager.enabled = false` override (the umbrella
+   chart's own default silently turns this on, which would have shipped
+   a webhook + `ClusterSPIFFEID` CRs with no review). Live-apply against
+   the real cluster caught 2 real config bugs neither the plan nor
+   `tofu test` surfaced (both now fixed + regression-guarded in
+   `spire.tftest.hcl`): (1) the vault plugin's `k8sAuth.token.audience`
+   defaults to `"vault"`, not PR 1's OpenBao role audience
+   (`var.openbao_endpoint`) — a live 403 "invalid audience" at
+   spire-server startup; (2) `spire-agent.trustBundleFormat` (its own
+   bootstrap-trust file format) is independent from
+   `spire-server.bundlePublisher.k8sConfigMap.format` even though both
+   read the same ConfigMap — a mismatch hangs the agent forever on
+   "could not parse trust bundle". End-to-end proven live: node
+   attestation succeeds, spire-server's active CA is upstream-signed
+   (`self_signed=false`), both ConfigMaps populated, chainsaw green.
+   **PR 3 — not started:** zot mTLS config + cross-namespace
+   bundle-ConfigMap wiring + a chainsaw assertion that a real registered
+   workload's SVID authenticates to zot end-to-end. Closes "zot registry
+   auth" once PR 3 lands.
 2. **Host-side SPIRE Agent** — `join_token` node attestation on the dev
    Mac, `pitchfork`-supervised (never a bare `spire-agent run &`). Host
    CLI tools (`flux push`, `oras`, `frontend-publish.sh`,
@@ -1069,6 +1092,32 @@ what the script itself actually needs to succeed past the render step.
 
 **Priority:** P3 — not a real regression, a test-harness gap. Not fixed
 here (out of scope for T8; flagged per repo-ownership discipline).
+
+### `spire-verify.bats` has no local-fixture rigor for chart-dependent cases — P3
+
+**Found 2026-09-15** while writing SPIRE Phase 1 PR 2's test suite.
+`environments/local/scripts/tests/openbao-verify.bats` stands up a
+throwaway local TLS zot registry (`tests/lib/registry.bash`'s
+`start_registry_tls`) for its digest-mismatch/malformed-ref cases —
+no network, no flakiness. `spire-verify.bats` has no equivalent: the
+`spiffe/helm-charts-hardened` repo is a CLASSIC (non-OCI, index.yaml +
+bare `.tgz` over plain HTTP) Helm repo, and this repo's only existing
+throwaway-registry fixture is OCI/zot-shaped. So `spire-verify.bats`'s
+chart-dependent cases (the happy path, the mutated-digest fail-closed
+case) run against the REAL live `spiffe.github.io` repo, self-skipping
+offline — correct behavior, but flaky-by-network same as
+`openbao-verify.bats`'s cases used to be before that suite got its
+local fixture.
+
+**Fix:** build a `tests/lib/helm_repo.bash` (or similar) — a throwaway
+static HTTP server serving a hand-built `index.yaml` + a couple of
+fixture `.tgz` charts, the classic-repo equivalent of
+`registry.bash`'s `start_registry`/`start_registry_tls`. Convert
+`spire-verify.bats`'s chart-dependent cases to use it.
+
+**Priority:** P3 — not a real regression, a test-harness gap. Not fixed
+here (out of scope for SPIRE Phase 1 PR 2; flagged per repo-ownership
+discipline, same pattern as the `openbao-verify.bats` item above).
 
 ### Run-scoped digest identity — race-simulating test — P3
 

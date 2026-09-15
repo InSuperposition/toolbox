@@ -189,6 +189,18 @@ local heavy = new Mapping<String, Step> {
     )
     check = "./environments/local/scripts/openbao-verify.sh"
   }
+  // chart-pin gate for environments/local/spire/ (SPIRE Phase 1,
+  // TODOS.md; docs/adr/0026). Classic (non-OCI) Helm repo — `helm pull`
+  // + sha256sum instead of oras resolve, then `helm template` and assert
+  // the expected shape. Needs network — self-skips (exit 0) offline /
+  // repo-down, so a flapping upstream repo does not red the check.
+  ["spire-verify"] {
+    glob = List(
+      "environments/local/spire/**",
+      "environments/local/scripts/spire-verify.sh"
+    )
+    check = "./environments/local/scripts/spire-verify.sh"
+  }
   ["bats"] {
     // *.bash (helper.bash) is a fixture, not a suite - excluded
     glob = List("**/tests/*.bats")
@@ -227,6 +239,21 @@ local heavy = new Mapping<String, Step> {
       "environments/local/scripts/openbao-chainsaw.sh"
     )
     check = "./environments/local/scripts/openbao-chainsaw.sh"
+  }
+  // The in-cluster SPIRE running state (SPIRE Phase 1, TODOS.md). Same
+  // [k8s] gate as chainsaw-openbao — skips in CI (no OrbStack) and skips
+  // locally until `mise run local:spire:bootstrap` has deployed it
+  // (probe: the `spire-server` StatefulSet). Asserts the running state;
+  // does not run the bridge or tear down.
+  ["chainsaw-spire"] {
+    glob = List(
+      ".chainsaw.yaml",
+      "environments/local/tests/spire/**/*.yaml",
+      "environments/local/spire/**",
+      "environments/local/trust-manager/**/*.yaml",
+      "environments/local/scripts/spire-chainsaw.sh"
+    )
+    check = "./environments/local/scripts/spire-chainsaw.sh"
   }
   // The Kyverno ImageValidatingPolicy running state (Plan B K1, ADR 0020).
   // Same [k8s] gate as chainsaw-flux — skips in CI (no OrbStack) and skips

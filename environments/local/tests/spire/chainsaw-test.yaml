@@ -1,0 +1,86 @@
+# [k8s]-gated (environments/local/scripts/spire-chainsaw.sh skips
+# without an orbstack cluster, and skips until spire-bootstrap.sh has
+# run once — probe: the `spire-server` StatefulSet).
+#
+# Asserts the RUNNING post-bootstrap state — it does NOT run the bridge
+# or tear anything down. The genuine end-to-end proof that the OpenBao
+# round-trip actually completed (spire-server holds a real
+# intermediate-signed bundle, not a bare self-signed cert) is the
+# bridge's own live check (`spire-server bundle show`) and the
+# documented `mise run local:spire:bootstrap` acceptance run.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: spire-reconcile
+spec:
+  steps:
+    - name: spire-crds-are-installed
+      try:
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: clusterspiffeids.spire.spiffe.io
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: clusterfederatedtrustdomains.spire.spiffe.io
+
+    - name: vault-ca-configmap-is-populated
+      try:
+        # trust-manager's dedicated Bundle (environments/local/trust-manager/
+        # spire-vault-ca.yaml) — spire-server's vault upstreamAuthority
+        # plugin mounts this to verify OpenBao's TLS listener.
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: spire-vault-ca
+                namespace: spire
+              data:
+                ("ca.crt" != null): true
+
+    - name: statefulset-is-a-single-ready-server
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: StatefulSet
+              metadata:
+                name: spire-server
+                namespace: spire
+              spec:
+                replicas: 1
+              status:
+                readyReplicas: 1
+
+    - name: daemonset-agent-is-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: spire-agent
+                namespace: spire
+              status:
+                (desiredNumberScheduled == numberReady): true
+
+    - name: trust-bundle-configmap-is-populated
+      try:
+        # bundlePublisher.k8sConfigMap (format=pem) — proves the OpenBao
+        # sign-intermediate round-trip actually completed, not just "pod
+        # is Running".
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: spire-bundle
+                namespace: spire
+              data:
+                ("bundle.crt" != null): true

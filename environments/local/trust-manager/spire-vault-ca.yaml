@@ -1,0 +1,37 @@
+# A SECOND, dedicated Bundle CR — not an addition to the shared
+# `toolbox-ca-bundle` above. SPIRE's vault upstreamAuthority plugin
+# mounts its referenced ConfigMap whole and hardcodes reading a key
+# literally named `ca.crt` (confirmed live against the spire-server
+# chart's templates) — a different key name than the shared Bundle's
+# `ca-certificates.crt`, and ADR 0022's own stated pattern is "a new
+# specific need gets its own entry, not a mutation of the shared
+# Bundle." SPIRE Phase 1 (TODOS.md), docs/adr/0025, docs/adr/0026.
+#
+# No `useDefaultCAs` — SPIRE only needs to verify OpenBao's own
+# dev-CA-issued listener cert, not the public root store (narrower than
+# the shared Bundle's Kyverno/ci use case, which verifies an HTTPS zot
+# that could plausibly sit behind a public-CA front door later).
+#
+# trust-manager names the per-namespace target ConfigMap after
+# `metadata.name` (confirmed live against the existing `toolbox-ca-bundle`
+# Bundle) — this produces `spire-vault-ca` in namespace `spire`, matching
+# `environments/local/spire/variables.tf`'s `spire_ca_configmap_name`
+# default.
+apiVersion: trust.cert-manager.io/v1alpha1
+kind: Bundle
+metadata:
+  name: spire-vault-ca
+spec:
+  sources:
+    - secret:
+        name: toolbox-dev-ca
+        key: ca.crt
+  target:
+    configMap:
+      key: ca.crt
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values:
+            - spire

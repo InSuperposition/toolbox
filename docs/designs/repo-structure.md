@@ -72,14 +72,16 @@ concerns whose files it may name.
          │                 │                      │
    deploy/frontend ──────▶ attestation      environments/local
          │                                        │  owns openbao/  (source = ./openbao)
-         │  frontend consumes the verify          │  owns its orchestration scripts
-         │  seam — the one allowed edge           ▼
-         └──────────────────────────────  environments/local/openbao   (tofu unit — leaf)
+         │  frontend consumes the verify          │  owns spire/    (source = ./spire)
+         │  seam — the one allowed edge           │  owns its orchestration scripts
+         │                                        ▼
+         └──────────────────────────────  environments/local/{openbao,spire}   (tofu units — leaves)
 
 FORBIDDEN:
   attestation                     ─╳▶  deploy/*                a seam never names its consumers
   ci                              ─╳▶  deploy/*                a seam never names its consumers (ADR 0014)
   environments/local/openbao      ─╳▶  attestation, deploy/*, environments/local/scripts
+  environments/local/spire        ─╳▶  attestation, deploy/*, environments/local/scripts
   environments/local/scripts      ─╳▶  attestation, deploy/*   (calls the attestation:export-pubkey TASK,
                                                                 never writes the pubkey file)
   tests/lib                       ─╳▶  any concern             scratch helpers take copy-paths as ARGS
@@ -89,6 +91,7 @@ Runtime-only edges (env vars / mise-task calls, not file paths — allowed, not 
   attestation/scripts/openbao-preflight.sh       ··▶  OpenBao daemon        via $VAULT_ADDR
   deploy/frontend/scripts/frontend-publish.sh    ··▶  attestation-verify    via $TOOLBOX_ATTESTATION_VERIFY
   environments/local/scripts/openbao-bootstrap.sh ··▶ `mise run attestation:export-pubkey`  (task call, not a file write)
+  environments/local/spire (spire-server's own vault plugin) ··▶ OpenBao's auth/kubernetes + pki mount   runtime k8s-auth login, role name only (no tofu-to-tofu state read, docs/adr/0025)
 
 Deployment-composition edge (a manifest-ref, not a shell path — select + target-namespace + order + reconciliation policy; ownership stays with the target):
   environments/local/  ──▶  ci/{runtime,tasks,pipelines}   Flux `Kustomization` CRs in environments/local/flux/ point at ci/ paths (T7c Increment 2)
@@ -111,9 +114,10 @@ they stay in `environments/local/flux/`.
 | `tests/` | repo-level shared test support (`lib/`, the coverage guard) | nothing — leaf; concern-agnostic (helpers take paths as args) |
 | `attestation/` | the sign + verify + preflight seam, `verdict-approved.cue`, `cosign-approval.pub` | `tests/lib` |
 | `deploy/frontend/` | one consumer of an approved image: build, **publish** (the Timoni module `timoni/`, the `k8s/` namespace, `frontend-publish.sh` — ADR 0019/0021) | `attestation` (the verify seam, via env), `tests/lib` |
-| `environments/local/` | one deployment target: the tofu composition, the Flux deployment policy (`flux/`), the `kyverno/` policy set (ADR 0020), the orchestration scripts that bring its units up | its own `openbao/` unit, `tests/lib`; calls `attestation:export-pubkey` as a task; reads the committed public `attestation/cosign-approval.pub` (kyverno `configMapGenerator`, `openbao-bootstrap.sh`) |
+| `environments/local/` | one deployment target: the tofu composition, the Flux deployment policy (`flux/`), the `kyverno/` policy set (ADR 0020), the orchestration scripts that bring its units up | its own `openbao/` unit, its own `spire/` unit, `tests/lib`; calls `attestation:export-pubkey` as a task; reads the committed public `attestation/cosign-approval.pub` (kyverno `configMapGenerator`, `openbao-bootstrap.sh`) |
 | `environments/local/openbao/` | the local-OpenBao **tofu unit** only (host pitchfork daemon — retires at T7c Increment 4d) | `tests/lib` (for its `.tftest.hcl`) — leaf |
-| `environments/local/openbao/` | the **in-cluster** local-OpenBao tofu unit (ADR 0016 — Phase A `helm_release` + Phase C `vault_*`) | `tests/lib` — leaf |
+| `environments/local/openbao/` | the **in-cluster** local-OpenBao tofu unit (ADR 0016 — Phase A `helm_release` + Phase C `vault_*`), including its `pki` mount as SPIRE's upstream authority (docs/adr/0025) | `tests/lib` — leaf |
+| `environments/local/spire/` | the in-cluster SPIRE Server + Agent **tofu unit** (SPIRE Phase 1, TODOS.md — one `helm_release` of the `spire` umbrella chart, docs/adr/0026) | `tests/lib` — leaf |
 | `ci/` | reusable Tekton Task/Pipeline defs → digest-pinned OCI bundles; `ci/runtime/` namespace; each path's `kustomization.yaml` inventory; the bundle-push + taskrun scripts | `tests/lib`. **Never names a consumer** (like `attestation/`) — machine-checked (`rules/boundary-ci.yml`). `deploy/<consumer>/` consumes `ci/` bundles by digest via a pinned `PipelineRun`. Tekton **controller** + `zot` installs are `environments/local/`, not `ci/`; from T7c Increment 2 the Task/Pipeline **defs** are reconciled by Flux `Kustomization` CRs that live in `environments/local/flux/` (deployment policy is `environments/local/`'s, the defs + inventories stay `ci/`'s). |
 | `modules/` | reusable, versioned, URL-consumed OpenTofu modules only | — (empty today; a README states the rule) |
 
