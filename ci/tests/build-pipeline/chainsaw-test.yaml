@@ -18,6 +18,18 @@
 # terminated exitCode is asserted: 2 on a CRITICAL finding (TaskRun fails),
 # 0 on a LOW-only report (TaskRun succeeds), 1 on a malformed report (TaskRun
 # fails, but as an error not a verdict). Fixtures: fixtures/scan-*.yaml.
+#
+# SPIRE Phase 1 follow-up — zot's mTLS/SVID enforcement (ADR 0025/0026) IS
+# chainsaw-covered live: two standalone `buildkit-build` TaskRuns (the real,
+# unmodified Task via `taskRef`, fixtures/mtls-*.yaml standing in for
+# git-clone), one as the `ci` namespace's `default` SA (zot authorizes it,
+# push succeeds) and one as `provenance-signer` (a validly-issued SVID zot
+# does NOT authorize, push rejected). Both are namespace-pinned to `ci`
+# (not chainsaw's default ephemeral namespace — the ClusterSPIFFEID
+# template mints identity from namespace+SA, so any other namespace fails
+# for the wrong reason). The full clone -> build -> push -> pull pipeline
+# integration (git egress included) is still proven only by the operator
+# run described above, unchanged.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -517,3 +529,164 @@ spec:
                 name: extract-digest-missing
               status:
                 (conditions[?type == 'Succeeded'] | [0].status): "False"
+    # Reuses the real, live buildkitd-mirror / toolbox-ca-bundle ConfigMaps
+    # (deploy/frontend/pipelinerun.cue's own binding names) so this proves
+    # the fixture against the actual mirror/CA config, not a stand-in.
+    # Pushed tag is FIXED (chainsaw-mtls-test), never random: zot's store
+    # is gc:false/dedupe:true, so repeated runs stay flat instead of
+    # accumulating blobs — do not "fix" this into a random tag. A second
+    # TaskRun immediately re-pushes the SAME tag: live-verified
+    # (2026-09-16) that zot's `create` action alone only authorizes the
+    # FIRST-EVER push to a given tag — a bare-`create` policy 403s every
+    # push after that (zot's session log: PUT .../manifests/<tag> 201 then
+    # 403 for the identical identity). The policy now grants `update` too
+    # (environments/local/zot/zot.yaml) specifically so a real CI re-run
+    # on an unchanged commit doesn't fail — this second TaskRun is the
+    # regression proof for that fix, not just idempotency of the test.
+    - name: buildkit-build-pushes-with-a-valid-svid
+      try:
+        - apply:
+            file: fixtures/mtls-build-defs.yaml
+        - apply:
+            file: fixtures/mtls-source.yaml
+        - apply:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: TaskRun
+              metadata:
+                name: mtls-enforcement-authorized
+                namespace: ci
+              spec:
+                serviceAccountName: default
+                taskRef:
+                  name: buildkit-build
+                params:
+                  - name: IMAGE
+                    value: zot.zot.svc.cluster.local:5000/toolbox-test/mtls-enforcement
+                  - name: APP_REVISION
+                    value: chainsaw-mtls-test
+                  - name: APP_REPO_URL
+                    value: https://example.invalid/chainsaw-mtls-test
+                workspaces:
+                  - name: source
+                    configMap:
+                      name: mtls-enforcement-source
+                  - name: build-defs
+                    configMap:
+                      name: mtls-enforcement-build-defs
+                  - name: buildkitd-config
+                    configMap:
+                      name: buildkitd-mirror
+                  - name: ca-bundle
+                    configMap:
+                      name: toolbox-ca-bundle
+        - assert:
+            timeout: 240s
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: TaskRun
+              metadata:
+                name: mtls-enforcement-authorized
+                namespace: ci
+              status:
+                (conditions[?type == 'Succeeded'] | [0].status): "True"
+                (steps[?name == 'fetch-svid'] | [0].terminated.exitCode): 0
+                (steps[?name == 'build'] | [0].terminated.exitCode): 0
+        - apply:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: TaskRun
+              metadata:
+                name: mtls-enforcement-authorized-repush
+                namespace: ci
+              spec:
+                serviceAccountName: default
+                taskRef:
+                  name: buildkit-build
+                params:
+                  - name: IMAGE
+                    value: zot.zot.svc.cluster.local:5000/toolbox-test/mtls-enforcement
+                  - name: APP_REVISION
+                    value: chainsaw-mtls-test
+                  - name: APP_REPO_URL
+                    value: https://example.invalid/chainsaw-mtls-test
+                workspaces:
+                  - name: source
+                    configMap:
+                      name: mtls-enforcement-source
+                  - name: build-defs
+                    configMap:
+                      name: mtls-enforcement-build-defs
+                  - name: buildkitd-config
+                    configMap:
+                      name: buildkitd-mirror
+                  - name: ca-bundle
+                    configMap:
+                      name: toolbox-ca-bundle
+        - assert:
+            timeout: 240s
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: TaskRun
+              metadata:
+                name: mtls-enforcement-authorized-repush
+                namespace: ci
+              status:
+                (conditions[?type == 'Succeeded'] | [0].status): "True"
+                (steps[?name == 'build'] | [0].terminated.exitCode): 0
+    # Negative case: same Task, same fixtures, run as `provenance-signer`
+    # instead of `default`. The ClusterSPIFFEID template mints it a VALID
+    # SVID (spiffe://toolbox.local/ns/ci/sa/provenance-signer — fetch-svid
+    # still succeeds) that zot's accessControl does NOT authorize for
+    # `create` (only .../sa/default is) — falls through to
+    # defaultPolicy:["read"]. Proves the policy is a real enforced
+    # allowlist, not "any cert is accepted."
+    - name: buildkit-build-push-rejected-for-an-unauthorized-svid
+      try:
+        - apply:
+            file: fixtures/mtls-build-defs.yaml
+        - apply:
+            file: fixtures/mtls-source.yaml
+        - apply:
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: TaskRun
+              metadata:
+                name: mtls-enforcement-unauthorized
+                namespace: ci
+              spec:
+                serviceAccountName: provenance-signer
+                taskRef:
+                  name: buildkit-build
+                params:
+                  - name: IMAGE
+                    value: zot.zot.svc.cluster.local:5000/toolbox-test/mtls-enforcement
+                  - name: APP_REVISION
+                    value: chainsaw-mtls-test-unauthorized
+                  - name: APP_REPO_URL
+                    value: https://example.invalid/chainsaw-mtls-test
+                workspaces:
+                  - name: source
+                    configMap:
+                      name: mtls-enforcement-source
+                  - name: build-defs
+                    configMap:
+                      name: mtls-enforcement-build-defs
+                  - name: buildkitd-config
+                    configMap:
+                      name: buildkitd-mirror
+                  - name: ca-bundle
+                    configMap:
+                      name: toolbox-ca-bundle
+        - assert:
+            timeout: 240s
+            resource:
+              apiVersion: tekton.dev/v1
+              kind: TaskRun
+              metadata:
+                name: mtls-enforcement-unauthorized
+                namespace: ci
+              status:
+                (conditions[?type == 'Succeeded'] | [0].status): "False"
+                (steps[?name == 'fetch-svid'] | [0].terminated.exitCode): 0
+                (steps[?name == 'build'] | [0].terminated.exitCode): 1

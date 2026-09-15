@@ -13,10 +13,16 @@
 #
 # SPIFFE mTLS gates PUSH (SPIRE Phase 1 PR 3, TODOS.md "zot registry
 # auth"): `http.auth.mtls` + `http.accessControl` require a valid SVID
-# for `create`; anonymous READ stays open (zot's own TLS listener uses
-# `VerifyClientCertIfGiven`, live-verified against the real v2.1.20
-# source — a client presenting no cert is treated as anonymous, not
-# rejected, so existing pull paths are unaffected). The trusted CA is
+# for `create`/`update`; anonymous READ stays open (zot's own TLS
+# listener uses `VerifyClientCertIfGiven`, live-verified against the
+# real v2.1.20 source — a client presenting no cert is treated as
+# anonymous, not rejected, so existing pull paths are unaffected).
+# `update` (2026-09-16, live-verified): `create` alone only authorizes
+# the FIRST-EVER push to a given tag/repo — zot's own session log shows
+# `PUT .../manifests/<tag>` 201 on the first push, 403 on every push
+# after, for the identical authorized identity. Without `update`, any
+# CI re-run on an unchanged commit (same git-SHA tag, no new content)
+# would fail to push. The trusted CA is
 # spire-server's own published bundle (`bundlePublisher.k8sConfigMap`,
 # `environments/local/spire/main.tf`, repointed cross-namespace into
 # this namespace) — a DIFFERENT CA than `toolbox-dev-ca` below, which
@@ -99,7 +105,7 @@ data:
             "**": {
               "policies": [{
                 "users": ["spiffe://toolbox.local/ns/ci/sa/default"],
-                "actions": ["read", "create"]
+                "actions": ["read", "create", "update"]
               }],
               "defaultPolicy": ["read"],
               "anonymousPolicy": ["read"]

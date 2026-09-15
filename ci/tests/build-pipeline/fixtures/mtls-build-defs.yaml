@@ -1,0 +1,17 @@
+# mTLS/SVID enforcement test (ci/tests/build-pipeline/chainsaw-test.yaml):
+# a minimal Dockerfile, delivered as a ConfigMap bound to buildkit-build's
+# `build-defs` workspace — no real git clone needed, same trick as
+# extract-digest's fixtures. Namespace-pinned to `ci`: the TaskRun that
+# consumes it must also run in `ci` (zot's accessControl only authorizes
+# spiffe://toolbox.local/ns/ci/sa/default for `create` — a chainsaw
+# auto-generated ephemeral namespace would get a validly-issued but
+# unauthorized SVID and fail for the wrong reason).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mtls-enforcement-build-defs
+  namespace: ci
+data:
+  Dockerfile: |
+    FROM scratch
+    COPY hello.txt /hello.txt

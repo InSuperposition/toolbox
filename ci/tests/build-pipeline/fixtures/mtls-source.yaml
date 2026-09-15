@@ -1,0 +1,10 @@
+# Companion to mtls-build-defs.yaml — the one context file the fixture
+# Dockerfile COPYs, bound to buildkit-build's `source` workspace.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mtls-enforcement-source
+  namespace: ci
+data:
+  hello.txt: |
+    mtls-enforcement fixture - not a real app.
