@@ -44,6 +44,51 @@ stop_registry() {
 	[ -f "$dir/zot.pid" ] && kill "$(cat "$dir/zot.pid")" 2>/dev/null || true
 }
 
+# start_registry_tls <dir> -> sets REG_TLS (host:port) and TLS_CA
+# ($dir's self-signed CA PEM), writes $dir/zot-tls.pid. A separate
+# fixture from start_registry (plain HTTP): this repo's `oras` callers
+# default to HTTPS with no --plain-http (openbao-verify.sh), so testing
+# their real transport needs a TLS listener, not a plain-HTTP one. No
+# auth support — bcrypt-hashing a credential needs the external
+# `htpasswd` binary, an undeclared system dependency this repo's mise-
+# pinned toolchain doesn't have; the auth-failure error path is unit-
+# tested directly against real oras output instead (openbao-verify.bats).
+start_registry_tls() {
+	local dir="$1" port
+	port="$(free_port)"
+	REG_TLS="127.0.0.1:${port}"
+	TLS_CA="$dir/tls-ca.pem"
+	openssl req -x509 -newkey rsa:2048 -keyout "$dir/tls-key.pem" -out "$TLS_CA" \
+		-days 1 -nodes -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1" 2>/dev/null
+
+	cat >"$dir/zot-tls.json" <<-EOF
+		{
+		  "distSpecVersion": "1.1.1",
+		  "storage": { "rootDirectory": "${dir}/data-tls" },
+		  "http": { "address": "127.0.0.1", "port": "${port}",
+		            "tls": { "cert": "${TLS_CA}", "key": "${dir}/tls-key.pem" } },
+		  "log": { "level": "error" }
+		}
+	EOF
+	zot serve "$dir/zot-tls.json" >"$dir/zot-tls.log" 2>&1 &
+	local zpid=$!
+	echo "$zpid" >"$dir/zot-tls.pid"
+	disown "$zpid" 2>/dev/null || true
+	local i=0
+	while [ "$i" -lt 50 ]; do
+		curl -sfk "https://${REG_TLS}/v2/" >/dev/null 2>&1 && return 0
+		sleep 0.1
+		i=$((i + 1))
+	done
+	echo "zot (tls) did not come up on ${REG_TLS}" >&2
+	return 1
+}
+
+stop_registry_tls() {
+	local dir="$1"
+	[ -f "$dir/zot-tls.pid" ] && kill "$(cat "$dir/zot-tls.pid")" 2>/dev/null || true
+}
+
 # make_key <dir> -> writes $dir/cosign.key + $dir/cosign.pub
 make_key() {
 	local dir="$1"

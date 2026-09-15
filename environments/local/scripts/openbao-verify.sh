@@ -23,7 +23,10 @@ set -euo pipefail
 # Offline / registry-down: prints a skip line and exits 0, like the [k8s]
 # gates, so a flapping registry.opentofu.org does not red the whole check.
 #
-# Test seam: TOOLBOX_OPENBAO_LOCK overrides the lock path (bats).
+# Test seams (bats): TOOLBOX_OPENBAO_LOCK overrides the lock path;
+# TOOLBOX_ORAS_CACERT points both oras calls at a local test registry's CA
+# (--ca-file) instead of the system trust store real GHCR/quay use. Unset
+# in production.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 UNIT_DIR="$(cd "$SCRIPT_DIR/../openbao" && pwd)"
@@ -39,6 +42,53 @@ skip() {
 	exit 0
 }
 val() { sed -n "s/^$1=//p" "$LOCK"; }
+
+# classify_failure <stderr text> — true (0) for a permanent/config-shaped
+# failure (auth, TLS cert, malformed ref, a real render error, ...) that
+# should fail this gate CLOSED; false (1) for transient network
+# unreachability or a not-found (registry down, DNS, or a real
+# not-found — the already-shipped skip behavior, not re-litigated here).
+# Patterns are the real error text oras 1.3.4 / helm emit for each class
+# (live-verified against a local zot fixture, not assumed): connection
+# refused and DNS failure both contain "dial tcp"; a timeout contains
+# "i/o timeout" or "context deadline exceeded"; a real not-found says
+# "... not found" (some registries say "manifest unknown" instead).
+# Everything else — "invalid reference" (malformed ref), "x509:
+# certificate signed by unknown authority" (cert failure), "basic
+# credential not found" (auth failure) — falls to the default: die.
+# ": not found" (colon-space, matching the real "<ref>: not found" shape),
+# not the bare phrase — "basic credential not found" (auth failure) has
+# no colon before it and must NOT collide with the not-found bucket.
+classify_failure() {
+	case "$1" in
+	*'dial tcp'* | *'i/o timeout'* | *'context deadline exceeded'* | \
+		*'no such host'* | *'connection refused'* | \
+		*'manifest unknown'* | *' 404 '* | *': not found'*)
+		return 1 ;;
+	*)
+		return 0 ;;
+	esac
+}
+
+# ORAS_CACERT — the --ca-file flag for both oras calls below, only when
+# TOOLBOX_ORAS_CACERT is set (bats). Empty in production: real
+# GHCR/quay use the system trust store, no flag needed.
+ORAS_CACERT=()
+[ -n "${TOOLBOX_ORAS_CACERT:-}" ] && ORAS_CACERT=(--ca-file "$TOOLBOX_ORAS_CACERT")
+
+# --- 0. anti-rotation guard FIRST — before every other check in this
+#        script, lock/tftpl existence included: a pure local `*.tf` grep,
+#        zero dependency on anything else here. It used to run LAST and
+#        could be silently skipped by an earlier registry-down exit (or,
+#        in principle, any other precondition failing first) — this unit
+#        must NEVER tofu-manage the transit mount or approval-key; both
+#        are created by the snapshot restore, and a tofu recreate = a key
+#        rotation = every past approval attestation stops verifying,
+#        plan § B3. Matches an actual resource block / `name =
+#        "approval-key"` arg, not the validation string or a comment.
+if grep -REn 'resource[[:space:]]+"vault_mount"|name[[:space:]]*=[[:space:]]*"approval-key"' "$UNIT_DIR"/*.tf; then
+	die "environments/local/openbao/*.tf tofu-manages the transit mount or approval-key — those are restore-managed, tofu must not touch them"
+fi
 
 command -v oras >/dev/null || die "oras not on PATH"
 command -v helm >/dev/null || die "helm not on PATH"
@@ -63,24 +113,34 @@ case "$image_digest" in sha256:*) ;; *) die "image_digest is not sha256:<hex>: '
 # oras wants a bare ref (no oci:// scheme).
 chart_ref_bare="${chart_repo#oci://}/$chart_name"
 
+workdir="$(mktemp -d)"
+trap 'rm -rf "$workdir"' EXIT
+
 # --- 1. chart tag resolves to the locked digest -------------------------
 echo "openbao-verify: oras resolve $chart_ref_bare:$chart_version"
-got_chart="$(oras resolve "$chart_ref_bare:$chart_version" 2>/dev/null)" ||
+got_chart="$(oras resolve "${ORAS_CACERT[@]}" "$chart_ref_bare:$chart_version" 2>"$workdir/oras-chart.err")" || {
+	err="$(cat "$workdir/oras-chart.err")"
+	if classify_failure "$err"; then
+		die "oras resolve failed for $chart_ref_bare:$chart_version (not a network issue): $err"
+	fi
 	skip "cannot reach $chart_ref_bare (registry down / offline)"
+}
 [ "$got_chart" = "$chart_digest" ] ||
 	die "chart tag $chart_version resolves to $got_chart, lock says $chart_digest — a mutated upstream tag or a stale lock"
 
 # --- 2. image tag resolves to the locked digest ------------------------
 echo "openbao-verify: oras resolve $image_ref:$image_tag"
-got_image="$(oras resolve "$image_ref:$image_tag" 2>/dev/null)" ||
+got_image="$(oras resolve "${ORAS_CACERT[@]}" "$image_ref:$image_tag" 2>"$workdir/oras-image.err")" || {
+	err="$(cat "$workdir/oras-image.err")"
+	if classify_failure "$err"; then
+		die "oras resolve failed for $image_ref:$image_tag (not a network issue): $err"
+	fi
 	skip "cannot reach $image_ref (registry down / offline)"
+}
 [ "$got_image" = "$image_digest" ] ||
 	die "image tag $image_tag resolves to $got_image, lock says $image_digest"
 
 # --- 3. render the chart BY DIGEST and assert the shape ----------------
-workdir="$(mktemp -d)"
-trap 'rm -rf "$workdir"' EXIT
-
 values="$workdir/values.yaml"
 {
 	echo 'global:'
@@ -120,8 +180,13 @@ values="$workdir/values.yaml"
 } >"$values"
 
 rendered="$workdir/rendered.yaml"
-helm template openbao "oci://$chart_ref_bare@$chart_digest" -f "$values" >"$rendered" 2>"$workdir/helm.err" ||
+helm template openbao "oci://$chart_ref_bare@$chart_digest" -f "$values" >"$rendered" 2>"$workdir/helm.err" || {
+	err="$(cat "$workdir/helm.err")"
+	if classify_failure "$err"; then
+		die "helm template failed (not a network issue): $err"
+	fi
 	skip "helm template failed (offline / registry): $(tail -1 "$workdir/helm.err")"
+}
 
 fail=0
 check() {
@@ -153,14 +218,5 @@ check "TLS Secret mounted at /openbao/tls" \
 	"grep -qE 'mountPath: /openbao/tls' '$rendered'"
 
 [ "$fail" = 0 ] || die "rendered chart does not match the expected shape"
-
-# --- 4. anti-rotation guard: this unit must NEVER tofu-manage the transit
-#        mount or approval-key (both are created by the snapshot restore;
-#        a tofu recreate = a key rotation = every past approval attestation
-#        stops verifying, plan § B3). Matches an actual resource block /
-#        `name = "approval-key"` arg, not the validation string or a comment.
-if grep -REn 'resource[[:space:]]+"vault_mount"|name[[:space:]]*=[[:space:]]*"approval-key"' "$UNIT_DIR"/*.tf; then
-	die "environments/local/openbao/*.tf tofu-manages the transit mount or approval-key — those are restore-managed, tofu must not touch them"
-fi
 
 echo "openbao-verify: OK — chart $chart_version @ $chart_digest, image @ $image_digest; no approval-key / vault_mount in the unit"
