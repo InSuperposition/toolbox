@@ -4,6 +4,25 @@ Open work, phase sequencing, and planning-session triggers (CLAUDE.md §
 Docs layout). Completed work lives in commit messages, PRs, and ADRs —
 this file keeps only a git-log-density pointer to it, not a diary.
 
+## Guiding principles for open work
+
+Every item below is scoped and executed against the same bar, in order
+when two of these trade off: **deterministic > declarative > correct >
+simple.** Concretely — research an existing tool's own declarative
+feature (a native CLI flag, a Tekton result, a schema) before adding a
+hand-rolled script or template; prefer the option that produces the same
+output every time over one that depends on call order or ambient state;
+never trade correctness for either of the above; and once two options
+are equally correct and declarative, the simpler one wins. The Kyverno
+amd64-index admission fix (PR #55, below) is the concrete precedent: the
+first draft proposed propagating a new value through three Tekton
+YAML files; researching `oras`'s own `--platform` flag replaced that
+with a single-script, single-flag fix — fewer files, less hand-rolled
+logic, not more. New items written from here forward get plain
+descriptive titles, not a new `T<n>` number — the existing `T7`/`T8`/
+`R1b-ii-c`-style references stay as-is (renaming them is its own tracked
+task, below: "Documentation extraction").
+
 ## Table of contents
 
 **Reference / runbooks** (no priority band — standing procedures, not
@@ -23,15 +42,20 @@ open work):
   - `Flux / registry CA trust — could a mesh solve this structurally?`
   - `SPIRE — phased workload-identity rollout` — planning-session output,
     Phases 0-3, cross-referenced from the four items above it
+  - `SPIRE — investigate broader scope (OpenBao and beyond)` — gated on
+    Phases 0-3 landing first
 - *tofu modules*
   - `Retrofit vm-orbstack, cluster-k0sctl, secret-openbao to digest-pinning`
 - *Kyverno/Cilium*
   - `Cilium — planning session needed`
-  - `Plan B — Timoni + Kyverno + Crossplane boundary` — shipped M1→X1→K1→M3,
-    Deferred table is the open half
+  - `Plan B — deferred follow-ups` — the ship arc (M1→X1→K1→M3) is done,
+    see Recently Closed; this is the deferred-items table
   - `Kyverno module — accumulating design inputs`
 - *cv_frontend hosting*
   - `Decide public hosting for cv_frontend`
+- *documentation*
+  - `Documentation extraction — code comments + TODOS.md's own T-number/
+    date litter`
 
 **P3**
 
@@ -45,7 +69,6 @@ open work):
   - `T7d — production repoint`
   - `Pin-drift guard: host mise.toml vs ci/tasks/* step images`
   - `openbao-verify.bats's online() helper checks only one of two registries`
-  - `kyverno-reconcile chainsaw fixture — stale hardcoded digest`
   - `Run-scoped digest identity — race-simulating test` — empirical proof,
     deferred from the shipped fix (provable by construction today)
   - `Tekton Dashboard`
@@ -62,6 +85,46 @@ open work):
 
 Newest first. Git-log density — commit/PR references, not a transcript.
 Full detail lives in the referenced PRs, ADRs, and commit messages.
+
+- **Kyverno amd64-index admission fix — DONE** (PR #55, `/investigate` +
+  `/plan-eng-review`, 2 Codex outside-voice passes). Kyverno's
+  `ImageValidatingPolicy` denied every real `cv-frontend` image since T8
+  started pushing `attest:provenance` multi-manifest indices —
+  `verifyAttestationSignatures`/`extractPayload` default to `linux/amd64`
+  resolving an index, no policy-level override exists. Two real
+  redesigns: (1) user directive to research tools before more Tekton
+  YAML — `oras resolve/attach/manifest fetch --platform` all exist and
+  work exactly as documented (live-verified), replacing a go-template
+  hack with one flag; BuildKit's `--metadata-file` does NOT expose a
+  per-platform digest in any shipped release. (2) Codex found the
+  resulting propagate-a-new-Task-result plan wouldn't even compile
+  (Tekton has no value-templating for Task-level results, confirmed by a
+  live spike) AND would reintroduce a cross-run evidence-collision
+  ambiguity (the INDEX digest is always run-unique — it embeds a
+  per-run provenance timestamp — the PLATFORM digest can collide across
+  byte-identical rebuilds). Fixing #2 by keeping evidence on the index
+  resolved #1 as a side effect: zero Tekton YAML touched in the end.
+  Ships: `attestation-sign.sh` resolves the platform digest via
+  `oras resolve --platform=linux/arm64` right after registry-transport
+  setup; evidence discovery stays on the index ref; the predicate
+  digest, signed subject, bundle referrer, and printed
+  `frontend:publish` line all switch to the platform ref. Two chainsaw
+  fixtures (`kyverno-reconcile`, `frontend-delivery`) re-pinned to the
+  platform digest; `frontend-delivery`'s pod-selection assertions also
+  gained a digest match — they previously selected any Pod by label
+  alone, so a stale surviving Pod could satisfy both "container started"
+  and "admitted by policy" regardless of whether a NEW admission attempt
+  ever succeeded (confirmed: this test would have passed throughout the
+  entire period the bug was live). New `tests/lib/registry.bash` helper
+  (`make_multiplatform_image`) — a genuine OCI index fixture, not a
+  stubbed `oras` binary. **Verified live end-to-end**: a real
+  `mise run attestation:sign` + `mise run frontend:publish` + Flux
+  reconcile produced a genuine NEW ReplicaSet whose pod reached `1/1
+  Running` — real admission, not a stale survivor. `mise run check` went
+  fully green, including `kyverno-reconcile` — broken since T8 shipped,
+  the first fully clean run this session. Supersedes the open
+  `kyverno-reconcile chainsaw fixture — stale hardcoded digest` item
+  (removed, below — this entry's own fix is that item's resolution).
 
 - **Run-scoped build digest identity — DONE** (`/plan-eng-review`
   2026-09-15, 1 Codex outside-voice pass, 5 findings folded). Reversed
@@ -276,6 +339,22 @@ Full detail lives in the referenced PRs, ADRs, and commit messages.
   - The other live finding worth keeping: R4's GHCR deletion broke the
     ADR-0009 demo's restart path the same day — see T-ADR9, above.
 
+- **Plan B — Timoni + Kyverno + Crossplane boundary ship arc — DONE**
+  (`M1 → X1 → K1 → M3`, each 1 PR = 1 squash commit) — **M1** #31
+  (`b4c0b0c`, `deploy/frontend/timoni/` CUE module + `timoni mod vet`
+  gate, ADR 0019); **X1** #32 (`d286867`, ADR 0018 —
+  render→reconcile→enforce→provision pipeline staging, tofu
+  `kubernetes_*` banned); **K1** #33 (`1dc6e91`, Kyverno v1.19.1 via Flux
+  + one `ImageValidatingPolicy` gating `cv_frontend` at admission, ADR
+  0020); **M3** #34 (`2c6a1e1`, `mise run frontend:publish` host step
+  delivers via Flux OCIRepository/Kustomization into ns `frontend`, ADR
+  0021). Live on `main`: `cv-frontend` runs 1/1 in ns `frontend`,
+  admitted by the approval policy; `chainsaw-{kyverno,frontend}` pass
+  post-merge. **Op note:** the interim zot is ephemeral + GC-off —
+  recreate loses `D_man` → re-run `frontend:publish` + re-pin (like
+  `frontend:seed`). Deferred tails — promoted to their own section,
+  not lost: "Plan B — deferred follow-ups," below.
+
 - **T9a — `mise run check` in CI — DONE** (PR #7, `7ae5ad0`).
   `.github/workflows/check.yml` runs the full `hk` `check` hook
   (shellcheck, tofu, cue, ls-lint, ast-grep, bats, check-coverage) on every
@@ -385,12 +464,17 @@ credential at all).
    does **not** cross this line; T7a's interim `gh`-token Secret is fine
    there.
 3. `zot` replaces GHCR (T7d) and needs its own identity model wired.
-4. T8 (build provenance, reshaped 2026-09-14 — no Chains) — narrower and
-   already scoped: adds a `chains-provenance-key` Transit policy denying it
-   `approval-key`, plus a dedicated ServiceAccount + k8s-auth role scoped
-   to that key only. `environments/local/openbao/main.tf` does **not**
-   already have this — it's new work T8 adds; T8 does not need this whole
-   session regardless.
+4. T8 (build provenance — DONE, see Recently Closed) — narrower and
+   already shipped: a `chains-provenance-key` Transit policy
+   (`chains_provenance_sign`) denying it `approval-key`, plus a
+   dedicated `provenance-signer` ServiceAccount + `chains_provenance`
+   k8s-auth role scoped to that key only, live in
+   `environments/local/openbao/main.tf`. Confirms the trigger fired
+   without reopening this whole session — T8's identity is scoped to
+   PROVENANCE signing, not approval signing, so it did NOT close the
+   human-approver gap this item is actually about (that gap is now
+   scoped instead by `SPIRE — phased workload-identity rollout`'s
+   Phase 3, below).
 
 **Pre-picked direction (evaluate these first, don't restart from zero):**
 
@@ -443,7 +527,9 @@ disaster") plus one bundle-only `[k8s]` restore test. The actual recovery
 system is unbuilt, and the backup-mechanism choice resurfaces at Plan B's
 `snapshot_schedule` preset.
 
-**Depends on:** Plan A merged. **Overlaps:** Plan B O5 (`snapshot_schedule`).
+**Depends on:** nothing blocking — Plan A (T7c Increment 4, in-cluster
+OpenBao) is done, see Recently Closed; this item is fully actionable
+now, just not yet scheduled. **Overlaps:** Plan B O5 (`snapshot_schedule`).
 **Priority:** P2. Surfaced by `/plan-eng-review` 2026-09-10 (+ Codex #6/#7).
 
 ### zot registry auth — planning session — P2
@@ -612,6 +698,37 @@ session; Phases 1-3 ~S-M each.
 **Priority:** P2 · **Depends on:** nothing blocking — Phase 0 can start
 any time. Phase 4 depends on the Cilium planning session (above).
 
+### SPIRE — investigate broader scope (OpenBao and beyond) — P2, planning session
+
+**What:** once the phased rollout above actually lands (Phases 0-3), run
+a follow-up investigation/planning pass on whether SPIFFE/SPIRE identity
+should extend to OTHER boundaries in the stack beyond what those phases
+scope. Not pre-deciding which boundaries qualify — that judgment is what
+this session is for. Named candidate to start from: OpenBao itself —
+Phase 3 only uses SPIRE for the human approver's own signing auth; the
+existing `flux_sops` k8s-auth role (`main.tf:188-210`) is a SEPARATE,
+already-working boundary this file elsewhere notes is "never
+live-tested" for its own audience-matching edge case (see "Auth +
+multi-member DX," above) — worth asking whether it should move to SPIRE
+too, or stays k8s-native (Chesterton's Fence: it already works,
+narrowly scoped, no defect to justify migrating it just because SPIRE
+now exists elsewhere). Other candidates to weigh, not pre-committed: a
+shared-runner/CI service identity if the build pipeline ever moves off
+this single-user box (the existing "Auth + multi-member DX" trigger #2).
+
+**Why:** the phased rollout (above) was deliberately scoped to close
+ALREADY-open, named gaps one small transaction at a time — not a
+"SPIRE everywhere" adoption. Once it's proven live across 3 phases, the
+cost/benefit of extending it further is a genuinely different, cheaper
+question than it was before any phase shipped (per this repo's own
+guiding principle, above: prefer the tool already proven correct and
+declarative over inventing a second, different auth mechanism for a
+boundary SPIRE could plausibly already reach).
+
+**Depends on:** Phases 0-3 (the entry above) landing first — extending a
+rollout before the base rollout proves out its own real-world
+cost/friction is the wrong order. **Priority:** P2.
+
 ### Retrofit vm-orbstack, cluster-k0sctl, secret-openbao to digest-pinning
 
 **What:** Pin the three existing OpenTofu modules' git sources by commit SHA
@@ -726,41 +843,23 @@ tools compete for one job).
 **Depends on:** T7c (local Flux — Cilium installs through it). **Priority:** P2
 · runs after the T7 arc, likely alongside the Kyverno module design.
 
-### Plan B — Timoni + Kyverno + Crossplane boundary — P2
+### Plan B — deferred follow-ups — P2
 
-**Shipped 2026-09-10, ship arc COMPLETE:** `M1 → X1 → K1 → M3`, each 1 PR
-= 1 squash commit — **M1** #31 (`b4c0b0c`, `deploy/frontend/timoni/` CUE
-module + `timoni mod vet` gate, ADR 0019); **X1** #32 (`d286867`, ADR
-0018 — render→reconcile→enforce→provision pipeline staging, tofu
-`kubernetes_*` banned); **K1** #33 (`1dc6e91`, Kyverno v1.19.1 via Flux +
-one `ImageValidatingPolicy` gating `cv_frontend` at admission, ADR 0020);
-**M3** #34 (`2c6a1e1`, `mise run frontend:publish` host step delivers via
-Flux OCIRepository/Kustomization into ns `frontend`, ADR 0021). Live on
-`main`: `cv-frontend` runs 1/1 in ns `frontend`, admitted by the approval
-policy; `chainsaw-{kyverno,frontend}` pass post-merge.
-
-**Op note:** the interim zot is ephemeral + GC-off — recreate loses
-`D_man` → re-run `frontend:publish` + re-pin (like `frontend:seed`).
-
-**Deferred (own triggers):**
+Plan B's ship arc (`M1 → X1 → K1 → M3`) is done — see Recently Closed.
+What's left is this table of deliberately-deferred items, each with its
+own trigger:
 
 | Item | Trigger |
 | --- | --- |
-| **O4 / O5** — extract `modules/secret-openbao/` (`moved` blocks — `deletion_allowed=false` on `sops`/`extra` keys makes `tofu destroy` fail partway) + `ha` / `awskms`\|`transit` unseal / `snapshot_schedule` / `tls_issuer` presets. **ADR 0017**. | `environments/production/openbao/` becomes real planned work (the true 2nd consumer — one consumer is not a module, `modules/README.md`). ADR 0012 stands until then. O4 planning also picks up a dedicated OpenBao Transit `manifest-signing` key for the M3 artifact. |
+| **O4 / O5** — extract `modules/secret-openbao/` (`moved` blocks — `deletion_allowed=false` on `sops`/`extra` keys makes `tofu destroy` fail partway) + `ha` / `awskms`\|`transit` unseal / `snapshot_schedule` / `tls_issuer` presets. **ADR 0017**. | `environments/production/openbao/` becomes real planned work (the true 2nd consumer — one consumer is not a module, `modules/README.md`). ADR 0012 stands until then. O4 planning also picks up a dedicated OpenBao Transit `manifest-signing` key for the M3 artifact. Also: O4 should account for T8's shape (one named `vault_policy` resource per consumer — `chains_provenance_sign`, `main.tf` — not a generic `policies` variable, which doesn't exist) when it extracts this unit. |
 | **Crossplane install** (core + `provider-*` + a Composition + its own ADR) | a consumer declares backing infra it does not own (bucket / DB / queue / DNS as a CR) — **not** a directory count. |
 | **G1** — Flux SOPS (`--sops-vault-configmap` + ConfigMap + `spec.decryption`) | a named secret needs SOPS decryption. Plan A's Phase C left the OpenBao side (`sops` key, `flux_sops` role) ready. |
 | **Manifest authorization** (Codex #7) — scoped RBAC for the `frontend` kustomize-controller SA + a defined rendered-manifest review path (image approval ≠ authz of the manifests around it) | own review/session. |
-| **Kyverno `ci`-namespace privilege policies** (PSA scalpel, build-pod securityContext) | `cluster-k0sctl` built + the Cilium planning session done. |
+| **Kyverno `ci`-namespace privilege policies** (PSA scalpel, build-pod securityContext) | `cluster-k0sctl` built + the Cilium planning session done. (Also referenced from the "Kyverno module — accumulating design inputs" entry below — this table is the row's one home.) |
 | **`chainsaw-frontend` HTTP-200 assertion** | the cv_frontend Remix v3 boot crash is fixed (cv_frontend repo). |
 
-**Depends on:** Plan A merged (done, `a3b5a24`). **Priority:** P2. Related:
-**T-DR** overlaps K1's snapshot needs / O5's `snapshot_schedule`; **T8**
-(build provenance, shipped — see "Recently closed," no Chains) ended up
-adding its own dedicated `vault_policy` resource directly
-(`chains_provenance_sign`, `main.tf`) rather than a generic `policies`
-extension point — no such point exists yet. O4 should account for that
-shape (one named policy resource per consumer) when it extracts this
-unit, not assume a reusable `policies` variable it can preserve.
+**Depends on:** nothing blocking. **Priority:** P2. Related: **T-DR**
+overlaps K1's snapshot needs / O5's `snapshot_schedule`.
 
 ### Kyverno module — accumulating design inputs — P2/P3, planning session
 
@@ -774,9 +873,9 @@ engines' overlap is an open question there).
 Known inputs so far:
 
 - **Scope the `ci` namespace privileged allowance** — duplicates a row
-  already in Plan B's Deferred table ("Kyverno `ci`-namespace privilege
-  policies", this file, Plan B section above) — see there for the trigger,
-  not restated here.
+  already in "Plan B — deferred follow-ups" (this file, above — "Kyverno
+  `ci`-namespace privilege policies") — see there for the trigger, not
+  restated here.
 - **Build-pod posture enforcement** (from `ci/README.md` § Residual privilege
   surface). The spike-proven `buildkit-build` `securityContext` ceiling
   (`SETUID`/`SETGID` only, `seccomp: Unconfined`, `allowPrivilegeEscalation`,
@@ -818,6 +917,39 @@ for the demo-vs-real-hosting distinction — it still holds.
 **Effort:** S (research + decision) / M (actual setup)
 **Priority:** P2
 **Depends on:** digest-as-source-of-truth T5b (demo/proof deploy) proven
+
+### Documentation extraction — code comments + TODOS.md's own T-number/date litter — P2, planning session
+
+**What:** two-part cleanup, same underlying problem. (1) CLAUDE.md §
+Docstrings and Comments already states the rule for code: a comment
+describes behavior-in-place, never planning narrative or a cross-file
+reference. Audit where that's been violated — this session alone added
+a lot of dense historical narrative ("HOTFIX 2026-09-14 — six real bugs,
+none caught by the merge above...") directly into Tekton YAML and script
+comments while debugging live — and extract the planning content into
+`docs/designs/` or an ADR, leaving the comment itself behavior-only. (2)
+This file's own `T7`/`T8`/`R1b-ii-c`-style numbering and dense inline
+dates are the same failure mode in a different file: a newcomer can't
+tell what `R1b-ii-c` means without archaeology, and a decorative
+`2026-09-14` stamp on a sentence that isn't actually a trigger condition
+is noise. Replace opaque references with plain descriptive titles
+(already the convention this audit's own two new items use) and trim
+dates down to only where one is load-bearing — an actual trigger
+condition or a "why now" — not narrative color.
+
+**Why:** both are the same root problem — planning/historical narrative
+living somewhere it outlives its usefulness and actively confuses the
+next reader, rather than in a doc whose whole job is holding history
+(commit messages, PRs, ADRs, `docs/designs/`). Named explicitly by the
+user during a TODOS.md audit pass (2026-09-15): "a messy situation, with
+[not-]relevant dates and task ids that no one can understand."
+
+**Not executed in this pass** — this audit only fixed staleness and
+completion tracking; it deliberately doesn't rename anything (see this
+file's own Guiding Principles note above on why new items get plain
+titles going forward without touching the old ones yet).
+
+**Depends on:** nothing blocking. **Priority:** P2.
 
 ### A real resolved-dependency-graph boundary check — planning session
 
@@ -889,30 +1021,6 @@ what the script itself actually needs to succeed past the render step.
 
 **Priority:** P3 — not a real regression, a test-harness gap. Not fixed
 here (out of scope for T8; flagged per repo-ownership discipline).
-
-### `kyverno-reconcile` chainsaw fixture — stale hardcoded digest — P3
-
-**Found 2026-09-14** while running `mise run check` for the T8 hotfix
-(unrelated to it). `environments/local/tests/kyverno/chainsaw-test.yaml`'s
-`an-approved-cv-frontend-pod-is-admitted` step pins a hardcoded
-`cv-frontend@sha256:d0c92cb19745096d0a127f46ff691a3ea72a59d48e7e3b7d154d2466ebec62df`
-— confirmed live (`oras manifest fetch`) that digest no longer exists in
-zot (404). The fixture is a durable, out-of-band-seeded image (the
-file's own header comment: "Regenerate the approved one after an
-approval-key rotation" — `mise run attestation:sign -- ...@<digest>`),
-not something the test suite creates itself; zot's storage evidently
-lost it at some point (unclear when — no code change in this session
-touched zot's PVC). Fixing needs pushing a fresh `cv-frontend` image,
-signing it with `attestation:sign`, and updating both this fixture
-(`environments/local/tests/kyverno/chainsaw-test.yaml`) and the sibling
-one in `environments/local/tests/frontend/delivery/chainsaw-test.yaml`
-(same digest, line 29) to the new digest — a different concern (the
-human-approval attestation) from T8's provenance, so out of scope here.
-
-**Priority:** P3 — a test-fixture staleness, not a policy or code defect
-(`policy-is-ready` and the unsigned-deny path both still pass). Not
-fixed here (out of scope for the T8 hotfix; flagged per repo-ownership
-discipline).
 
 ### Run-scoped digest identity — race-simulating test — P3
 
