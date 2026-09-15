@@ -38,8 +38,10 @@ open work):
   - `Auth + multi-member DX` — deferred, trigger + pre-picked direction
     recorded (includes the folded-in gh token expiry gap)
   - `T-DR` — declarative disaster recovery for the in-cluster OpenBao
-  - `zot registry auth` — credential-free today, real auth deferred
-  - `Flux / registry CA trust — could a mesh solve this structurally?`
+  - `zot registry auth` — credential-free today, direction decided
+    (SPIRE Phase 1), not yet landed
+  - `Flux / registry CA trust` — direction decided (SPIRE Phase 2), not
+    yet landed
   - `SPIRE — phased workload-identity rollout` — planning-session output,
     Phases 0-3, cross-referenced from the four items above it
   - `SPIRE — investigate broader scope (OpenBao and beyond)` — gated on
@@ -532,70 +534,46 @@ OpenBao) is done, see Recently Closed; this item is fully actionable
 now, just not yet scheduled. **Overlaps:** Plan B O5 (`snapshot_schedule`).
 **Priority:** P2. Surfaced by `/plan-eng-review` 2026-09-10 (+ Codex #6/#7).
 
-### zot registry auth — planning session — P2
+### zot registry auth — P2
 
 **What:** design real auth for the local (and eventual production) zot. T7b0
-ships it **credential-free** on the single-user OrbStack VM (stated threat model:
-all cluster writers are the operator's). **Why:** a credential-free registry lets
-any cluster workload push an image or attach a referrer; `attestation-sign.sh`
-selects evidence by `last`-of-artifactType. Fine solo, not fine with a second
-operator or a shared cluster. **Options to weigh:** static htpasswd Secret,
-zot's OIDC/LDAP, an OpenBao-issued short-lived credential, **or SPIFFE/SPIRE
-mTLS (4th candidate, now the lead one)** — zot has first-party documented
-support for extracting identity from an X.509-SVID's URI SAN
-([zotregistry.dev authn-authz](https://zotregistry.dev/v2.1.14/articles/authn-authz/)),
-no beta caveat. See `SPIRE — phased workload-identity rollout` below, Phase 1.
-**First step:** decide whether this folds into the deferred "Auth + multi-member
-DX" session (likely) or stays separate. **Depends on:** T7b0 (zot exists).
-**Triggers with:** a 2nd operator, a shared cluster, or
+ships it **credential-free** on the single-user OrbStack VM — fine solo, not
+fine with a second operator or a shared cluster (any workload can push an
+image or attach a referrer; `attestation-sign.sh` selects evidence by
+`last`-of-artifactType).
+
+**Decision already made, not still open:** SPIFFE/SPIRE mTLS — see `SPIRE —
+phased workload-identity rollout` below, Phase 1, for the citation and
+verdict (duplicated here once, before that entry existed; cut in this pass).
+Rejected alternatives, not restated there: a static htpasswd Secret, zot's
+OIDC/LDAP, an OpenBao-issued short-lived credential — each needs its own
+credential-issuance/rotation story SPIRE's Workload API already gives for
+free.
+
+**First step:** decide whether this folds into the deferred "Auth +
+multi-member DX" session (likely) or stays separate. **Depends on:** SPIRE
+Phase 1 (below). **Triggers with:** a 2nd operator, a shared cluster, or
 `environments/production/`.
 
-### Flux / registry CA trust — could a mesh or another pinned tool solve this structurally? — planning session — P2
+### Flux / registry CA trust — P2
 
 **What:** R1b-ii-c hit a real wall: `flux push artifact` has no CA-file
-override for a private registry CA (`~/.claude/plans/t7c-distribution-t7d.md`
-§ "R1b-ii-c PRE-PLAN"), and the interim (`--insecure-registry`, scoped to one
-call) is accepted only as time-boxed, not a destination. The per-CLI-flag
-approach (this session's fix) treats each tool as its own trust boundary —
-worth a dedicated session asking whether a **structural** fix moves the trust
-decision below the application layer entirely, so individual CLIs stop
-needing to know about the dev CA at all.
+override for a private registry CA, and the interim (`--insecure-registry`,
+scoped to one call) is accepted only as time-boxed, not a destination. The
+per-CLI-flag approach (that session's fix) treats each tool as its own trust
+boundary, one at a time.
 
-**Why:** a mesh sidecar/ztunnel terminating and re-establishing mTLS between
-workloads (and potentially between the host and cluster) could make
-in-cluster registry traffic trusted by construction, independent of whether
-`flux push`/`crane`/whatever-comes-next happens to expose a CA flag — closes
-this whole class of gap instead of solving it once per tool.
+**Decision already made, not still open:** a host-side SPIRE Agent — see
+`SPIRE — phased workload-identity rollout` below, Phase 2, for the citation
+and verdict (duplicated here once, before that entry existed; cut in this
+pass). Cilium's Mutual Authentication was the other candidate and is ruled
+out (pod-to-pod only, confirmed Beta) — also cited there, not restated here.
 
-**Candidates researched (real sources, not pattern-matching from training
-data — same discipline as the R1b-ii-c pre-plan):**
-
-- **Cilium's Mutual Authentication — checked, does NOT answer this item.**
-  Confirmed Beta, and Cilium's own docs state it "only works within a
-  Cilium-managed cluster and is not compatible with an external mTLS
-  solution" ([docs.cilium.io mutual-authentication](https://docs.cilium.io/en/stable/network/servicemesh/mutual-authentication/mutual-authentication/)) —
-  pod-to-pod only. The actual pain here (`flux push`/`oras`/
-  `frontend-publish.sh` running **on the Mac host**, outside the cluster)
-  is exactly the case this feature rules out. Not the answer to this
-  item's own question.
-- **SPIFFE/SPIRE host-side agent — the candidate that does answer it.**
-  SPIRE supports non-Kubernetes node attestation (`join_token`, `x509pop`)
-  for bare hosts/VMs ([spiffe.io SPIRE concepts](https://spiffe.io/docs/latest/spire-about/spire-concepts/)).
-  A SPIRE Agent on the dev Mac issues host CLI processes their own
-  X.509-SVIDs via the Workload API, which zot's SPIFFE mTLS support (see
-  "zot registry auth", above) consumes directly — one mechanism closes
-  both this item and that one, without waiting on Cilium's beta maturity.
-  See `SPIRE — phased workload-identity rollout` below, Phase 2.
-- **Kyverno** — anything beyond admission policy (already scoped, ADR
-  0020/0022) relevant to registry trust distribution. Not investigated
-  further — no lead found.
-- **Crossplane** — pinned/inactive (ADR 0018); the "provision" stage has
-  no bearing on this (transport trust, not backing-infra provisioning).
-
-**Depends on:** R1b-ii-c's per-tool fixes landing first (this session)
-— they're needed regardless of whether a mesh answer ever ships, and prove
-the problem is real before reaching for a bigger structural tool.
-**Triggers with:** a dedicated planning/research session, not blocking R2–R4.
+**Open coordination question this item still owns:** whether this folds into
+the deferred "Auth + multi-member DX" session, same as "zot registry auth"
+above — decide both together, they're the same host-identity question from
+two angles. **Depends on:** SPIRE Phase 2 (below). **Triggers with:** a
+dedicated planning/research session, not blocking R2–R4.
 
 ### SPIRE — phased workload-identity rollout — P2, planning-session output
 
@@ -746,7 +724,9 @@ the digest-equivalent for git-sourced modules.
 
 **Effort:** M
 **Priority:** P2
-**Depends on:** digest-as-source-of-truth Phase 1-2 landing and proving out
+**Depends on:** nothing blocking — Phase 1 (the mechanical build/scan/gate
+pipeline) and Phase 2 (all of T7a-T7d's Tekton work) both shipped (Recently
+Closed); fully actionable now, just not yet scheduled.
 
 ### Build reproducibility (SOURCE_DATE_EPOCH, independent rebuild verification) — P3
 
@@ -1087,7 +1067,8 @@ silent-wrong-result bug — the class the repo exists to prevent. **First step:*
 generated lockfile both sides consume, running `mise` *inside* the Task images,
 Tekton image refs as params from one manifest — then iterate + innovate, rather
 than reflexively adding another `mise run check` step. Pins move ~quarterly.
-**Depends on:** T7b2.
+**Depends on:** nothing blocking — T7b2 shipped (T7, Recently Closed);
+fully actionable now, just not yet scheduled.
 
 ### Tekton Dashboard — P3, deferred
 
@@ -1107,7 +1088,8 @@ Dashboard's broad-read ClusterRole. The Dashboard ships **no auth** — an
 unauthenticated endpoint on a cluster that also runs untrusted build steps
 is a lateral-movement target without a network policy.
 
-**Priority:** P3 · **Depends on:** T7a (Tekton installed). Blocked for
+**Priority:** P3 · **Depends on:** nothing blocking — T7a shipped (Recently
+Closed); fully actionable now, just not yet scheduled. Blocked for
 production on the Cilium + Kyverno module builds.
 
 ### T10 — VEX hardening — P3, post-T8
@@ -1124,8 +1106,9 @@ ADR 0023 — `frontend:publish` is the only consume gate now).
 enforcement benefit; this is where the benefit lands. `vexctl`
 (`aqua:openvex/vexctl`) is already pinned.
 
-**Priority:** P3 · **Depends on:** T8 (build-provenance signing infra —
-reshaped 2026-09-14, no Chains involved).
+**Priority:** P3 · **Depends on:** nothing blocking — T8 (build-provenance
+signing infra, no Chains) shipped (Recently Closed); fully actionable now,
+just not yet scheduled.
 
 ### Publish a multi-arch image once a real amd64 consumer exists
 
@@ -1205,8 +1188,10 @@ places) is the other candidate worth the same question in the same session.
 without pulling the full chart (matching `openbao-verify.sh`'s current
 cheap-check shape) before committing to the swap.
 
-**Depends on:** R1b-ii-c (crane's zot use) landed. **Triggers with:** the
-next chart-pin gate touch, or a dedicated tooling-consolidation session.
+**Depends on:** nothing blocking — R1b-ii-c (crane's zot use) shipped (T7c
+distribution tail, Recently Closed); fully actionable now. **Triggers
+with:** the next chart-pin gate touch, or a dedicated tooling-consolidation
+session.
 
 ### Upgrade cosign signing to public trust (Fulcio/keyless or published key)
 
@@ -1230,4 +1215,8 @@ lands.
 
 **Effort:** M
 **Priority:** P3
-**Depends on:** digest-as-source-of-truth Phase 1-3 stable
+**Depends on:** nothing blocking — the mechanical pipeline through T8's
+build-provenance signing has shipped (Recently Closed); fully actionable
+now, just not yet scheduled. (Not cited as "Phase 1-3" — that design doc's
+own Phase-3 label still says "Tekton Chains," which T8 shipped without;
+logged for the Documentation extraction item, not fixed here.)
