@@ -182,6 +182,16 @@ push_local_fixture() {
 	[[ "$output" == *"restore-managed"* ]]
 }
 
+@test "anti-rotation guard: a DIFFERENT vault_mount (e.g. pki) is not the transit mount and passes the guard" {
+	# narrowed 2026-09-15 (SPIRE Phase 1, docs/adr/0025): the guard used to
+	# ban ANY vault_mount resource; a new pki mount has no key-preservation
+	# constraint (nothing else creates/seeds it) and must be allowed.
+	printf '\nresource "vault_mount" "pki" { path = "pki" }\n' \
+		>>"$SCRATCH/environments/local/openbao/main.tf"
+	run "$SW"
+	[[ "$output" != *"restore-managed"* ]]
+}
+
 @test "anti-rotation guard runs before the anti-rotation guard's own network dependency ever exists" {
 	# regression guard for the reordering itself: a completely broken lock
 	# (missing file) would normally die at the lock-existence check, which

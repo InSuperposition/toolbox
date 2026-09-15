@@ -248,3 +248,65 @@ resource "vault_kubernetes_auth_backend_role" "chains_provenance" {
   token_policies                   = [vault_policy.chains_provenance_sign.name]
   token_ttl                        = var.chains_auth.token_ttl_seconds
 }
+
+# ─── PKI mount — SPIRE's upstream authority (SPIRE Phase 1, TODOS.md) ────
+#
+# FIRST use of OpenBao's PKI engine in this repo. Unlike `transit`, this
+# mount is NOT restore-managed — nothing else creates or seeds it — so it
+# carries no key-preservation constraint and is an ordinary tofu-owned
+# resource, same footing as `vault_auth_backend "kubernetes"` above.
+# Keeps OpenBao the one root of trust: no third independent CA alongside
+# `toolbox-dev-ca` and OpenBao's own listener cert (docs/adr/0025).
+#
+# No consumer yet — the future `environments/local/spire/` unit's
+# spire-server reaches this at RUNTIME via its own vault upstreamAuthority
+# plugin (k8s-auth login -> pki/root/sign-intermediate), never via
+# tofu-to-tofu state sharing. This unit creates only the OpenBao-side half
+# of that contract.
+
+resource "vault_mount" "pki" {
+  path                  = "pki"
+  type                  = "pki"
+  max_lease_ttl_seconds = 315360000 # 10y — dev-scale root
+
+  depends_on = [helm_release.openbao]
+}
+
+resource "vault_pki_secret_backend_root_cert" "spire_root" {
+  backend     = vault_mount.pki.path
+  type        = "internal" # private key never leaves OpenBao
+  common_name = "toolbox-dev SPIRE Root CA"
+  ttl         = "315360000"
+  key_type    = "ec"
+  key_bits    = 256
+
+  depends_on = [vault_mount.pki]
+}
+
+# Scoped to exactly the one call SPIRE's vault upstreamAuthority plugin
+# makes (doc/plugin_server_upstreamauthority_vault.md, spiffe/spire) —
+# `pki/root/sign-intermediate`, never `pki/root/generate` or `pki/issue/*`.
+resource "vault_policy" "spire_sign_intermediate" {
+  name = "spire_sign_intermediate"
+
+  policy = <<-HCL
+    path "pki/root/sign-intermediate" {
+      capabilities = ["update"]
+    }
+  HCL
+
+  depends_on = [helm_release.openbao]
+}
+
+# Bound to the ServiceAccount name/namespace the future spire-server Helm
+# release will create (PR 2) — referenced here by plain string, not a live
+# lookup, since that chart doesn't exist yet.
+resource "vault_kubernetes_auth_backend_role" "spire_server" {
+  backend                          = vault_auth_backend.kubernetes.path
+  role_name                        = "spire_server"
+  bound_service_account_names      = [var.spire_auth.service_account_name]
+  bound_service_account_namespaces = [var.spire_auth.service_account_namespace]
+  audience                         = var.openbao_endpoint
+  token_policies                   = [vault_policy.spire_sign_intermediate.name]
+  token_ttl                        = var.spire_auth.token_ttl_seconds
+}

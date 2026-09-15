@@ -84,9 +84,14 @@ ORAS_CACERT=()
 #        must NEVER tofu-manage the transit mount or approval-key; both
 #        are created by the snapshot restore, and a tofu recreate = a key
 #        rotation = every past approval attestation stops verifying,
-#        plan § B3. Matches an actual resource block / `name =
-#        "approval-key"` arg, not the validation string or a comment.
-if grep -REn 'resource[[:space:]]+"vault_mount"|name[[:space:]]*=[[:space:]]*"approval-key"' "$UNIT_DIR"/*.tf; then
+#        plan § B3. Matches a `vault_mount` resource's `path = "transit"`
+#        argument specifically (the only place that literal string can
+#        legitimately appear is a `backend = "transit"` REFERENCE to the
+#        pre-existing mount, which uses a different argument name) or a
+#        `name = "approval-key"` arg — not the validation string, a
+#        comment, or a DIFFERENT mount (e.g. `pki`, SPIRE Phase 1,
+#        docs/adr/0025 — a new mount with no key-preservation constraint).
+if grep -REn 'path[[:space:]]*=[[:space:]]*"transit"|name[[:space:]]*=[[:space:]]*"approval-key"' "$UNIT_DIR"/*.tf; then
 	die "environments/local/openbao/*.tf tofu-manages the transit mount or approval-key — those are restore-managed, tofu must not touch them"
 fi
 
