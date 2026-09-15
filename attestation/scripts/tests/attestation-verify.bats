@@ -12,7 +12,14 @@ setup() {
 	start_registry "$FIX"
 	make_key "$FIX"
 	export TOOLBOX_APPROVAL_PUBKEY="$FIX/cosign.pub"
-	IMAGE="$(make_image "$FIX")"
+	# A real OCI index — attestation-sign.sh (used by sign()/run_sign below
+	# to CREATE the fixtures this file verifies) resolves a platform digest
+	# via `oras resolve --platform` before anything else (Kyverno amd64-index
+	# admission fix, `/investigate` 2026-09-15); a bare `make_image` artifact
+	# has no image config and that call errors.
+	IMAGE="$(make_multiplatform_image "$FIX")"
+	PLATFORM_REF="$(oras resolve --plain-http --platform=linux/arm64 "$IMAGE")"
+	PLATFORM_REF="${IMAGE%@*}@${PLATFORM_REF}"
 }
 
 teardown() {
@@ -25,15 +32,20 @@ sign() { # <verdict> -> echoes the attestation digest
 	attestation_digest "$(run_sign "$IMAGE" "$1" "reason for $1")"
 }
 
+# NOTE: verify calls below use $PLATFORM_REF, not $IMAGE — attestation-sign.sh
+# signs the resolved PLATFORM digest, not the index $IMAGE is (Kyverno
+# amd64-index admission fix); attestation-verify.sh's --check-claims
+# --digest requires an exact subject match.
+
 @test "a pinned approved attestation verifies (exit 0)" {
 	att="$(sign approve)"
-	run "$SCRIPTS/attestation-verify.sh" "$IMAGE" "$att"
+	run "$SCRIPTS/attestation-verify.sh" "$PLATFORM_REF" "$att"
 	[ "$status" -eq 0 ]
 }
 
 @test "a pinned rejected attestation is refused with 'verdict: rejected'" {
 	att="$(sign reject)"
-	run "$SCRIPTS/attestation-verify.sh" "$IMAGE" "$att"
+	run "$SCRIPTS/attestation-verify.sh" "$PLATFORM_REF" "$att"
 	[ "$status" -eq 1 ]
 	[[ "$output" == *"verdict: rejected"* ]]
 }
@@ -42,7 +54,7 @@ sign() { # <verdict> -> echoes the attestation digest
 	approve_att="$(sign approve)"
 	reject_att="$(sign reject)"
 	[ -n "$reject_att" ]
-	run "$SCRIPTS/attestation-verify.sh" "$IMAGE" "$approve_att"
+	run "$SCRIPTS/attestation-verify.sh" "$PLATFORM_REF" "$approve_att"
 	[ "$status" -eq 0 ]
 }
 
@@ -54,7 +66,13 @@ sign() { # <verdict> -> echoes the attestation digest
 
 @test "wrong subject: an approval for another image is refused (exit 1)" {
 	att="$(sign approve)"
-	OTHER="$(make_image "$FIX")"
+	# same repo as $IMAGE (mimg — OCI referrers are repo-scoped, a different
+	# repo name would 404 on the fetch before the subject check ever runs),
+	# different digest, so the attestation's real (platform) subject
+	# genuinely mismatches this one.
+	OTHER="$(make_multiplatform_image "$FIX")"
+	OTHER="$(oras resolve --plain-http --platform=linux/arm64 "$OTHER")"
+	OTHER="${IMAGE%@*}@${OTHER}"
 	run "$SCRIPTS/attestation-verify.sh" "$OTHER" "$att"
 	[ "$status" -eq 1 ]
 	[[ "$output" == *"attestation verification failed"* ]]
@@ -63,7 +81,7 @@ sign() { # <verdict> -> echoes the attestation digest
 @test "bad signature: verifying against a different public key is refused (exit 1)" {
 	att="$(sign approve)"
 	( cd "$FIX" && COSIGN_PASSWORD="" cosign generate-key-pair --output-key-prefix other >/dev/null 2>&1 )
-	TOOLBOX_APPROVAL_PUBKEY="$FIX/other.pub" run "$SCRIPTS/attestation-verify.sh" "$IMAGE" "$att"
+	TOOLBOX_APPROVAL_PUBKEY="$FIX/other.pub" run "$SCRIPTS/attestation-verify.sh" "$PLATFORM_REF" "$att"
 	[ "$status" -eq 1 ]
 	[[ "$output" == *"attestation verification failed"* ]]
 }

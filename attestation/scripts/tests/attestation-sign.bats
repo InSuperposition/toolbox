@@ -25,7 +25,15 @@ setup() {
 	load helper
 	FIX="$FIX_FILE"
 	export TOOLBOX_APPROVAL_PUBKEY="$FIX/cosign.pub"
-	IMAGE="$(make_image "$FIX")"
+	# A real OCI index (one linux/arm64 child), not a bare artifact push —
+	# matches production shape after the Kyverno amd64-index admission fix
+	# (`/investigate` 2026-09-15): attestation-sign.sh now resolves a
+	# platform digest via `oras resolve --platform` before anything else,
+	# and that call errors on a plain non-index artifact (live-verified:
+	# "unknown config ... expect application/vnd.oci.image.config.v1+json").
+	IMAGE="$(make_multiplatform_image "$FIX")"
+	PLATFORM_REF="$(oras resolve --plain-http --platform=linux/arm64 "$IMAGE")"
+	PLATFORM_REF="${IMAGE%@*}@${PLATFORM_REF}"
 }
 
 @test "no argument is a usage error (exit 2)" {
@@ -49,7 +57,7 @@ setup() {
 }
 
 @test "missing build evidence => exit 4, no attestation" {
-	BARE="$(make_bare_image "$FIX")"
+	BARE="$(make_bare_multiplatform_image "$FIX")"
 	printf 'approve\nx\n' >"$FIX/answers"
 	TOOLBOX_APPROVE_KEY="$FIX/cosign.key" COSIGN_PASSWORD="" run "$SCRIPTS/attestation-sign.sh" "$BARE" <"$FIX/answers"
 	[ "$status" -eq 4 ]
@@ -100,16 +108,36 @@ setup() {
 	oras blob fetch --plain-http --output "$FIX/att.json" "${IMAGE%@*}@${layer}"
 	ptype="$(jq -r '.dsseEnvelope.payload' "$FIX/att.json" | base64 -d | jq -r '.predicateType')"
 	[ "$ptype" = "https://insuperposition.github.io/toolbox/attestations/approval/v1" ]
-	# and it verifies end to end (new signer -> the shipped verifier)
-	run "$SCRIPTS/attestation-verify.sh" "$IMAGE" "$att"
+	# and it verifies end to end (new signer -> the shipped verifier) — against
+	# the PLATFORM ref, not $IMAGE (the index): the signed subject is the
+	# platform digest (Kyverno amd64-index admission fix), and
+	# attestation-verify.sh's --check-claims --digest requires an exact
+	# subject match.
+	run "$SCRIPTS/attestation-verify.sh" "$PLATFORM_REF" "$att"
 	[ "$status" -eq 0 ]
+}
+
+@test "approve: signs the PLATFORM digest, not the index — evidence lookup stays on the index" {
+	out="$(run_sign "$IMAGE" approve "clean")"
+	att="$(attestation_digest "$out")"
+	# the printed "record it" line hands the operator the PLATFORM ref,
+	# never the index ref they originally passed in — the whole point of
+	# this fix (Kyverno's admission check has no way to resolve an index).
+	[[ "$out" == *"record it:"*"$PLATFORM_REF"* ]]
+	[[ "$out" != *"record it:"*"$IMAGE"* ]]
+	# the bundle referrer actually landed on the PLATFORM digest, not the
+	# index — oras discover against the index must NOT find it.
+	run oras discover --plain-http --format json "$PLATFORM_REF"
+	[ "$(printf '%s' "$output" | jq '[.referrers[] | select(.artifactType == "application/vnd.dev.sigstore.bundle.v0.3+json")] | length')" -eq 1 ]
+	run oras discover --plain-http --format json "$IMAGE"
+	[ "$(printf '%s' "$output" | jq '[.referrers[] | select(.artifactType == "application/vnd.dev.sigstore.bundle.v0.3+json")] | length')" -eq 0 ]
 }
 
 @test "reject: still writes a signed record (never silent)" {
 	out="$(run_sign "$IMAGE" reject "CVE too risky")"
 	[[ "$out" == *"REJECTED"* ]]
 	att="$(attestation_digest "$out")"
-	run "$SCRIPTS/attestation-verify.sh" "$IMAGE" "$att"
+	run "$SCRIPTS/attestation-verify.sh" "$PLATFORM_REF" "$att"
 	[ "$status" -eq 1 ]
 	[[ "$output" == *"verdict: rejected"* ]]
 }

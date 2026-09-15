@@ -50,6 +50,20 @@ make_key() {
 	(cd "$dir" && COSIGN_PASSWORD="" cosign generate-key-pair >/dev/null 2>&1)
 }
 
+# _attach_evidence <dir> <ref> -> attaches a fake CycloneDX SBOM referrer
+# and a fake trivy scan-report referrer to <ref>. Shared by make_image and
+# make_multiplatform_image — same fake evidence shape, different subject.
+_attach_evidence() {
+	local dir="$1" ref="$2"
+	printf '{"bomFormat":"CycloneDX","specVersion":"1.5","components":[{"name":"remix","version":"3.0.0"}]}' >"$dir/sbom.json"
+	printf '{"SchemaVersion":2,"Results":[{"Target":"app","Vulnerabilities":[{"VulnerabilityID":"CVE-2026-1","Severity":"LOW"}]}]}' >"$dir/scan.json"
+	(
+		cd "$dir" &&
+			oras attach --plain-http --artifact-type application/vnd.cyclonedx+json "$ref" "sbom.json:application/vnd.cyclonedx+json" >/dev/null &&
+			oras attach --plain-http --artifact-type application/vnd.trivy.report+json "$ref" "scan.json:application/vnd.trivy.report+json" >/dev/null
+	)
+}
+
 # make_image <dir> -> echoes "<REG>/img@sha256:<digest>", with a fake
 # CycloneDX SBOM referrer and a fake trivy scan-report referrer attached.
 make_image() {
@@ -58,14 +72,40 @@ make_image() {
 	(cd "$dir" && oras push --plain-http "${REG}/img:build" "layer.bin:application/octet-stream" >/dev/null)
 	digest="$(oras resolve --plain-http "${REG}/img:build")"
 	local ref="${REG}/img@${digest}"
+	_attach_evidence "$dir" "$ref"
+	echo "$ref"
+}
 
-	printf '{"bomFormat":"CycloneDX","specVersion":"1.5","components":[{"name":"remix","version":"3.0.0"}]}' >"$dir/sbom.json"
-	printf '{"SchemaVersion":2,"Results":[{"Target":"app","Vulnerabilities":[{"VulnerabilityID":"CVE-2026-1","Severity":"LOW"}]}]}' >"$dir/scan.json"
-	(
-		cd "$dir" &&
-			oras attach --plain-http --artifact-type application/vnd.cyclonedx+json "$ref" "sbom.json:application/vnd.cyclonedx+json" >/dev/null &&
-			oras attach --plain-http --artifact-type application/vnd.trivy.report+json "$ref" "scan.json:application/vnd.trivy.report+json" >/dev/null
-	)
+# make_multiplatform_image <dir> -> echoes "<REG>/mimg@sha256:<INDEX-digest>",
+# a genuine OCI index (one linux/arm64 child, matching BuildKit's real
+# shape closely enough for `oras resolve --platform` to work — verified
+# live: a bare `oras push` artifact has no image config and --platform
+# errors "unknown config ... expect application/vnd.oci.image.config.v1+json";
+# an INDEX with a platform-annotated descriptor resolves correctly even
+# when the child itself is a plain artifact, since oras reads the
+# platform off the descriptor, not the child's own config). Evidence is
+# attached to the INDEX digest (matching scan-attach.yaml's real
+# addressing — TODOS.md "Run-scoped build digest identity"), never the
+# child — this is what makes the index provably run-unique in production
+# and is exactly the shape attestation-sign.sh's new platform-resolution
+# step must be tested against.
+make_multiplatform_image() {
+	local dir="$1" child_digest child_size index_digest
+	echo "multiplatform child $(date +%s%N)" >"$dir/mchild.bin"
+	(cd "$dir" && oras push --plain-http "${REG}/mimg:child" "mchild.bin:application/octet-stream" >/dev/null)
+	child_digest="$(oras resolve --plain-http "${REG}/mimg:child")"
+	child_size="$(oras manifest fetch --plain-http "${REG}/mimg:child" | wc -c | tr -d ' ')"
+
+	jq -n --arg d "$child_digest" --argjson s "$child_size" \
+		'{schemaVersion: 2, mediaType: "application/vnd.oci.image.index.v1+json",
+		  manifests: [{mediaType: "application/vnd.oci.image.manifest.v1+json",
+		               digest: $d, size: $s,
+		               platform: {architecture: "arm64", os: "linux"}}]}' \
+		>"$dir/mindex.json"
+	(cd "$dir" && oras manifest push --plain-http "${REG}/mimg:multi" mindex.json >/dev/null)
+	index_digest="$(oras resolve --plain-http "${REG}/mimg:multi")"
+	local ref="${REG}/mimg@${index_digest}"
+	_attach_evidence "$dir" "$ref"
 	echo "$ref"
 }
 
@@ -76,4 +116,26 @@ make_bare_image() {
 	(cd "$dir" && oras push --plain-http "${REG}/bare:build" "bare.bin:application/octet-stream" >/dev/null)
 	digest="$(oras resolve --plain-http "${REG}/bare:build")"
 	echo "${REG}/bare@${digest}"
+}
+
+# make_bare_multiplatform_image <dir> -> the make_multiplatform_image shape
+# (a real INDEX, so `oras resolve --platform` still succeeds) with NO
+# evidence referrers attached — for exercising the "evidence missing"
+# path without also tripping platform-resolution.
+make_bare_multiplatform_image() {
+	local dir="$1" child_digest child_size index_digest
+	echo "bare multiplatform child $(date +%s%N)" >"$dir/bmchild.bin"
+	(cd "$dir" && oras push --plain-http "${REG}/bmimg:child" "bmchild.bin:application/octet-stream" >/dev/null)
+	child_digest="$(oras resolve --plain-http "${REG}/bmimg:child")"
+	child_size="$(oras manifest fetch --plain-http "${REG}/bmimg:child" | wc -c | tr -d ' ')"
+
+	jq -n --arg d "$child_digest" --argjson s "$child_size" \
+		'{schemaVersion: 2, mediaType: "application/vnd.oci.image.index.v1+json",
+		  manifests: [{mediaType: "application/vnd.oci.image.manifest.v1+json",
+		               digest: $d, size: $s,
+		               platform: {architecture: "arm64", os: "linux"}}]}' \
+		>"$dir/bmindex.json"
+	(cd "$dir" && oras manifest push --plain-http "${REG}/bmimg:multi" bmindex.json >/dev/null)
+	index_digest="$(oras resolve --plain-http "${REG}/bmimg:multi")"
+	echo "${REG}/bmimg@${index_digest}"
 }
