@@ -77,6 +77,7 @@ each row links to.
 | **cert-manager** | In-cluster PKI for the **local dev cluster** — issues the TLS server cert the in-cluster OpenBao listener needs (T7c Increment 4, ADR 0016). | A Flux-reconciled **helper** component (chart + images digest-pinned in `environments/local/flux/cert-manager.lock`; no runtime `spec.verify` — cert-manager signs with a static key, the digest is the pin, ADR 0001). Dev uses a selfSigned root → CA → `openbao-tls` leaf chain (the leaf applies once the 4b bridge creates ns `openbao`); **production** points the leaf's `issuerRef` at a real backend (ACME / org intermediate / OpenBao PKI) — the CA and every leaf unchanged. Unlike OpenBao (OpenTofu-owned substrate, ADR 0015), a helper behind the GitOps loop is fine — nothing secret-bearing depends on its reconcile being tofu-driven. |
 | **trust-manager** | Distributes the CA **trust bundle** Kyverno's admission controller mounts (public roots + the dev CA) so it can pull the HTTPS zot for attestation verification without losing public-registry trust (T7c R1b, ADR 0022). | cert-manager's sibling, a Flux-reconciled helper (`environments/local/flux/trust-manager.lock`; chart unsigned → `ref.digest` pin, no `spec.verify`; **both** component images digest-pinned — the `trust-pkg-debian-trixie` package image is the public-root snapshot and is frozen at its pin, not auto-refreshing). Scoped to the **one** Kyverno ConfigMap consumer: buildkitd (per-registry CA file) and Flux source-controller (`certSecretRef`) take the dev CA directly; routing them through trust-manager (which needs `secretTargets` + its Secret RBAC) is an R1b-ii call. `Bundle` CRs live in `environments/local/trust-manager/` (R1b-ii), never the `flux-system` inventory (unknown-CRD deadlock). |
 | **OpenBao** | Secret store of record — for anything created *after* OpenBao exists and is unsealed. | Local dev: an in-cluster tofu-owned raft StatefulSet (`environments/local/openbao/`, ADR 0016 — supersedes the ADR 0010 machine-global pitchfork daemon). Auto-unseals from a static seal key mounted as a k8s Secret; the on-machine `0600` restore-bundle files (`seal.key`, `root.token`) in `~/.local/state/toolbox/openbao/snapshots/` are the disaster / genesis path (ADR 0011 custody model). `mise [env]` injects `VAULT_ADDR` (ClusterIP HTTPS), `VAULT_CACERT`, `VAULT_TOKEN`. The out-of-band requirement is real for the *deferred production* `secret-openbao` module, not the local one. |
+| **SPIRE** | Workload identity — issues short-lived SPIFFE X.509-SVIDs to in-cluster workloads (SPIRE Phase 1, `TODOS.md`, ADRs 0024-0026). | Local dev: an in-cluster tofu-owned Server + Agent (`environments/local/spire/`, sibling to `openbao/`, same skeleton), upstream-signed by OpenBao's `pki` mount (ADR 0025). Declarative registration via the chart's own `ClusterSPIFFEID` CRD (`controllerManager.enabled = true`, ADR 0026) — no hand-typed registration entries. First consumer: `ci` namespace's default ServiceAccount presents its SVID to zot for mTLS push (PR #66/#67). Host-side agent (non-k8s CLI identity) is **not pursued** — SPIRE ships no darwin release binaries (`TODOS.md`, `Flux / registry CA trust`). |
 | ~~**fnox**~~ | **Removed 2026-09-07 (ADR 0011).** Was the local dev secret access layer (backend = OpenBao). `fnox set`/`fnox remove` silently rewrite `fnox.toml`, and its keychain items trigger a GUI password prompt when read by another binary. The one bootstrap secret it held (the root token) is now a `0600` file. | — |
 | **pitchfork** | Local dev daemon supervision only (directory-scoped autostart/autostop). | Repo-policy choice — pitchfork itself can run production daemons; we simply don't use it that way here. |
 | **hk** | Sole git-hook gate — concurrent, file-locked, three-way-merge stash-safe. | Config in `hk.pkl`. |
@@ -334,6 +335,27 @@ re-export pubkey → re-sign → re-record).
 For app secrets created *after* OpenBao is up, OpenBao is the store of
 record; a client that reads them into the dev env is a future concern
 (none exists yet).
+
+## Workload identity: the local in-cluster SPIRE (ADR 0025/0026)
+
+SPIRE Server + Agent run in-cluster (`environments/local/spire/`, sibling
+tofu unit to `openbao/`, same skeleton). `spire-bootstrap.sh` (the
+one-time bridge) applies the `helm_release` and confirms the server's
+active CA is upstream-signed, not self-signed:
+
+| stage | what happens | held by |
+|---|---|---|
+| bootstrap | SPIRE's intermediate cert is signed by OpenBao's `pki` mount at runtime (`spire_server` k8s-auth role, ADR 0025) — no static cert file ships anywhere | OpenBao (the root); SPIRE never holds a long-lived key of its own |
+| process restart | server data (registration entries, its signed intermediate) lives on a PVC and survives; the agent re-attests automatically via `k8s_psat` node attestation — no re-typed token | the cluster (PVC + kubelet) |
+| machine reboot | both pods reschedule and re-attest automatically, no manual step, same as OpenBao's StatefulSet | the cluster |
+| disaster | the intermediate cert re-issues from OpenBao (already-recoverable root, see above); registration entries re-apply from the checked-in `ClusterSPIFFEID` CR (`controllerManager.enabled = true`, ADR 0026) — declarative, never hand-typed | git (the manifest) + OpenBao (the root) |
+
+No recurring manual step, no memorized secret — matches the standard
+OpenBao already holds. Registered identity today: the `ci` namespace's
+default ServiceAccount, consumed by `buildkit-build` to present a live
+SVID when pushing to zot (SPIRE Phase 1 PR 3, `TODOS.md`). A host-side
+agent for non-k8s CLI identity was evaluated and **not pursued** — SPIRE
+ships no darwin release binaries.
 
 ## Scripts Policy
 

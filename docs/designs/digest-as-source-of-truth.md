@@ -210,8 +210,9 @@ ci/                                  # reusable Tekton defs — Flux-reconciled 
   pipelines/build-scan-approve.yaml    #   T7b1/T7b2/T7b3 — clone-app → clone-defs → build → scan-attach → gate (shared + buildkitd-config workspaces, retries on clones)
   pipelines/kustomization.yaml        #   T7c Inc.2 — per-path inventory (the Pipeline def only)
   runtime/namespace.yaml               #   T7a ✓ — the `ci` namespace (no RBAC — the build SA needs none)
-  runtime/buildkitd-mirror.yaml        #   T7b1-followup — buildkitd.toml ConfigMap: mirror docker.io + gcr.io → in-cluster zot (interim; OrbStack IPv6-egress defect)
-  runtime/kustomization.yaml          #   T7c Inc.2 — per-path inventory (namespace + mirror CM only)
+  runtime/buildkitd-mirror.yaml        #   T7b1-followup — buildkitd.toml ConfigMap: mirror docker.io + gcr.io → in-cluster zot (interim; OrbStack IPv6-egress defect); also carries the zot client keypair path (SPIRE Phase 1 follow-up — zot requires mTLS to push, ADR 0025/0026)
+  runtime/spiffe-helper-config.yaml    #   SPIRE Phase 1 follow-up — spiffe-helper HCL config the `fetch-svid` step loads to fetch the pushing SVID
+  runtime/kustomization.yaml          #   T7c Inc.2 — per-path inventory (namespace, mirror CM, provenance-signer SA, spiffe-helper config)
   scripts/registry-seed.sh             #   T7b1-followup — host `oras cp` of a Dockerfile's base images into zot (mise run frontend:seed; not crane, R1b-ii-c pre-plan)
   scripts/kubeconform-scan.sh + chainsaw-test.sh + lib/ci.sh + tests/   # T7a ✓ (tekton-taskrun.sh deleted in T7b1)
   tests/crd-schemas/{task,pipeline,pipelinerun}_v1.json  #   Tekton v1 CRD schemas (vendored from the pinned release) for kubeconform
@@ -225,7 +226,8 @@ environments/local/                  # the ONE deployment target — owns its Op
   kyverno/                              #   K1/ADR 0020 — the ImageValidatingPolicy + its approval-pubkey ConfigMap (configMapGenerator) + tests/crd-schemas/
   cert-manager/                         #   T7c Inc.4 — the dev-PKI CRs (ADR 0016)
   openbao/                              #   the local-OpenBao tofu unit (ADR 0016) — a raft StatefulSet, key-preserving snapshot restore
-  zot/                                  #   T7b0 — committed manifests; reconciled by environments/local/flux/zot-sync.yaml (T7c, was `mise run local:zot:install`)
+  zot/                                  #   T7b0 — committed manifests; reconciled by environments/local/flux/zot-sync.yaml (T7c, was `mise run local:zot:install`); requires mTLS client cert to push, anonymous read only (SPIRE Phase 1 PR 3, ADR 0025/0026)
+  spire/                                #   SPIRE Phase 1 PR 2 — the local-SPIRE tofu unit (ADR 0026), sibling to openbao/ — Server+Agent, intermediate cert signed by OpenBao's pki mount
   tekton/                               #   T7c Inc.0 — release.lock (SHA-256) for tekton-install.sh; the *controller* install stays a checksum-gated `kubectl apply`, a named Flux prerequisite (ADR 0015)
   tests/{flux,kyverno,frontend}/**/chainsaw-test.yaml   #   [k8s]-gated running-state asserts (flux-/kyverno-/frontend-chainsaw.sh)
   scripts/openbao-{bootstrap,reset,snapshot}.sh + {flux,kyverno,frontend}-chainsaw.sh + {flux,cert-manager,kyverno}-kubeconform.sh + flux-bootstrap.sh + lib/ + tests/

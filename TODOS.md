@@ -41,12 +41,11 @@ open work):
   - `zot registry auth` — CLOSED (2026-09-15, SPIRE Phase 1 PR 3 +
     buildkit-build wiring) — mTLS enforced, real Task presents a live SVID
     on every push; both proven live end-to-end
-  - `Flux / registry CA trust` — direction decided (SPIRE Phase 2), not
-    yet landed
-  - `SPIRE — phased workload-identity rollout` — planning-session output,
-    Phases 0-3, cross-referenced from the four items above it
-  - `SPIRE — investigate broader scope (OpenBao and beyond)` — gated on
-    Phases 0-3 landing first
+  - `Flux / registry CA trust` — open again, undecided; its only
+    candidate mechanism (host-side SPIRE Agent) is not viable, see
+    `SPIRE — phased workload-identity rollout` below
+  - `SPIRE — phased workload-identity rollout` — CLOSED, Phases 0-1
+    shipped; Phases 2-3 dropped (not viable / depended on Phase 2)
 - *tofu modules*
   - `Retrofit vm-orbstack, cluster-k0sctl, secret-openbao to digest-pinning`
 - *Kyverno/Cilium*
@@ -71,7 +70,6 @@ open work):
     verification)` — split out from the old T8 scope
   - `T7d — production repoint`
   - `Pin-drift guard: host mise.toml vs ci/tasks/* step images`
-  - `openbao-verify.bats's online() helper checks only one of two registries`
   - `Run-scoped digest identity — race-simulating test` — empirical proof,
     deferred from the shipped fix (provable by construction today)
   - `Tekton Dashboard`
@@ -525,9 +523,11 @@ credential at all).
    `environments/local/openbao/main.tf`. Confirms the trigger fired
    without reopening this whole session — T8's identity is scoped to
    PROVENANCE signing, not approval signing, so it did NOT close the
-   human-approver gap this item is actually about (that gap is now
-   scoped instead by `SPIRE — phased workload-identity rollout`'s
-   Phase 3, below).
+   human-approver gap this item is actually about. **Updated
+   2026-09-15:** the SPIRE-backed idea for this gap (`SPIRE — phased
+   workload-identity rollout`, below) was dropped — no viable host-side
+   SPIRE Agent on the dev Mac (no darwin binaries). This gap stays open,
+   unscoped by any current plan.
 
 **Pre-picked direction (evaluate these first, don't restart from zero):**
 
@@ -652,19 +652,24 @@ scoped to one call) is accepted only as time-boxed, not a destination. The
 per-CLI-flag approach (that session's fix) treats each tool as its own trust
 boundary, one at a time.
 
-**Decision already made, not still open:** a host-side SPIRE Agent — see
-`SPIRE — phased workload-identity rollout` below, Phase 2, for the citation
-and verdict (duplicated here once, before that entry existed; cut in this
-pass). Cilium's Mutual Authentication was the other candidate and is ruled
-out (pod-to-pod only, confirmed Beta) — also cited there, not restated here.
+**Previously proposed mechanism, now dropped:** a host-side SPIRE Agent
+(`join_token` node attestation on the dev Mac) was the picked direction.
+Not viable — SPIRE ships no darwin release binaries at all (confirmed
+via the GitHub releases API for spiffe/spire v1.11.0), only
+`linux-{amd64,arm64}-musl` tarballs and a windows zip. Cilium's Mutual
+Authentication was the other candidate and is also ruled out
+(pod-to-pod only, confirmed Beta,
+[docs.cilium.io](https://docs.cilium.io/en/stable/network/servicemesh/mutual-authentication/mutual-authentication/)).
+No live candidate mechanism remains.
 
 **Open coordination question this item still owns:** whether this folds into
 the deferred "Auth + multi-member DX" session, same as "zot registry auth"
 above — decide both together, they're the same host-identity question from
-two angles. **Depends on:** SPIRE Phase 2 (below). **Triggers with:** a
-dedicated planning/research session, not blocking R2–R4.
+two angles. **Depends on:** a new mechanism being found — none is currently
+identified. **Triggers with:** a dedicated planning/research session, not
+blocking R2–R4.
 
-### SPIRE — phased workload-identity rollout — P2, planning-session output
+### SPIRE — phased workload-identity rollout — CLOSED (2026-09-15, Phases 0-1)
 
 **What:** a corrected, cited map of every identity boundary in the repo
 today, plus an ordered, small-transaction rollout of SPIFFE/SPIRE where it
@@ -714,13 +719,15 @@ not pattern-matched from training data):**
   a mismatched SVID is correctly rejected with a different error, `"no
   chain matching all constraints"`, proving the URI SAN gate itself works
   — it's alias creation afterward that hard-fails, with no config
-  workaround). Phase 3 targets `jwt` auth + JWT-SVID instead.
+  workaround). `jwt` auth + JWT-SVID remains the untried alternative if
+  SPIRE-backed OpenBao auth is revisited; no phase currently plans to.
 - **Registry-CA-trust "mesh" question** — Cilium's Mutual Authentication
   is confirmed pod-to-pod only, explicitly incompatible with external/host
   mTLS ([docs.cilium.io](https://docs.cilium.io/en/stable/network/servicemesh/mutual-authentication/mutual-authentication/)) —
   does not answer the "Flux / registry CA trust" item's own question. A
-  host-side SPIRE Agent (non-k8s node attestation via `join_token`) does —
-  see that item's entry above.
+  host-side SPIRE Agent (non-k8s node attestation via `join_token`) was
+  the other candidate — also ruled out (2026-09-15, no darwin binaries);
+  see that item's entry above. No mechanism currently answers this.
 - **Tekton Chains** — not viable now, upstream alpha, "not yet functional"
   ([tekton.dev](https://tekton.dev/docs/pipelines/spire/)). T8 does not
   depend on this.
@@ -730,9 +737,9 @@ not pattern-matched from training data):**
 0. **Spike — DONE (2026-09-15, ADR 0024).** Throwaway SPIRE Server +
    Agent + throwaway OpenBao container (all Docker, teardown after);
    confirmed OpenBao `cert` auth cannot authenticate a stock SPIFFE
-   X.509-SVID (no CN → `"missing name in alias"`). **Phase 3 targets
-   `jwt` auth + JWT-SVID**, not `cert`. No production wiring landed;
-   this was a finding, not code.
+   X.509-SVID (no CN → `"missing name in alias"`); `jwt` auth +
+   JWT-SVID was the identified alternative, not pursued further. No
+   production wiring landed; this was a finding, not code.
 1. **SPIRE Server + Agent in-cluster; zot mTLS** — split into 3 PRs
    (Gall's Law / bisect-safety). **PR 1 — DONE (2026-09-15, #64):**
    OpenBao's `pki` mount as SPIRE's upstream authority (docs/adr/0025).
@@ -770,82 +777,38 @@ not pattern-matched from training data):**
    choice now that a real consumer exists). Live-proven end-to-end: a
    real pod running as the `ci` namespace's default ServiceAccount
    fetched its SVID and pushed to zot via `oras`; an anonymous push was
-   denied; anonymous read stayed unaffected. Closes "zot registry auth"
-   (above) for the mechanism — buildkit's own Task wiring is a separate
-   new follow-up item (below "zot registry auth").
-2. **Host-side SPIRE Agent** — `join_token` node attestation on the dev
-   Mac, `pitchfork`-supervised (never a bare `spire-agent run &`). Host
-   CLI tools (`flux push`, `oras`, `frontend-publish.sh`,
-   `registry-seed.sh`) present an X.509-SVID to zot instead of per-CLI
-   `--ca-file` patchwork. Closes "Flux / registry CA trust."
-   **Blocker flagged (2026-09-15, found as a side effect of Phase 0):**
-   SPIRE ships no darwin release binaries at all — only
-   `linux-{amd64,arm64}-musl` tarballs and a windows zip (confirmed via
-   the GitHub releases API for spiffe/spire v1.11.0). "Host-side SPIRE
-   Agent... on the dev Mac" cannot use a host-native binary as written;
-   needs a different mechanism (a host-run Linux container, a VM, or
-   reconsidering the approach) before this phase is planned further. Not
-   solved — flagged only.
-3. **OpenBao signing identity** — gated on Phase 0. `attestation-sign.sh`
-   authenticates via the host SVID → OpenBao `cert` (or `jwt`, if the
-   spike fails) auth → a policy scoped to `transit/sign/approval-key`
-   only — the root token retires from this one path. Directly answers
-   Auth + multi-member DX's trigger #1 (a second approver) ahead of that
-   trigger firing, since the mechanism becomes cheap to have ready.
-   `flux_sops`'s k8s-auth role is untouched.
-4. **Cilium Mutual Authentication** — not scheduled; deferred to the
-   Cilium planning-session entry (above), reusing this Phase 1's SPIRE
-   Server, never Cilium's bundled one.
-   Not scheduled at all: Tekton Chains + SPIRE (upstream not ready — see
-   T8's entry).
+   denied; anonymous read stayed unaffected. Closed "zot registry auth"
+   (above) for the mechanism; the follow-up (`buildkit-build`'s own Task
+   presenting the SVID) is DONE too — see "Wire buildkit-build's real
+   Task to present a rotating SVID," below.
 
-**Operational Lifecycle Trace (SPIRE Server, required before Phase 1
-ships per CLAUDE.md's planning gate):** bootstrap via a tofu unit +
-`spire-bootstrap.sh` (intermediate cert from OpenBao PKI, host
-`join_token` written `0600`, registration entries declarative via
-`spire-register.sh` — never typed by hand); process restart — in-cluster
-DB on a PVC survives, host agent restarted + re-attested by `pitchfork`;
-machine reboot — both sides autostart, no manual step; disaster — SPIRE's
-cert re-issues from OpenBao (already-recoverable root), registration
-entries re-apply from the checked-in manifest. No recurring manual step,
-no memorized secret — matches the standard ADR 0011 already holds OpenBao
-to. Full trace: the plan file above.
+**Not pursued — host-side SPIRE Agent (2026-09-15):** SPIRE ships no
+darwin release binaries at all — only `linux-{amd64,arm64}-musl`
+tarballs and a windows zip (confirmed via the GitHub releases API for
+spiffe/spire v1.11.0). A host-native agent on the dev Mac cannot be
+built as originally scoped (no alternate mechanism — a Linux container,
+a VM — evaluated or picked). "Flux / registry CA trust" (above) and
+the OpenBao-signing-identity idea (retiring `attestation-sign.sh`'s
+root-token use) both depended on this and are dropped with it, not
+carried forward as open items. Cilium Mutual Authentication remains not
+scheduled, deferred to the Cilium planning-session entry (above),
+reusing this Phase 1 SPIRE Server if/when it happens — never Cilium's
+bundled one. Tekton Chains + SPIRE also stays not scheduled (upstream
+not ready — see T8's entry).
 
-**Effort:** planning done (this entry + the linked plan); Phase 0 ~1
-session; Phases 1-3 ~S-M each.
-**Priority:** P2 · **Depends on:** nothing blocking — Phase 0 can start
-any time. Phase 4 depends on the Cilium planning session (above).
+**Operational Lifecycle Trace (SPIRE Server, shipped in Phase 1):**
+bootstrap via a tofu unit + `spire-bootstrap.sh` (intermediate cert
+from OpenBao PKI, registration entries declarative via the chart's own
+`ClusterSPIFFEID` — never typed by hand); process restart — in-cluster
+DB on a PVC survives; machine reboot — no manual step, cluster-native;
+disaster — SPIRE's cert re-issues from OpenBao (already-recoverable
+root), registration entries re-apply from the checked-in manifest. No
+recurring manual step, no memorized secret — matches the standard
+ADR 0011 already holds OpenBao to.
 
-### SPIRE — investigate broader scope (OpenBao and beyond) — P2, planning session
-
-**What:** once the phased rollout above actually lands (Phases 0-3), run
-a follow-up investigation/planning pass on whether SPIFFE/SPIRE identity
-should extend to OTHER boundaries in the stack beyond what those phases
-scope. Not pre-deciding which boundaries qualify — that judgment is what
-this session is for. Named candidate to start from: OpenBao itself —
-Phase 3 only uses SPIRE for the human approver's own signing auth; the
-existing `flux_sops` k8s-auth role (`main.tf:188-210`) is a SEPARATE,
-already-working boundary this file elsewhere notes is "never
-live-tested" for its own audience-matching edge case (see "Auth +
-multi-member DX," above) — worth asking whether it should move to SPIRE
-too, or stays k8s-native (Chesterton's Fence: it already works,
-narrowly scoped, no defect to justify migrating it just because SPIRE
-now exists elsewhere). Other candidates to weigh, not pre-committed: a
-shared-runner/CI service identity if the build pipeline ever moves off
-this single-user box (the existing "Auth + multi-member DX" trigger #2).
-
-**Why:** the phased rollout (above) was deliberately scoped to close
-ALREADY-open, named gaps one small transaction at a time — not a
-"SPIRE everywhere" adoption. Once it's proven live across 3 phases, the
-cost/benefit of extending it further is a genuinely different, cheaper
-question than it was before any phase shipped (per this repo's own
-guiding principle, above: prefer the tool already proven correct and
-declarative over inventing a second, different auth mechanism for a
-boundary SPIRE could plausibly already reach).
-
-**Depends on:** Phases 0-3 (the entry above) landing first — extending a
-rollout before the base rollout proves out its own real-world
-cost/friction is the wrong order. **Priority:** P2.
+**Effort:** Phase 0 + Phase 1 shipped, ~2 sessions total.
+**Priority:** P2 · **Status:** closed — Phase 0 and Phase 1 are the
+full scope of this rollout now; nothing left pending under this entry.
 
 ### Retrofit vm-orbstack, cluster-k0sctl, secret-openbao to digest-pinning
 
@@ -1116,31 +1079,6 @@ drives them (tekton + oras + cue; cosign + oras + openbao) — the rename
 needs thought, and it touches `mise.toml` tasks, ADRs, README, bats.
 (`frontend-deploy.sh`/`frontend-serve.sh`, the other two originally named
 here, are gone — ADR 0023 retired them, not renamed them.)
-
-### `openbao-verify.bats`'s `online()` helper checks only one of two registries — P3
-
-**Found 2026-09-14** while running `mise run check` for T8 (unrelated to it —
-confirmed on clean `main`). `environments/local/scripts/tests/openbao-verify.bats`'s
-`online()` helper checks only `ghcr.io` (the chart registry) reachability
-before deciding whether to run the anti-rotation-guard cases live. The
-script itself (`openbao-verify.sh`) ALSO needs `quay.io` (the image
-registry) for its second `crane digest` check, and self-skips (exit 0,
-no failure) if that one specific registry is unreachable — independent
-of `ghcr.io`. When `quay.io` is down (confirmed live: 504/502 gateway
-errors while `ghcr.io` answered fine) the bats `online()` check passes,
-the test runs, the script hits its OWN internal skip on the `quay.io`
-call before ever reaching the anti-rotation grep, and the test then
-falsely reports the guard failed (it never ran) rather than skipping
-cleanly like the script's own design intends ("a flapping registry does
-not red `mise run check`" — true for the script, not for this test).
-
-**Fix:** `online()` should check both `ghcr.io/openbao/charts/openbao:0.29.4`
-and `quay.io/openbao/openbao:2.6.2` (or whatever `openbao-verify.sh`'s
-`image_ref:image_tag` currently resolve to) before proceeding, matching
-what the script itself actually needs to succeed past the render step.
-
-**Priority:** P3 — not a real regression, a test-harness gap. Not fixed
-here (out of scope for T8; flagged per repo-ownership discipline).
 
 ### `spire-verify.bats` has no local-fixture rigor for chart-dependent cases — P3
 
