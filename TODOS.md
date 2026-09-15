@@ -1191,40 +1191,118 @@ environment.
 **Depends on:** cluster-k0sctl module built, digest-as-source-of-truth
 Phase 2-3 proven
 
-### OpenBao's own tooling surface — `bao` CLI vs. direct API calls — planning session — P3
+### PR A — openbao-bootstrap.sh: curl health-probe → `bao status` — P3, fully planned
 
-**What:** now that `crane` is gone (below, Recently Closed), the same
-"redundant coverage" question this repo's Tool Boundaries constraint
-raises for a whole pinned tool applies one level down: several scripts
-call OpenBao's HTTP API directly in places `bao` CLI already covers.
-Worth the same one-job-per-mechanism look, on its own — a genuinely
-different, smaller-grained question than the crane removal was.
+**What:** planning session (`/plan-eng-review` + Codex outside voice,
+2026-09-15) closed out the "bao CLI vs. direct API calls" audit. Repo-wide
+grep of every `VAULT_ADDR`/`curl`/`/v1/` site found exactly **2** genuine
+direct-API sites (both in `openbao-bootstrap.sh`: `pf_refresh()` line 93,
+Phase A line 305), both hitting `v1/sys/health?sealedcode=200&uninitcode=
+200&...` — a hand-rolled override collapsing sealed/uninit/standby to
+HTTP 200. Everywhere else in the repo already uses `bao` CLI or cosign's
+own hashivault-KMS integration (not swappable). Live-verified: `bao
+status` exit 0/2 (unsealed / sealed-or-uninitialized) both mean
+"reachable" — same bucket the curl override collapses to 200 — **and**
+`VAULT_CLIENT_TIMEOUT` (undocumented in `--help`, confirmed live: bounded
+a black-holed connection to exactly the requested seconds) replaces
+curl's `--max-time` natively, no external `timeout`/`gtimeout`/perl-alarm
+wrapper needed.
 
-**Why:** every direct-API call is a second way to do something the
-pinned `bao` CLI already does, the same maintenance-surface smell
-CLAUDE.md § Tool Boundaries calls out — not urgent, but worth a pass.
+**Design (final, both PRs together took 6 native + 7 Codex findings):**
 
-**Depends on:** nothing blocking. **Triggers with:** a dedicated
-tooling-consolidation session.
+```bash
+bao_reachable() {
+  local addr="$1" ca="$2"
+  unset BAO_ADDR BAO_CACERT BAO_TOKEN   # ambient BAO_* would silently
+                                         # out-rank the VAULT_* below
+  VAULT_ADDR="$addr" VAULT_CACERT="$ca" VAULT_CLIENT_TIMEOUT=2 \
+    bao status >/dev/null 2>&1
+  local ec=$?
+  [ "$ec" = 0 ] || [ "$ec" = 2 ]        # exact match — a naive "!= 1"
+                                         # misreads other exit codes as reachable
+}
+```
 
-### openbao-verify.bats — convert error-path tests from live network to stubbed unit tests — P3
+Called from both `pf_refresh()`'s retry loop and the Phase A one-shot
+check (one helper, not two inline blocks — matches this file's existing
+`kc()`/`die()`/`skip()` factoring). Also fixes a pre-existing,
+independent bug found while touching this code (Codex): `pf_refresh()`
+unconditionally `export`s `VAULT_ADDR` even after exhausting all 50
+retries with no successful probe — now `die()`s instead of silently
+proceeding as if reachable.
 
-**What:** `online()`'s reachability probe runs BEFORE the script's own
-separate live call (a TOCTOU gap — registry state can change between
-the two), and all 8 existing cases only prove behavior on a clean
-network, not how the gate specifically handles an auth failure, a cert
-failure, or a malformed ref (as opposed to a plain registry-down/
-not-found, which IS covered — verified live across 3 error classes
-during the crane-removal review, below). Found by Codex's outside voice
-during that review's plan pass; surfaced by, not blocking, that
-unrelated tool-consolidation PR.
+**New test:** `openbao-bootstrap.bats` has zero unit coverage of
+reachability polling today (proven only by the live `[k8s]` chainsaw
+suite) — a stub-`bao`-on-PATH unit test for `bao_reachable()`'s
+exit-code classification (0/2 → true, 1 → false) is mandatory per this
+project's regression-test rule (modifies existing, working behavior).
 
-**Why:** stubbed unit tests would isolate error-branch coverage from
-live-registry flakiness and let each failure mode assert independently,
-instead of relying on whichever error a live registry happens to return
-that day.
+**Files:** `environments/local/scripts/openbao-bootstrap.sh`,
+`environments/local/scripts/tests/openbao-bootstrap.bats`.
+**Depends on:** nothing blocking.
 
-**Depends on:** nothing blocking. **Priority:** P3.
+### PR B — openbao-verify.bats: stub conversion + fail-closed fix — P3, fully planned
+
+**What:** same planning session. `online()`'s reachability probe ran
+BEFORE the script's own separate live call (TOCTOU gap), and 0 of 8
+existing cases exercised auth failure, cert failure, or malformed ref
+(only DNS-down/not-found, informally verified live during the
+crane-removal review, never captured as an automated case). Reading the
+full script during this session surfaced 2 more real bugs, both folded
+into the same PR (Boy Scout Rule — same file, same pass):
+
+1. `oras resolve ... || skip "cannot reach ..."` treats EVERY failure —
+   including a malformed ref, a pure client-side parse error with zero
+   network involved — as "registry offline" and exits 0. A typo'd
+   `chart_name` in `openbao.lock` today silently PASSES this fail-closed
+   gate.
+2. `helm template ... || skip "helm template failed..."` has the exact
+   same bug — a real render error also reports as a clean offline-skip.
+
+**Design (final):**
+
+- `classify_oras_failure()` (reused for helm's stderr too): matches
+  known Go net-package phrasing anchored on prefixes (`dial tcp `,
+  `i/o timeout`, `context deadline exceeded`, `no such host`,
+  `connection refused`) **plus** `manifest unknown`/`404`/`not found` →
+  skip (transient + the already-shipped not-found/DNS-down behavior,
+  explicitly preserved, not re-litigated). Everything else — 401/403,
+  x509/cert errors, "invalid reference" — dies instead of skipping.
+- **Anti-rotation guard moved to run FIRST**, before any network call.
+  It's a pure local `*.tf` grep with zero network dependency; today it
+  runs LAST and silently never executes whenever an earlier network step
+  skips (masked coverage gap, found by Codex). Moving it first also means
+  its 2 existing bats cases need **no registry fixture at all** — a net
+  simplification, not added scope.
+- New test seam `TOOLBOX_ORAS_CACERT` (env var, unset in production —
+  real GHCR/quay/system trust store): threaded as `--ca-file` on both
+  `oras resolve` calls when set. One TLS-based local-registry transport
+  for every stubbed case — no separate `--plain-http` path, matches the
+  existing `TOOLBOX_OPENBAO_LOCK` test-seam convention already in this
+  file. (Considered reusing `attestation/scripts/lib/attestation.sh`'s
+  local-registry auto-detection instead — rejected: would create a new
+  `environments/local/` → `attestation/` concern-DAG edge not worth
+  opening for a test-only need.)
+- `tests/lib/registry.bash` gains `start_registry_tls()` (self-signed
+  cert, optional htpasswd auth) — generic, reusable, explicitly checked
+  **not** SPIFFE/SPIRE-specific (the upcoming SPIRE Phase 0 spike
+  unblocks 3 unrelated deferred items — zot registry auth, Flux/registry
+  CA trust, the human-approver OpenBao auth gap — none of which are this
+  PR; `bao_reachable()` above needs no token at all, and this registry
+  auth is OCI-registry auth, not OpenBao's). Digest-mismatch + auth-failure
+  cases point `TOOLBOX_ORAS_CACERT` at the fixture's real CA (reachable,
+  verified); the cert-failure case omits/wrongs it (verification fails
+  naturally, no extra script logic).
+- Tightened the pre-existing "fails closed on a mutated image digest"
+  test to also assert the output names the mismatch (`*"resolves to"*`),
+  matching the chart-digest test's rigor 30 lines above it — the old
+  version only checked nonzero exit, which a bug at an earlier unrelated
+  step would also satisfy.
+
+**Files:** `environments/local/scripts/openbao-verify.sh`,
+`environments/local/scripts/tests/openbao-verify.bats`,
+`tests/lib/registry.bash`.
+**Depends on:** nothing blocking.
 
 ### Upgrade cosign signing to public trust (Fulcio/keyless or published key)
 
