@@ -28,7 +28,7 @@ teardown() {
 	[[ "$output" == *"Invalid: 0"* ]]
 	# selfSigned ClusterIssuer + CA Certificate + CA ClusterIssuer +
 	# openbao-tls leaf + zot-tls leaf + the toolbox-ca-bundle Bundle
-	[[ "$output" == *"Valid: 6"* ]]
+	[[ "$output" == *"Valid: 7"* ]]
 }
 
 @test "the vendored cert-manager CRD schemas are actually used (nothing skipped)" {

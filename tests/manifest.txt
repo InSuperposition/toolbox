@@ -33,6 +33,9 @@ bats    environments/local/scripts/tests/flux-chainsaw.bats      7
 bats    environments/local/scripts/tests/openbao-verify.bats     19
 bats    environments/local/scripts/tests/openbao-bootstrap.bats  12
 bats    environments/local/scripts/tests/openbao-chainsaw.bats   5
+bats    environments/local/scripts/tests/spire-verify.bats       6
+bats    environments/local/scripts/tests/spire-chainsaw.bats     5
+bats    environments/local/scripts/tests/spire-bootstrap.bats    3
 bats    ci/scripts/tests/chainsaw-test.bats                   3
 bats    ci/scripts/tests/kubeconform-scan.bats               3
 bats    ci/scripts/tests/registry-seed.bats                  10
@@ -43,3 +46,4 @@ bats    tests/check-tf-boundary.bats                        4
 tftest  environments/local/openbao/tests/helm_values.tftest.hcl   5
 tftest  environments/local/openbao/tests/phase_c.tftest.hcl       8
 tftest  environments/local/openbao/tests/pki.tftest.hcl           4
+tftest  environments/local/spire/tests/spire.tftest.hcl           5

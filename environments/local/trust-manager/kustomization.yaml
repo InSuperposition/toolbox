@@ -9,3 +9,4 @@ kind: Kustomization
 
 resources:
   - bundle.yaml
+  - spire-vault-ca.yaml

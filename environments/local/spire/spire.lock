@@ -1,0 +1,34 @@
+# spire (in-cluster) — pinned charts.
+#
+# Hand-maintained (NOT generated). SPIRE Phase 1 (TODOS.md, docs/adr/0026).
+#
+# The digest/checksum IS the trust boundary (ADR 0001). Unlike OpenBao's
+# OCI chart repo, `https://spiffe.github.io/helm-charts-hardened/` is a
+# CLASSIC (non-OCI) Helm repo — there is no `oras resolve` equivalent.
+# spire-verify.sh (the hk `spire-verify` gate) AND the bootstrap bridge,
+# before ANY `tofu apply`, `helm pull` each chart by its pinned version
+# and assert its downloaded `.tgz`'s sha256 equals the digest below —
+# fail closed on a mismatch.
+#
+# Neither chart is cosign-signed (this is a community Helm repo, not an
+# OCI registry with a signing convention) — the committed digest is the
+# whole pin.
+#
+# To bump a chart:
+#   1. pick the new version V
+#   2. helm repo update spiffe && helm pull spiffe/<chart> --version V
+#   3. shasum -a 256 <chart>-V.tgz                                       -> digest
+#   4. update the version + digest below AND variables.tf's matching default
+#   5. re-run: mise run local:spire:verify
+
+chart_repository=https://spiffe.github.io/helm-charts-hardened/
+
+spire_crds_chart_version=0.6.1
+spire_crds_chart_digest=sha256:ce982e63fc375e392b014fc99e621a55442ab886052413e9bb052f72d66580a8
+
+spire_chart_version=0.30.2
+spire_chart_digest=sha256:aadaeabe1dfecbcd803d541580ab41c229d99c0075ace3b6e050b0ceef36aa8d
+
+# The SPIRE binary version both spire-server/spire-agent ship, per the
+# spire chart's own appVersion.
+app_version=1.15.3
