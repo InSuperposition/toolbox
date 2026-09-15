@@ -3,12 +3,15 @@
 
 _d="$BATS_TEST_DIRNAME"
 while [ "$_d" != "/" ] && [ ! -e "$_d/mise.toml" ]; do _d="$(dirname "$_d")"; done
+# ports.bash first — registry.bash uses free_port.
 # shellcheck source=/dev/null
 . "$_d/tests/lib/ports.bash"
 # shellcheck source=/dev/null
 . "$_d/tests/lib/scratch.bash"
 # shellcheck source=/dev/null
 . "$_d/tests/lib/assert.bash"
+# shellcheck source=/dev/null
+. "$_d/tests/lib/registry.bash"
 unset _d
 
 # fake_mise_export <outdir> — a stub `mise` on PATH. openbao-bootstrap.sh
