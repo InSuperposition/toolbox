@@ -64,9 +64,6 @@ CLUSTER_DIR="$STATE_DIR/cluster"          # throwaway first-init tokens
 CA_FILE="$STATE_DIR/tls/ca.crt"
 TFSTATE="$STATE_DIR/openbao.tfstate"
 TFSTATE_BUNDLE="$SNAP_DIR/${TFSTATE##*/}"
-# health probe query — 200 for every non-fatal state (sealed included) so a
-# reachable-but-sealed endpoint counts as "up".
-HEALTH_Q="v1/sys/health?sealedcode=200&uninitcode=200&standbycode=200&drsecondarycode=200&performancestandbycode=200"
 
 PF_PID=""
 PF_ADDR=""
@@ -79,6 +76,25 @@ die() {
 }
 kc() { kubectl --context "$CONTEXT" "$@"; }
 
+# bao_reachable <addr> <ca-file> — is $addr answering, regardless of seal
+# state (sealed / uninitialized both count as "reachable"; only a
+# connection-level failure does not)? `bao status` exit codes: 0 = unsealed,
+# 2 = sealed or uninitialized, 1 = everything else (unreachable, TLS
+# failure, ...). VAULT_CLIENT_TIMEOUT bounds the call the same way curl's
+# old --max-time did — `bao status --help` has no such flag, but the
+# client honors this env var (live-verified against OpenBao 2.6.2: bounds
+# a black-holed connection to exactly the requested seconds). BAO_* is
+# unset first: if a developer's shell happens to export it from unrelated
+# OpenBao work, it silently out-ranks the VAULT_* set below.
+bao_reachable() {
+	local addr="$1" ca="$2" ec
+	unset BAO_ADDR BAO_CACERT BAO_TOKEN
+	VAULT_ADDR="$addr" VAULT_CACERT="$ca" VAULT_CLIENT_TIMEOUT=2 \
+		bao status >/dev/null 2>&1
+	ec=$?
+	[ "$ec" = 0 ] || [ "$ec" = 2 ]
+}
+
 # pf_refresh — (re)establish a port-forward to pod/openbao-0 and point
 # VAULT_ADDR at it. Used when the direct ClusterIP endpoint is unreachable
 # (a sealed pod has no ready Service endpoints; OrbStack host->ClusterIP
@@ -90,10 +106,10 @@ pf_refresh() {
 	PF_ADDR="https://127.0.0.1:8200"
 	local _
 	for _ in $(seq 1 50); do
-		curl -sf --max-time 2 --cacert "$CA_FILE" -o /dev/null "$PF_ADDR/$HEALTH_Q" && break
+		bao_reachable "$PF_ADDR" "$CA_FILE" && { export VAULT_ADDR="$PF_ADDR"; return 0; }
 		sleep 0.2
 	done
-	export VAULT_ADDR="$PF_ADDR"
+	die "port-forward to pod/openbao-0 never became reachable at $PF_ADDR after 10s"
 }
 
 # The openbao chart's server StatefulSet uses `updateStrategy: OnDelete`
@@ -302,7 +318,7 @@ wait_pod_running
 
 # ── 9. reach the endpoint (OrbStack host routing, or a port-forward) ──
 export VAULT_CACERT="$CA_FILE"
-if curl -sf --max-time 5 --cacert "$CA_FILE" -o /dev/null "$ENDPOINT/$HEALTH_Q"; then
+if bao_reachable "$ENDPOINT" "$CA_FILE"; then
 	export VAULT_ADDR="$ENDPOINT"
 	echo "==> Endpoint reachable directly: $ENDPOINT"
 else
