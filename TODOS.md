@@ -38,9 +38,9 @@ open work):
   - `Auth + multi-member DX` — deferred, trigger + pre-picked direction
     recorded (includes the folded-in gh token expiry gap)
   - `T-DR` — declarative disaster recovery for the in-cluster OpenBao
-  - `zot registry auth` — CLOSED (2026-09-15, SPIRE Phase 1 PR 3) —
-    mTLS enforced, mechanism proven live; buildkit's own Task wiring is a
-    separate new follow-up item
+  - `zot registry auth` — CLOSED (2026-09-15, SPIRE Phase 1 PR 3 +
+    buildkit-build wiring) — mTLS enforced, real Task presents a live SVID
+    on every push; both proven live end-to-end
   - `Flux / registry CA trust` — direction decided (SPIRE Phase 2), not
     yet landed
   - `SPIRE — phased workload-identity rollout` — planning-session output,
@@ -602,36 +602,47 @@ fetched its SVID from the Workload API and pushed to zot via `oras`
 (`--cert-file`/`--key-file`); an anonymous push to the same repo was denied
 (`basic credential not found` / 401); anonymous read stayed unaffected (200).
 
-**Not closed by this PR — a separate follow-up:** buildkitd's actual
-`ci/tasks/buildkit-build.yaml` Task does not yet present a rotating SVID
-during a real push (see the new "Wire buildkit-build's real Task..." item,
-below this section) — this PR proves the mechanism and registers the real
-identity; wiring the real Task is genuinely separate cross-concern work.
+**The buildkit-side wiring itself was a separate follow-up, now also
+closed** (2026-09-15, see "Wire buildkit-build's real Task..." below) —
+`buildkit-build`'s real Task now presents a live SVID on every push.
 
-### Wire buildkit-build's real Task to present a rotating SVID — P2
+### Wire buildkit-build's real Task to present a rotating SVID — CLOSED (2026-09-15)
 
-**What:** `ci/tasks/buildkit-build.yaml`'s `build` step (running as the `ci`
-namespace's default ServiceAccount, now a registered SPIFFE identity per
-the closed "zot registry auth" item above) does not yet present that
-identity to zot during a real push — it still authenticates however it
-did before (nothing, credential-free reads/writes).
+**What it was:** `ci/tasks/buildkit-build.yaml`'s `build` step (running as
+the `ci` namespace's default ServiceAccount, a registered SPIFFE identity
+per "zot registry auth" above) didn't present that identity to zot during
+a real push.
 
-**Why this is separate, harder work — confirmed live 2026-09-15:**
-`buildctl` (the client CLI) has no client-cert flag at all; buildkit's
-mTLS-to-registry config lives server-side in `buildkitd.toml`'s
-`[registry."zot.zot.svc.cluster.local:5000"]` block
-(`keyfile`/`certfile`/`ca`). SPIRE X.509-SVIDs rotate (default ~1h TTL) —
-static files written once at pod start would go stale — so this needs
-either the `spiffe-csi-driver` (currently `enabled: false` in
-`environments/local/spire/main.tf`) or a `spiffe-helper` sidecar rewriting
-the files on rotation, added to `ci/tasks/buildkit-build.yaml` (a
-different concern boundary than `environments/local/`). Confirm buildkitd
-(not just buildctl) actually honors the resulting `buildkitd.toml` client-cert
-config live before committing further.
+**Closed by:** a new `fetch-svid` step (before `build`) runs the pinned
+`spiffe-helper` binary directly — no embedded shell, no CSI driver needed.
+`daemon_mode = false` (fetch once, exit) is correct for a Tekton step:
+steps run sequentially in one pod lifetime, well under a fresh SVID's
+~1h default TTL, so no rotation/reload machinery is needed — simpler
+than the CSI-driver route originally assumed. The client keypair
+(`[[registry."zot...".keypair]]`) is a **static** stanza baked directly
+into the existing `ci/runtime/buildkitd-mirror.yaml` ConfigMap, same
+footing as the file's existing `ca = [...]` entry it sits beside — the
+file path is a build-time constant (this Task's own fixed emptyDir
+mount), not something that rotates independently the way the CA
+(deliberately kept out-of-band) does. No new script, no workspace
+needed — the hostPath socket and the new ConfigMap are Task-owned infra
+mounts (same class as `disable-ipv6`'s hardcoded sysctl values), not
+consumer-parameterized data.
 
-**Depends on:** "zot registry auth" (closed, above) — the identity and
-mTLS enforcement already exist; this is purely the buildkit-side wiring.
-**Priority:** P2.
+**Real bug caught by live verification:** `fetch-svid`'s `securityContext`
+MUST match the `build` step's `runAsUser: 1000` — spiffe-helper's key
+file is written `0600`; a UID mismatch between the two steps is a real
+"permission denied" reading it at push time, not a hypothetical.
+
+**Live-proven end-to-end, both directions:** a real `buildctl-daemonless.sh`
+build+push to zot succeeded with the fetched SVID (`spiffe-helper`
+correctly writes leaf+intermediate to `svid.pem` — verified live, unlike
+an earlier session mistake with raw DER concatenation); the identical
+push with no client cert failed `unauthorized: authentication required`.
+`ci/tests/build-pipeline/chainsaw-test.yaml`'s step-count/posture
+assertions updated and green live.
+
+**Depends on:** "zot registry auth" (closed, above). **Priority:** was P2.
 
 ### Flux / registry CA trust — P2
 
