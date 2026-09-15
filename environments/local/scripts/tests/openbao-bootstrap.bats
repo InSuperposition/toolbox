@@ -117,3 +117,70 @@ seed_bundle() {
 	run shellcheck "$SW"
 	[ "$status" -eq 0 ]
 }
+
+# bao_reachable() unit tests — the script has no source-safe entry point
+# (no `[[ "${BASH_SOURCE[0]}" == "$0" ]]` guard; sourcing it runs the whole
+# migration), so the function body is extracted into its own snippet and
+# sourced on its own, then exercised against a stub `bao` on PATH. No
+# cluster, no network — a pure exit-code classification test, mandatory
+# per the project's regression-test rule (this PR rewrote the caller's
+# reachability logic; the classifier itself needs its own proof).
+setup_bao_reachable() {
+	local snippet="$SCRATCH/bao_reachable.sh"
+	sed -n '/^bao_reachable() {/,/^}/p' "$SW" >"$snippet"
+	[ -s "$snippet" ]
+	# shellcheck source=/dev/null
+	source "$snippet"
+	STUBBIN="$SCRATCH/stubbin-bao"
+	mkdir -p "$STUBBIN"
+}
+
+stub_bao_exit() {
+	cat >"$STUBBIN/bao" <<EOF
+#!/bin/sh
+exit $1
+EOF
+	chmod +x "$STUBBIN/bao"
+}
+
+@test "bao_reachable: unsealed (exit 0) is reachable" {
+	setup_bao_reachable
+	stub_bao_exit 0
+	run env PATH="$STUBBIN:$PATH" bash -c "source '$SCRATCH/bao_reachable.sh'; bao_reachable http://x ''"
+	[ "$status" -eq 0 ]
+}
+
+@test "bao_reachable: sealed-or-uninitialized (exit 2) is reachable" {
+	setup_bao_reachable
+	stub_bao_exit 2
+	run env PATH="$STUBBIN:$PATH" bash -c "source '$SCRATCH/bao_reachable.sh'; bao_reachable http://x ''"
+	[ "$status" -eq 0 ]
+}
+
+@test "bao_reachable: connection error (exit 1) is NOT reachable" {
+	setup_bao_reachable
+	stub_bao_exit 1
+	run env PATH="$STUBBIN:$PATH" bash -c "source '$SCRATCH/bao_reachable.sh'; bao_reachable http://x ''"
+	[ "$status" -ne 0 ]
+}
+
+@test "bao_reachable: an unrelated nonzero exit (e.g. 127) is NOT reachable" {
+	# guards the exact bug an unanchored \`!= 1\` check would reintroduce.
+	setup_bao_reachable
+	stub_bao_exit 127
+	run env PATH="$STUBBIN:$PATH" bash -c "source '$SCRATCH/bao_reachable.sh'; bao_reachable http://x ''"
+	[ "$status" -ne 0 ]
+}
+
+@test "bao_reachable: unsets ambient BAO_* before calling bao" {
+	setup_bao_reachable
+	cat >"$STUBBIN/bao" <<'EOF'
+#!/bin/sh
+[ -z "${BAO_ADDR:-}" ] && [ -z "${BAO_CACERT:-}" ] && [ -z "${BAO_TOKEN:-}" ] && exit 0
+exit 1
+EOF
+	chmod +x "$STUBBIN/bao"
+	run env PATH="$STUBBIN:$PATH" BAO_ADDR="http://wrong" BAO_CACERT="/wrong" BAO_TOKEN="wrong" \
+		bash -c "source '$SCRATCH/bao_reachable.sh'; bao_reachable http://x ''"
+	[ "$status" -eq 0 ]
+}
