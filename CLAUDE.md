@@ -14,7 +14,8 @@ design, not an afterthought.
 
 - Reusable OpenTofu modules, each independently versionable and consumable.
 - Zero trust by default: no plaintext secret, default-deny network, admission
-  policy on every manifest (mechanics defined per-module, see §7).
+  policy on every manifest (mechanics defined per-module, see § Zero Trust
+  below).
 - One tool per concern — no two pinned tools compete for the same job.
 - `mise` is the only bootstrap step and the only runbook; there is no
   separate ops doc describing steps `mise.toml` doesn't already encode.
@@ -26,8 +27,7 @@ design, not an afterthought.
   A script is its own file, lintable and testable on its own.
   - **Named carve-out:** `deploy/frontend/Dockerfile` is the one
     hand-authored Dockerfile in this repo. It packages the external
-    consumer `cv_frontend` as a distroless Node image
-    (`docs/adr/0007-distroless-dockerfile-not-buildpacks.md`). It is a
+    consumer `cv_frontend` as a distroless Node image. It is a
     minimal two-stage build — two `RUN` lines, no shell
     logic — which is the industry-standard declarative form, not the "RUN
     soup" this rule targets. Both base images are pinned by digest. Any
@@ -41,12 +41,13 @@ design, not an afterthought.
     `ci/scripts/*.sh`, shellcheck-clean and bats-tested, and runs from
     there. Machine-checked by `rules/boundary-no-embedded-shell.yml`.
 - No cyclic calls between `mise` tasks and scripts — one direction only.
-- One primary test tool per layer (§9) — acknowledged partial overlap is
-  fine, redundant full coverage by two tools for the same concern is not.
+- One primary test tool per layer (§ Testing Strategy below) —
+  acknowledged partial overlap is fine, redundant full coverage by two
+  tools for the same concern is not.
 - `hk` is the only git-hook gate. No hook logic lives anywhere else.
 - Don't assert a boundary, a mechanism, or a "safe by default" claim that
   hasn't been verified. Where something is genuinely undecided, this doc
-  says so — see "Deferred / Not Yet Decided" (§16) — rather than guessing.
+  says so — see "Deferred / Not Yet Decided" below — rather than guessing.
 
 ## Repo Role
 
@@ -70,21 +71,21 @@ each row links to.
 | **OpenTofu** | Owns the full lifecycle (create/upgrade/destroy) of foundational infra: VM, k0s cluster, OpenBao secret engine. | Plan/apply, cloud-agnostic. `k0sctl` is not a competing layer — it's the CLI the `cluster-k0sctl` module wraps, same relationship as `vm-orbstack` wrapping OrbStack. |
 | **Flux** | GitOps sync — reconciles manifests (plain YAML, or a Timoni-built OCI artifact) from git/OCI continuously. | Nothing is applied by hand once Flux owns a path. |
 | **Flux Operator** | Manages Flux CD's *ongoing* configuration via a declarative `FluxInstance` CRD, once installed. | **Not** a full replacement for `flux bootstrap` — see GitOps Flow below for what still happens once, imperatively. [fluxoperator.dev](https://fluxoperator.dev/get-started/) |
-| **Timoni** | Renders + type-checks application manifests from CUE, then publishes them as an OCI artifact (Helm-chart alternative). | First real module: `deploy/frontend/timoni/` (`cv_frontend`, ADR 0019). A **host operator step** produces the artifact — `mise run frontend:publish` verifies the approval attestation, then `timoni build` → `flux push` (ADR 0021 — `timoni` ships no container image); Flux reconciles *that artifact*, not a live Timoni controller object. [timoni.sh/gitops-flux](https://timoni.sh/gitops-flux) |
-| **Crossplane** | *Negative space* — pinned, not active. The **provision** stage of the in-cluster pipeline (render → reconcile → enforce → provision; ADR 0018). | Creates the backing infra a consumer *declares* it needs (bucket/DB/queue/DNS as a CR), if ever activated — trigger `TODOS.md` T-X1, **not** a directory count. Layered above the substrate, delivered by Flux, consumes OpenBao creds; never co-owns a resource, never wraps a substrate module in `provider-terraform`. tofu `kubernetes_*` / `kubernetes_manifest` resources are **banned** (`no-kubernetes-tf` hk step). |
-| **Kyverno** | Admission policy — the **enforce** stage of the in-cluster pipeline (ADR 0018). | Live on the local dev *reference* cluster (v1.19.1, Flux-reconciled): **one** `ImageValidatingPolicy` verifies the `cv_frontend` approval attestation at admission (`failurePolicy: Fail`, deny-only, never mutate; scoped by the `toolbox.dev/cv-frontend: approval-enforced` namespace label + the `cv-frontend*` image glob) — Plan B K1, ADR 0020. Broader `ci`-namespace privilege-scoping policies stay deferred to a production Kyverno module + the Cilium session. |
+| **Timoni** | Renders + type-checks application manifests from CUE, then publishes them as an OCI artifact (Helm-chart alternative). | First real module: `deploy/frontend/timoni/` (`cv_frontend`). A **host operator step** produces the artifact — `mise run frontend:publish` verifies the approval attestation, then `timoni build` → `flux push` (`timoni` itself ships no container image); Flux reconciles *that artifact*, not a live Timoni controller object. [timoni.sh/gitops-flux](https://timoni.sh/gitops-flux) |
+| **Crossplane** | *Negative space* — pinned, not active. The **provision** stage of the in-cluster pipeline (render → reconcile → enforce → provision). | Creates the backing infra a consumer *declares* it needs (bucket/DB/queue/DNS as a CR), if ever activated — the real trigger is a consumer declaring infra it doesn't own, **not** a directory count. Layered above the substrate, delivered by Flux, consumes OpenBao creds; never co-owns a resource, never wraps a substrate module in `provider-terraform`. tofu `kubernetes_*` / `kubernetes_manifest` resources are **banned** (`no-kubernetes-tf` hk step). |
+| **Kyverno** | Admission policy — the **enforce** stage of the in-cluster pipeline. | Live on the local dev *reference* cluster (v1.19.1, Flux-reconciled): **one** `ImageValidatingPolicy` verifies the `cv_frontend` approval attestation at admission (`failurePolicy: Fail`, deny-only, never mutate; scoped by the `toolbox.dev/cv-frontend: approval-enforced` namespace label + the `cv-frontend*` image glob). Broader `ci`-namespace privilege-scoping policies stay deferred to a production Kyverno module and a future Cilium-focused planning pass. |
 | **Cilium** | Network policy, default-deny between workloads, explicit allow only. | Bootstrap allow-list (DNS, API server, git/OCI pulls, OpenBao) needed before default-deny can reconcile anything — defined at Cilium module build time. |
-| **cert-manager** | In-cluster PKI for the **local dev cluster** — issues the TLS server cert the in-cluster OpenBao listener needs (T7c Increment 4, ADR 0016). | A Flux-reconciled **helper** component (chart + images digest-pinned in `environments/local/flux/cert-manager.lock`; no runtime `spec.verify` — cert-manager signs with a static key, the digest is the pin, ADR 0001). Dev uses a selfSigned root → CA → `openbao-tls` leaf chain (the leaf applies once the 4b bridge creates ns `openbao`); **production** points the leaf's `issuerRef` at a real backend (ACME / org intermediate / OpenBao PKI) — the CA and every leaf unchanged. Unlike OpenBao (OpenTofu-owned substrate, ADR 0015), a helper behind the GitOps loop is fine — nothing secret-bearing depends on its reconcile being tofu-driven. |
-| **trust-manager** | Distributes the CA **trust bundle** Kyverno's admission controller mounts (public roots + the dev CA) so it can pull the HTTPS zot for attestation verification without losing public-registry trust (T7c R1b, ADR 0022). | cert-manager's sibling, a Flux-reconciled helper (`environments/local/flux/trust-manager.lock`; chart unsigned → `ref.digest` pin, no `spec.verify`; **both** component images digest-pinned — the `trust-pkg-debian-trixie` package image is the public-root snapshot and is frozen at its pin, not auto-refreshing). Scoped to the **one** Kyverno ConfigMap consumer: buildkitd (per-registry CA file) and Flux source-controller (`certSecretRef`) take the dev CA directly; routing them through trust-manager (which needs `secretTargets` + its Secret RBAC) is an R1b-ii call. `Bundle` CRs live in `environments/local/trust-manager/` (R1b-ii), never the `flux-system` inventory (unknown-CRD deadlock). |
-| **OpenBao** | Secret store of record — for anything created *after* OpenBao exists and is unsealed. | Local dev: an in-cluster tofu-owned raft StatefulSet (`environments/local/openbao/`, ADR 0016 — supersedes the ADR 0010 machine-global pitchfork daemon). Auto-unseals from a static seal key mounted as a k8s Secret; the on-machine `0600` restore-bundle files (`seal.key`, `root.token`) in `~/.local/state/toolbox/openbao/snapshots/` are the disaster / genesis path (ADR 0011 custody model). `mise [env]` injects `VAULT_ADDR` (ClusterIP HTTPS), `VAULT_CACERT`, `VAULT_TOKEN`. The out-of-band requirement is real for the *deferred production* `secret-openbao` module, not the local one. |
-| **SPIRE** | Workload identity — issues short-lived SPIFFE X.509-SVIDs to in-cluster workloads (SPIRE Phase 1, `TODOS.md`, ADRs 0024-0026). | Local dev: an in-cluster tofu-owned Server + Agent (`environments/local/spire/`, sibling to `openbao/`, same skeleton), upstream-signed by OpenBao's `pki` mount (ADR 0025). Declarative registration via the chart's own `ClusterSPIFFEID` CRD (`controllerManager.enabled = true`, ADR 0026) — no hand-typed registration entries. First consumer: `ci` namespace's default ServiceAccount presents its SVID to zot for mTLS push (PR #66/#67). Host-side agent (non-k8s CLI identity) is **not pursued** — SPIRE ships no darwin release binaries (`TODOS.md`, `Flux / registry CA trust`). |
-| ~~**fnox**~~ | **Removed 2026-09-07 (ADR 0011).** Was the local dev secret access layer (backend = OpenBao). `fnox set`/`fnox remove` silently rewrite `fnox.toml`, and its keychain items trigger a GUI password prompt when read by another binary. The one bootstrap secret it held (the root token) is now a `0600` file. | — |
+| **cert-manager** | In-cluster PKI for the **local dev cluster** — issues the TLS server cert the in-cluster OpenBao listener needs. | A Flux-reconciled **helper** component (chart + images digest-pinned in `environments/local/flux/cert-manager.lock`; no runtime `spec.verify` — cert-manager signs with a static key, the digest is the pin). Dev uses a selfSigned root → CA → `openbao-tls` leaf chain (the leaf applies once OpenBao's namespace-bridge step creates ns `openbao`); **production** points the leaf's `issuerRef` at a real backend (ACME / org intermediate / OpenBao PKI) — the CA and every leaf unchanged. Unlike OpenBao (OpenTofu-owned substrate), a helper behind the GitOps loop is fine — nothing secret-bearing depends on its reconcile being tofu-driven. |
+| **trust-manager** | Distributes the CA **trust bundle** Kyverno's admission controller mounts (public roots + the dev CA) so it can pull the HTTPS zot for attestation verification without losing public-registry trust. | cert-manager's sibling, a Flux-reconciled helper (`environments/local/flux/trust-manager.lock`; chart unsigned → `ref.digest` pin, no `spec.verify`; **both** component images digest-pinned — the `trust-pkg-debian-trixie` package image is the public-root snapshot and is frozen at its pin, not auto-refreshing). Scoped to the **one** Kyverno ConfigMap consumer: buildkitd (per-registry CA file) and Flux source-controller (`certSecretRef`) take the dev CA directly; routing them through trust-manager (which needs `secretTargets` + its Secret RBAC) is a deliberate scope call, not a default. `Bundle` CRs live in `environments/local/trust-manager/`, never the `flux-system` inventory (unknown-CRD deadlock). |
+| **OpenBao** | Secret store of record — for anything created *after* OpenBao exists and is unsealed. | Local dev: an in-cluster tofu-owned raft StatefulSet (`environments/local/openbao/`, supersedes an earlier machine-global pitchfork daemon). Auto-unseals from a static seal key mounted as a k8s Secret; the on-machine `0600` restore-bundle files (`seal.key`, `root.token`) in `~/.local/state/toolbox/openbao/snapshots/` are the disaster / genesis path. `mise [env]` injects `VAULT_ADDR` (ClusterIP HTTPS), `VAULT_CACERT`, `VAULT_TOKEN`. The out-of-band requirement is real for the *deferred production* `secret-openbao` module, not the local one. |
+| **SPIRE** | Workload identity — issues short-lived SPIFFE X.509-SVIDs to in-cluster workloads. | Local dev: an in-cluster tofu-owned Server + Agent (`environments/local/spire/`, sibling to `openbao/`, same skeleton), upstream-signed by OpenBao's `pki` mount. Declarative registration via the chart's own `ClusterSPIFFEID` CRD (`controllerManager.enabled = true`) — no hand-typed registration entries. First consumer: `ci` namespace's default ServiceAccount presents its SVID to zot for mTLS push. Host-side agent (non-k8s CLI identity) is **not pursued** — SPIRE ships no darwin release binaries. |
+| ~~**fnox**~~ | **Removed 2026-09-07.** Was the local dev secret access layer (backend = OpenBao). `fnox set`/`fnox remove` silently rewrite `fnox.toml`, and its keychain items trigger a GUI password prompt when read by another binary. The one bootstrap secret it held (the root token) is now a `0600` file. | — |
 | **pitchfork** | Local dev daemon supervision only (directory-scoped autostart/autostop). | Repo-policy choice — pitchfork itself can run production daemons; we simply don't use it that way here. |
 | **hk** | Sole git-hook gate — concurrent, file-locked, three-way-merge stash-safe. | Config in `hk.pkl`. |
 | **mise** | Bootstrap + task runner. | Call graph is one direction only: `mise run check` → `hk check` → individual linters/formatters. `hk.pkl` never calls back into a mise task. |
-| **CI build/scan/approve pipeline** | Digest-pinned build → scan+SBOM → cosign-signed approval gate for app repos consumed by this stack (e.g. `cv_frontend`). | Build is a **distroless Node image** from `deploy/frontend/Dockerfile` (`docker buildx` in Phase-1 CI; Phase-2 is **daemonless rootless BuildKit** in-cluster — `buildctl-daemonless.sh`, ADR 0014, `TODOS.md` T7). `docs/adr/0007`. Reusable pieces: `ci/tasks/{buildkit-build,trivy-scan,oras-attach}.yaml` + `ci/pipelines/build-scan-approve.yaml`, distributed as digest-pinned OCI bundles (ADR 0014, parameterized — not app-specific); a per-consumer `PipelineRun` lives in `deploy/<consumer>/` (e.g. `deploy/frontend/`). Full design: `docs/designs/digest-as-source-of-truth.md`. |
+| **CI build/scan/approve pipeline** | Digest-pinned build → scan+SBOM → cosign-signed approval gate for app repos consumed by this stack (e.g. `cv_frontend`). | Build is a **distroless Node image** from `deploy/frontend/Dockerfile`. An early iteration ran on GitHub Actions + GHCR to prove the pipeline shape; the current, steady-state form is **daemonless rootless BuildKit** running in-cluster (`buildctl-daemonless.sh`), delivering into the in-cluster `zot`. Reusable pieces: `ci/tasks/{buildkit-build,trivy-scan,oras-attach}.yaml` + `ci/pipelines/build-scan-approve.yaml`, distributed as digest-pinned, parameterized (not app-specific) OCI bundles; a per-consumer `PipelineRun` lives in `deploy/<consumer>/` (e.g. `deploy/frontend/`). Full design: `docs/designs/digest-as-source-of-truth.md`. |
 | ~~**buildpacks**~~ | **Removed 2026-09-06.** Was the image build tool; the pivot replaced it with a hand-authored distroless Dockerfile (carve-out above). No longer pinned in `mise.toml`. | — |
-| **chainsaw / kubeconform** | Primary test tools for k8s manifests — not strictly exclusive. | See Testing Strategy (§9). |
+| **chainsaw / kubeconform** | Primary test tools for k8s manifests — not strictly exclusive. | See Testing Strategy below. |
 
 ## GitOps Flow
 
@@ -99,9 +100,9 @@ each row links to.
    declaratively via `FluxInstance` — no repeated `flux bootstrap` runs.
 4. Flux reconciles everything else from git, pulling Timoni-built OCI
    artifacts where a module uses Timoni for app-manifest packaging.
-5. Kyverno admission policy runs on the reconciled workloads (the **enforce**
-   stage, ADR 0018): today one `ImageValidatingPolicy` verifies the
-   `cv_frontend` approval attestation before its pod is admitted (Plan B K1).
+5. Kyverno admission policy runs on the reconciled workloads (the
+   **enforce** stage): today one `ImageValidatingPolicy` verifies the
+   `cv_frontend` approval attestation before its pod is admitted.
 
 ## Zero Trust
 
@@ -109,16 +110,16 @@ each row links to.
   the source of truth once it exists. For the **local dev** daemon its
   bootstrap secrets (root token, recovery key, static-seal key) are `0600`
   files in `~/.local/state/toolbox/openbao/`, beside the raft store they
-  protect — the machine is the trust boundary (ADR 0011). "Out-of-band by
+  protect — the machine is the trust boundary. "Out-of-band by
   necessity" holds for the deferred production `secret-openbao` module, not
   the local one.
 - **Network** — Cilium default-deny between workloads, explicit allow only.
   Bootstrap allow-list needs are defined at Cilium module build time.
 - **Admission** — Kyverno is live on the dev reference cluster with one
   `ImageValidatingPolicy` gating `cv_frontend` on its approval attestation
-  (`failurePolicy: Fail`, deny-only; Plan B K1, ADR 0020). A policy on
+  (`failurePolicy: Fail`, deny-only). A policy on
   *every* manifest, and the `ci`-namespace privilege scoping, are a
-  production Kyverno module + Cilium-session concern.
+  production Kyverno module and future Cilium-focused planning concern.
 
 ## Operational Lifecycle Trace (planning gate)
 
@@ -139,9 +140,29 @@ A recurring manual step, or a memorized secret with no machine-side
 storage, is a **flaw to fix in the plan** — not a feature to document —
 *unless* there is a stated threat-model reason (production, multi-operator,
 a deferred module with a different lifecycle). The local OpenBao daemon
-(ADR 0010/0011) traces clean: all three secrets are `0600` files, restart
+traces clean: all three secrets are `0600` files, restart
 and reboot auto-unseal, and the only manual case (disaster `-force`
 restore) uses the snapshot's own bundle.
+
+## Comments & Commit Messages
+
+A code/test comment, a commit message, and a PR body all follow the same
+rule: **behavior-in-place**. Each explains what the code does and why, on
+its own terms — a reader with zero access to this session, this PR, or
+today's TODOS.md must be able to understand it fully, standalone.
+
+- **Never cite an identifier as the explanation** — a TODOS.md phase/task
+  shorthand code, a PR/issue number, an ADR number, a plan-file path, or a
+  branch name. No exceptions: an identifier teaches a reader nothing by
+  itself, whether it points at something ephemeral (TODOS.md) or something
+  permanent (an ADR) — the failure is the same either way, a bare pointer
+  standing in for content. What's acceptable **everywhere**, ADRs
+  included: the actual behavior/decision described in place, plus a date.
+- **The squash-only merge policy makes this literal, not stylistic.**
+  Every PR body becomes the permanent one-line-per-commit `git log`
+  entry (§ CI check gate & merge policy below) — write it as the durable
+  record it actually becomes, not as a note to a reviewer who already
+  has the context.
 
 ## Docs layout
 
@@ -168,7 +189,7 @@ Rules:
 ## File Placement
 
 Full spec, the concern DAG, the target tree, and the migration status:
-`docs/designs/repo-structure.md` (ADR 0012, 0013).
+`docs/designs/repo-structure.md`.
 
 The rule:
 
@@ -183,8 +204,8 @@ The rule:
 
 The concerns: `tests/` (repo-level shared test support, leaf) · `attestation/`
 (the sign/verify seam — never names a consumer) · `ci/` (reusable Tekton
-defs → digest-pinned OCI bundles — never names a consumer; ADR 0014,
-Phase 2) · `deploy/frontend/` (the one consumer — the Dockerfile, the
+defs → digest-pinned OCI bundles — never names a consumer)
+· `deploy/frontend/` (the one consumer — the Dockerfile, the
 Timoni module `timoni/`, the `k8s/` namespace, `pipelinerun.cue`, and the
 `frontend-{build,deploy,serve,publish}.sh` operator scripts) ·
 `environments/local/` (one deployment target — owns its `openbao/` tofu
@@ -193,7 +214,7 @@ that bring them up) · `modules/` (reusable, versioned, URL-consumed OpenTofu
 modules only — empty + README today).
 
 The rule is in force and the tree matches it — the phased restructure
-(`TODOS.md` T1–T6, `docs/designs/repo-structure.md` § Migration status) is
+tracked in `docs/designs/repo-structure.md` § Migration status is
 complete. `ls-lint` + `ast-grep` enforce the placement + edge rules with
 **zero exceptions** (only `**/tests/**` is exempt from the concern-climb
 rule — fixtures reach across concerns by design).
@@ -204,7 +225,7 @@ rule — fixtures reach across concerns by design).
 only** — nothing else. It is empty today (a README states the rule); the
 deferred production `secret-openbao` is the first candidate. The local dev
 OpenBao is **not** a `modules/` entry — it is a tofu unit under
-`environments/local/openbao/`, owned by that environment (ADR 0012).
+`environments/local/openbao/`, owned by that environment.
 
 A published module's standard layout is `main.tf`, `variables.tf`,
 `outputs.tf`, `versions.tf`, `README.md`, `tests/*.tftest.hcl`. A tofu
@@ -215,7 +236,7 @@ Script files are named `<domain>-<verb>.sh` where `<domain>` is the tool
 (`openbao-bootstrap.sh`), never the directory — see § File Placement and
 § Scripts Policy.
 
-**Tekton definitions are NOT `modules/` entries** (ADR 0014, supersedes an
+**Tekton definitions are NOT `modules/` entries** (supersedes an
 earlier carve-out). The reusable Task/Pipeline defs live in the `ci/`
 concern (`ci/tasks/`, `ci/pipelines/`, `ci/runtime/`) and are distributed
 as **digest-pinned OCI bundles** (`tkn bundle push` → registry digest; a
@@ -225,8 +246,8 @@ a path segment. The per-consumer `PipelineRun` (binding one consumer's
 params + the pinned bundle digests) lives in `deploy/<consumer>/`. The
 Tekton *controller* install and `zot` are vendored upstreams →
 `environments/local/` (a Flux `OCIRepository`/`Kustomization`), not `ci/`.
-Full design: `docs/designs/digest-as-source-of-truth.md`; phasing:
-`TODOS.md` T7a–T7d.
+Full design: `docs/designs/digest-as-source-of-truth.md`; phasing
+tracked in `TODOS.md`.
 
 ## Testing Strategy
 
@@ -235,8 +256,8 @@ non-overlapping claim:
 
 | Layer | Tool | Notes |
 |---|---|---|
-| k8s manifests, static | kubeconform | Schema validation, no cluster needed, fast pre-merge gate. First user: `ci/` (T7a) — via `ci/scripts/kubeconform-scan.sh` (the `-schema-location` template collides with hk's own), Tekton has no standalone validator so the Task is checked against a v1 CRD schema vendored from the pinned release at `ci/tests/crd-schemas/`. |
-| k8s manifests, live behavior/policy | chainsaw | End-to-end in a real/test cluster; runs after kubeconform passes. First user: `ci/` (T7a) — `[k8s]`-gated via `ci/scripts/chainsaw-test.sh` (skips, never fatal, without an orbstack cluster + Tekton — GitHub runners have no OrbStack; a documented departure from `[docker]`). Every wrapper (`{flux,openbao,kyverno,frontend}-chainsaw.sh`, `ci/scripts/chainsaw-test.sh`) passes `--config .chainsaw.yaml` (repo root): `namespace.fastDelete: true` so a loaded single-node cluster's slow ephemeral-namespace teardown never fails the run on a non-signal (investigated 2026-09-10). |
+| k8s manifests, static | kubeconform | Schema validation, no cluster needed, fast pre-merge gate. First user: `ci/` — via `ci/scripts/kubeconform-scan.sh` (the `-schema-location` template collides with hk's own), Tekton has no standalone validator so the Task is checked against a v1 CRD schema vendored from the pinned release at `ci/tests/crd-schemas/`. |
+| k8s manifests, live behavior/policy | chainsaw | End-to-end in a real/test cluster; runs after kubeconform passes. First user: `ci/` — `[k8s]`-gated via `ci/scripts/chainsaw-test.sh` (skips, never fatal, without an orbstack cluster + Tekton — GitHub runners have no OrbStack; a documented departure from `[docker]`). Every wrapper (`{flux,openbao,kyverno,frontend}-chainsaw.sh`, `ci/scripts/chainsaw-test.sh`) passes `--config .chainsaw.yaml` (repo root): `namespace.fastDelete: true` so a loaded single-node cluster's slow ephemeral-namespace teardown never fails the run on a non-signal. |
 | OpenTofu units | `tofu test` (`.tftest.hcl`) | Native framework; tests in `<unit>/tests/`. |
 | Shell scripts | bats | Every script gets one, in `<concern>/scripts/tests/*.bats` beside the script. |
 
@@ -256,12 +277,12 @@ hook) diffs three views — the suites it finds on disk, the committed
 silently drops a suite fails the gate. `tests/check-coverage.bats`
 mutation-tests the guard. Full spec: `docs/designs/repo-structure.md`.
 
-Harness prerequisites: `ci/` (T7a) is the first concern with k8s manifests
+Harness prerequisites: `ci/` is the first concern with k8s manifests
 and sets the initial shape — CRD schemas **vendored** from the pinned
 Tekton release (not fetched at lint time), chainsaw creating an ephemeral
 namespace per test, a `k8s_available()` skip-guard. The fuller harness
 (isolated test cluster, rendered-manifest source, readiness/timeout/cleanup
-policy, in-cluster trivy DB) is speced when T7b builds the full pipeline.
+policy, in-cluster trivy DB) is speced when the full pipeline is built out.
 
 ## mise: Bootstrap & Runbook-as-Config
 
@@ -296,9 +317,11 @@ PRs merge **squash-only** — the repo setting disables merge-commit and
 rebase merges and auto-deletes the head branch. So every push to `main` is
 exactly one commit, and `check.yml` running on that commit *is* full
 per-commit `git bisect` safety, for free. That is why there is **no**
-per-commit history-replay workflow (the former T9b — resolved by policy,
-not tooling). The squash commit takes the **PR title + PR body**, so the
-PR description is the durable commit message — write it as one.
+per-commit history-replay workflow — resolved by policy, not tooling. The
+squash commit takes the **PR title + PR body**, so the
+PR description is the durable commit message — write it as one, per
+§ Comments & Commit Messages above (behavior-in-place, no bare
+identifiers).
 
 ## pitchfork: Local Daemon Supervision
 
@@ -307,10 +330,10 @@ watcher). Declarative process definitions, autostart/autostop on `cd` into
 the repo. Never a production workload — that's a repo-policy choice, not a
 tool limitation.
 
-## Secrets: the local in-cluster OpenBao (ADR 0011/0016)
+## Secrets: the local in-cluster OpenBao
 
-The local dev OpenBao runs in-cluster (`environments/local/openbao/`,
-ADR 0016). `openbao-bootstrap.sh` (the one-time bridge) brings it up and,
+The local dev OpenBao runs in-cluster (`environments/local/openbao/`).
+`openbao-bootstrap.sh` (the one-time bridge) brings it up and,
 on every successful run, writes the restore bundle's values to `0600`
 files in `$OPENBAO_STATE_DIR` (`~/.local/state/toolbox/openbao/`), beside
 the `snapshots/` bundle:
@@ -328,7 +351,7 @@ recurring manual step**: the pod auto-unseals from the Secret on every
 start; a pod restart or cluster return needs no action. The one manual case
 is the disaster `-force` restore — re-run `mise run local:openbao:bootstrap`,
 which restores from the `snapshots/` bundle. After the host daemon's
-retirement (ADR 0016) that bundle is the **only** genesis path; a lost
+retirement that bundle is the **only** genesis path; a lost
 bundle with no host daemon is the "resume signing" disaster (fresh init →
 re-export pubkey → re-sign → re-record).
 
@@ -336,7 +359,7 @@ For app secrets created *after* OpenBao is up, OpenBao is the store of
 record; a client that reads them into the dev env is a future concern
 (none exists yet).
 
-## Workload identity: the local in-cluster SPIRE (ADR 0025/0026)
+## Workload identity: the local in-cluster SPIRE
 
 SPIRE Server + Agent run in-cluster (`environments/local/spire/`, sibling
 tofu unit to `openbao/`, same skeleton). `spire-bootstrap.sh` (the
@@ -345,17 +368,16 @@ active CA is upstream-signed, not self-signed:
 
 | stage | what happens | held by |
 |---|---|---|
-| bootstrap | SPIRE's intermediate cert is signed by OpenBao's `pki` mount at runtime (`spire_server` k8s-auth role, ADR 0025) — no static cert file ships anywhere | OpenBao (the root); SPIRE never holds a long-lived key of its own |
+| bootstrap | SPIRE's intermediate cert is signed by OpenBao's `pki` mount at runtime (via a dedicated k8s-auth role) — no static cert file ships anywhere | OpenBao (the root); SPIRE never holds a long-lived key of its own |
 | process restart | server data (registration entries, its signed intermediate) lives on a PVC and survives; the agent re-attests automatically via `k8s_psat` node attestation — no re-typed token | the cluster (PVC + kubelet) |
 | machine reboot | both pods reschedule and re-attest automatically, no manual step, same as OpenBao's StatefulSet | the cluster |
-| disaster | the intermediate cert re-issues from OpenBao (already-recoverable root, see above); registration entries re-apply from the checked-in `ClusterSPIFFEID` CR (`controllerManager.enabled = true`, ADR 0026) — declarative, never hand-typed | git (the manifest) + OpenBao (the root) |
+| disaster | the intermediate cert re-issues from OpenBao (already-recoverable root, see above); registration entries re-apply from the checked-in `ClusterSPIFFEID` CR (`controllerManager.enabled = true`) — declarative, never hand-typed | git (the manifest) + OpenBao (the root) |
 
 No recurring manual step, no memorized secret — matches the standard
 OpenBao already holds. Registered identity today: the `ci` namespace's
 default ServiceAccount, consumed by `buildkit-build` to present a live
-SVID when pushing to zot (SPIRE Phase 1 PR 3, `TODOS.md`). A host-side
-agent for non-k8s CLI identity was evaluated and **not pursued** — SPIRE
-ships no darwin release binaries.
+SVID when pushing to zot. A host-side agent for non-k8s CLI identity was
+evaluated and **not pursued** — SPIRE ships no darwin release binaries.
 
 ## Scripts Policy
 
@@ -381,52 +403,51 @@ Config files reference scripts by path — never embed them.
 Architecture: `docs/designs/digest-as-source-of-truth.md`. Decisions and
 rationale: `docs/adr/`. Open work and phase sequencing: `TODOS.md`.
 
-Shape: distroless Dockerfile build (`docs/adr/0007`) → trivy scan + SBOM +
-scan-report referrers → cosign-signed approval gate backed by OpenBao
-Transit (`docs/adr/0004`). Phase 2 (shipped) runs as Tekton
-Pipelines on OrbStack's k8s, delivering into the in-cluster `zot`
-(`docs/adr/0003`, T7c). Phase 1 (GitHub Actions + GHCR on a native
-`linux/arm64` runner) proved the pipeline shape first and was retired
-once Phase 2 proved stable end to end (T7c R4). Tekton Chains provenance
-is Phase 3, still deferred (T8, blocked on the in-cluster OpenBao move
-past its loopback listener).
-[Pipelines-as-Code](https://pipelinesascode.com/) (not raw Tekton
-Triggers/EventListener) remains the already-researched *webhook-triggering*
-mechanism for if/when this pipeline moves from on-demand to webhook-driven.
+Shape: distroless Dockerfile build → trivy scan + SBOM + scan-report
+referrers → cosign-signed approval gate backed by OpenBao Transit. The
+shipped, steady-state pipeline runs as Tekton Pipelines on OrbStack's k8s,
+delivering into the in-cluster `zot`. An earlier iteration (GitHub Actions
++ GHCR on a native `linux/arm64` runner) proved the pipeline shape first
+and was retired once the in-cluster form proved stable end to end. Tekton
+Chains provenance is still deferred, blocked on the in-cluster OpenBao
+move past its loopback listener. [Pipelines-as-Code](https://pipelinesascode.com/)
+(not raw Tekton Triggers/EventListener) remains the already-researched
+*webhook-triggering* mechanism for if/when this pipeline moves from
+on-demand to webhook-driven.
 
 **Delivery** (after approval) is a separate host step, not part of this
 pipeline: `mise run frontend:publish` verifies the approval attestation,
-renders the Timoni module (ADR 0019), and `flux push`es the manifests for
-Flux to reconcile into ns `frontend`, where Kyverno re-verifies at admission
-(Plan B K1/M3, ADRs 0020/0021).
+renders the Timoni module, and `flux push`es the manifests for
+Flux to reconcile into ns `frontend`, where Kyverno re-verifies at
+admission.
 
 ## Deferred / Not Yet Decided
 
 Stated explicitly rather than guessed:
 
-- **Crossplane** — pinned, inactive. Boundary now defined (ADR 0018): the
+- **Crossplane** — pinned, inactive. Boundary now defined: the
   **provision** stage — creates consumer-*declared* backing infra as a CR,
   layered above the tofu substrate, delivered by Flux. Activation trigger
-  `TODOS.md` T-X1 (a consumer declares infra it does not own); not sequenced
-  before then. The per-consumer namespace bundle stays Flux plain-YAML
-  meanwhile; tofu `kubernetes_*` resources are banned.
+  is a consumer declaring infra it does not own; not sequenced before then.
+  The per-consumer namespace bundle stays Flux plain-YAML meanwhile; tofu
+  `kubernetes_*` resources are banned.
 - **Pipelines-as-Code** — pinned/researched, not yet wired. The CI
-  build/scan/approve pipeline runs on-demand/manually triggered through
-  Phase 3; webhook-driven triggering via Pipelines-as-Code is a later
-  addition, not required to prove the pipeline itself.
+  build/scan/approve pipeline runs on-demand/manually triggered for now;
+  webhook-driven triggering via Pipelines-as-Code is a later addition, not
+  required to prove the pipeline itself.
 - **Tekton Triggers/EventListener** — not used; if/when webhook-driven
   triggering is built, Pipelines-as-Code replaces this stack outright.
 - **`flux bootstrap`** — not eliminated, only reduced to a one-time step
   (operator install + first `FluxInstance` apply + deploy-key/git
   write-back setup). Flux Operator replaces the *ongoing* config path only.
 - **pitchfork in production** — not used here; dev-only by policy.
-- **Local OpenBao unseal-key storage** — RESOLVED (ADR 0011/0016): static
+- **Local OpenBao unseal-key storage** — RESOLVED: static
   seal auto-unseal from a `0600` `seal.key` (mounted in-cluster as a k8s
   Secret); the on-machine restore-bundle files are `0600`; `fnox` and the
   keychain are gone. The production `secret-openbao` module keeps the
   out-of-band requirement.
-- **Local OpenBao runs in-cluster** — SHIPPED (ADR 0016). The loopback
-  listener could not serve pods (the blocker in front of T8), so
+- **Local OpenBao runs in-cluster** — SHIPPED. The loopback
+  listener could not serve pods, so
   `environments/local/openbao/` is now a tofu-owned single-replica raft
   StatefulSet: `openbao-bootstrap.sh` (the one-time bridge) picks a source
   (a live host daemon, an off-machine restore bundle, or the disaster
@@ -439,12 +460,12 @@ Stated explicitly rather than guessed:
   policy, the k8s-ServiceAccount auth method + a `flux_sops` role).
   `approval-key` + the `transit` mount are never tofu-managed
   (`openbao-verify.sh` greps the `.tf`). The host `pitchfork` daemon is
-  retired. **Deferred (Plan B):** the reusable `modules/secret-openbao`
+  retired. **Deferred:** the reusable `modules/secret-openbao`
   extraction; wiring `--sops-vault-configmap` onto the `FluxInstance`.
-- **Kyverno — broader enforcement** — one `ImageValidatingPolicy` ships
-  (Plan B K1, ADR 0020). A policy on every manifest, `ci`-namespace
-  privilege scoping (PSA scalpel, build-pod `securityContext`), and the
-  webhook-failure posture for those are a production Kyverno module concern.
+- **Kyverno — broader enforcement** — one `ImageValidatingPolicy` ships.
+  A policy on every manifest, `ci`-namespace privilege scoping (PSA
+  scalpel, build-pod `securityContext`), and the webhook-failure posture
+  for those are a production Kyverno module concern.
 - **Cilium enforcement mechanics** — network default-deny between workloads
   and the bootstrap allow-list are undefined until the Cilium module is
   built (planning session, `TODOS.md`).
