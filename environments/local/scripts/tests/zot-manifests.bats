@@ -32,8 +32,13 @@ setup() {
 	[ "$status" -eq 0 ]
 }
 
-@test "the zot accessControl grants create only to the registered ci-namespace identity" {
+@test "the zot accessControl grants read/create/update to the registered ci-namespace identity" {
 	run grep -nF 'spiffe://toolbox.local/ns/ci/sa/default' "$ZOT"
+	[ "$status" -eq 0 ]
+	# update (2026-09-16, live-verified): create alone only authorizes the
+	# first-ever push to a given tag/repo — a CI re-run on an unchanged
+	# commit needs update too, or its second push gets a 403.
+	run grep -n '"actions": \["read", "create", "update"\]' "$ZOT"
 	[ "$status" -eq 0 ]
 	run grep -n '"defaultPolicy": \["read"\]' "$ZOT"
 	[ "$status" -eq 0 ]
