@@ -33,6 +33,13 @@ open work):
 
 **P2**
 
+- *cluster substrate* (highest-priority P2 bucket — gates Cilium and
+  everything downstream of it)
+  - `Move the local dev substrate to an OrbStack Linux VM + k0s
+    (vm-orbstack, cluster-k0sctl) — strict tofu/Flux boundary`
+  - `Retrofit OpenBao/SPIRE off tofu-owned helm_release onto Flux
+    HelmRelease` — independent of the substrate move, same boundary
+    rationale
 - *secrets/auth*
   - `Dev CA (toolbox-dev-ca) rotation runbook + rotationPolicy decision`
   - `Auth + multi-member DX` — deferred, trigger + pre-picked direction
@@ -46,10 +53,10 @@ open work):
     `SPIRE — phased workload-identity rollout` below
   - `SPIRE — phased workload-identity rollout` — CLOSED, Phases 0-1
     shipped; Phases 2-3 dropped (not viable / depended on Phase 2)
-- *tofu modules*
-  - `Retrofit vm-orbstack, cluster-k0sctl, secret-openbao to digest-pinning`
 - *Kyverno/Cilium*
-  - `Cilium — planning session needed`
+  - `Cilium — planning session needed` — now sequenced after the cluster
+    substrate move (below); OrbStack's built-in kubernetes has no custom
+    CNI support to run Cilium on
   - `Plan B — deferred follow-ups` — the ship arc (M1→X1→K1→M3) is done,
     see Recently Closed; this is the deferred-items table
   - `Kyverno module — accumulating design inputs`
@@ -892,26 +899,102 @@ ADR 0011 already holds OpenBao to.
 **Priority:** P2 · **Status:** closed — Phase 0 and Phase 1 are the
 full scope of this rollout now; nothing left pending under this entry.
 
-### Retrofit vm-orbstack, cluster-k0sctl, secret-openbao to digest-pinning
+### Move the local dev substrate to an OrbStack Linux VM + k0s (`vm-orbstack`, `cluster-k0sctl`) — strict tofu/Flux boundary — P2
 
-**What:** Pin the three existing OpenTofu modules' git sources by commit SHA
-instead of a mutable tag, matching the pattern proven in the
-digest-as-source-of-truth pipeline.
+**What:** Replace OrbStack's built-in `orb start k8s` cluster with a
+real OrbStack Linux VM running k0s, provisioned by two new OpenTofu
+modules under `modules/`: `vm-orbstack` (creates the VM — CLAUDE.md §
+Tool Boundaries already names this, "same relationship as
+`vm-orbstack` wrapping OrbStack") and `cluster-k0sctl` (bootstraps k0s
+on it via the `k0sctl` CLI, already pinned in `mise.toml`). Both git
+sources SHA-pinned from the day they're written (`ref=<sha>`, matching
+`docs/adr/0001-digest-is-the-trust-boundary.md`'s digest-equivalent for
+git-sourced modules) — no separate retrofit step, unlike the earlier
+version of this item.
 
-**Why:** Closes the gap this whole design is about — for the modules that
-actually provision production infra, not just the CI pipeline wedge.
+**Why now:** OrbStack's built-in Kubernetes does not support swapping
+in a custom CNI — `orbstack/orbstack#742` is an open, unresolved feature
+request for exactly this (checked live, 2026-09-17: still open, no
+shipped custom-CNI support). Cilium needs to own the CNI (§ Tool
+Boundaries: "network policy, default-deny between workloads, explicit
+allow only"), so Cilium cannot be evaluated on the current cluster at
+all — this was already one of the two named forcing conditions in
+"Cilium — planning session needed" below ("(b) k0s replaces the
+OrbStack cluster"). That trigger fires with this task.
 
-**Context:** Deliberately out of scope for the pipeline wedge — it proves
-the pattern on `deploy/frontend/` first. Once Phase 1-2 are proven, apply
-the same `ref=<sha>` convention here.
-`docs/adr/0001-digest-is-the-trust-boundary.md` frames git commit SHA as
-the digest-equivalent for git-sourced modules.
+**Strict boundary (new, applies to this task and all new work from here
+forward — existing shipped tofu-owned in-cluster resources are a
+separate, already-scoped item, see "Retrofit OpenBao/SPIRE..." below):**
+OpenTofu's job stops the moment the k0s API server is reachable and
+authenticated — VM creation, k0s install/join, and nothing inside the
+cluster. No `helm_release`, no `kubernetes_manifest`, no in-cluster
+provider resource of any kind from `cluster-k0sctl` or any module built
+after it. Everything that configures the cluster once it exists —
+Flux's own bootstrap, every controller, every workload — goes through
+Flux (GitOps reconciliation) or Crossplane (consumer-declared backing
+infra, per its existing "provision" boundary in § Tool Boundaries), not
+another `tofu apply` reaching into the cluster. This sharpens the
+existing "no `kubernetes_*` tofu resources" rule (§ Tool Boundaries,
+already enforced by the `no-kubernetes-tf` hk step) into "no in-cluster
+tofu resources of any kind, `helm_release` included" for everything
+built after this task.
+
+**`secret-openbao`'s home is now open again.** It was slotted for
+`modules/` (CLAUDE.md § Module Structure & Naming, "the deferred
+production `secret-openbao` is the first candidate") on the assumption
+OpenBao's in-cluster deployment stays tofu-owned. If "Retrofit
+OpenBao/SPIRE..." below lands first, OpenBao's Helm release becomes a
+Flux `HelmRelease` — not an OpenTofu module at all, since `modules/` is
+OpenTofu-only (§ Module Structure & Naming) and there's then no tofu
+logic left to package. Do not pre-commit `secret-openbao` to `modules/`
+before that item resolves — see its own "Plan B — deferred follow-ups"
+table row for the update.
+
+**Effort:** L (two new OpenTofu modules, a new VM lifecycle, and a
+`mise.toml`/`environments/local/README.md` bootstrap-flow rewrite —
+`orb start k8s` currently underlies most `mise run local:*` task
+descriptions).
+**Priority:** P2, highest in this bucket — gates the Cilium session and
+transitively the Kyverno module design + the `ci`-namespace privileged
+scalpel (see "Plan B — deferred follow-ups" below).
+**Depends on:** nothing blocking; fully actionable now.
+
+### Retrofit OpenBao/SPIRE off tofu-owned `helm_release` onto Flux `HelmRelease` — P2
+
+**What:** `environments/local/openbao/` and `environments/local/spire/`
+currently `tofu apply` a `helm_release` resource directly against the
+live cluster (see CLAUDE.md's OpenBao and SPIRE rows — both call this
+out explicitly today). Move both to a Flux `HelmRelease` CR instead,
+reconciled the same way `cert-manager`/`trust-manager`/`zot` already
+are, so OpenTofu no longer owns anything inside the cluster.
+
+**Why:** Same strict boundary as the substrate-move task above, applied
+retroactively rather than left as a documented exception. The user
+explicitly chose the retroactive option over "new work only" — this is
+its own tracked item, independent of the VM/k0s substrate move, because
+it can land against the current OrbStack cluster or the new k0s one.
+
+**What does NOT move:** the actual `bao operator init` /
+`raft snapshot restore -force` sequence, the k8s-auth backend setup, and
+Phase C's `sops` key + `flux_sops` role stay exactly as
+`openbao-bootstrap.sh` orchestrates them today — those are one-time
+bridge operations against a running OpenBao, not something Flux
+reconciles continuously. Only the `helm_release` that installs the
+OpenBao/SPIRE charts moves to Flux.
+
+**Disaster-recovery implication to trace before landing (CLAUDE.md §
+Operational Lifecycle Trace):** the raft PVC and its restore path are
+unaffected (still `openbao-bootstrap.sh` + the `snapshots/` bundle) —
+only the chart-install step's owner changes, from `tofu apply` to a
+Flux `Kustomization` reconcile. Confirm a fresh-cluster bootstrap order
+still holds: Flux must be up before the `HelmRelease` can reconcile,
+same as today's `mise run local:openbao:bootstrap` description already
+states ("Needs Flux bootstrapped").
 
 **Effort:** M
 **Priority:** P2
-**Depends on:** nothing blocking — Phase 1 (the mechanical build/scan/gate
-pipeline) and Phase 2 (all of T7a-T7d's Tekton work) both shipped (Recently
-Closed); fully actionable now, just not yet scheduled.
+**Depends on:** nothing blocking; fully actionable now, independent of
+the substrate-move task above.
 
 ### Build reproducibility (SOURCE_DATE_EPOCH, independent rebuild verification) — P3
 
@@ -1005,7 +1088,10 @@ offers to deploy its own SPIRE server, do not use that option.** One
 SPIRE Server per cluster, never two (CLAUDE.md § Tool Boundaries — no two
 tools compete for one job).
 
-**Depends on:** T7c (local Flux — Cilium installs through it). **Priority:** P2
+**Depends on:** T7c (local Flux — Cilium installs through it) AND "Move
+the local dev substrate to an OrbStack Linux VM + k0s" above — OrbStack's
+built-in kubernetes has no custom-CNI support, so this session cannot run
+against the current cluster at all. **Priority:** P2
 · runs after the T7 arc, likely alongside the Kyverno module design.
 
 ### Plan B — deferred follow-ups — P2
@@ -1016,7 +1102,7 @@ own trigger:
 
 | Item | Trigger |
 | --- | --- |
-| **O4 / O5** — extract `modules/secret-openbao/` (`moved` blocks — `deletion_allowed=false` on `sops`/`extra` keys makes `tofu destroy` fail partway) + `ha` / `awskms`\|`transit` unseal / `snapshot_schedule` / `tls_issuer` presets. **ADR 0017**. | `environments/production/openbao/` becomes real planned work (the true 2nd consumer — one consumer is not a module, `modules/README.md`). ADR 0012 stands until then. O4 planning also picks up a dedicated OpenBao Transit `manifest-signing` key for the M3 artifact. Also: O4 should account for T8's shape (one named `vault_policy` resource per consumer — `chains_provenance_sign`, `main.tf` — not a generic `policies` variable, which doesn't exist) when it extracts this unit. |
+| **O4 / O5** — extract `modules/secret-openbao/` (`moved` blocks — `deletion_allowed=false` on `sops`/`extra` keys makes `tofu destroy` fail partway) + `ha` / `awskms`\|`transit` unseal / `snapshot_schedule` / `tls_issuer` presets. **ADR 0017**. **Home now undecided** (2026-09-17) — pending "Retrofit OpenBao/SPIRE off tofu-owned `helm_release`..." above: if OpenBao's chart install moves to a Flux `HelmRelease`, there is no tofu logic left to package as a `modules/` entry (OpenTofu-only, § Module Structure & Naming) — this row's scope and even its `modules/` destination need re-deciding once that item resolves, not before. | `environments/production/openbao/` becomes real planned work (the true 2nd consumer — one consumer is not a module, `modules/README.md`). ADR 0012 stands until then. O4 planning also picks up a dedicated OpenBao Transit `manifest-signing` key for the M3 artifact. Also: O4 should account for T8's shape (one named `vault_policy` resource per consumer — `chains_provenance_sign`, `main.tf` — not a generic `policies` variable, which doesn't exist) when it extracts this unit. |
 | **Crossplane install** (core + `provider-*` + a Composition + its own ADR) | a consumer declares backing infra it does not own (bucket / DB / queue / DNS as a CR) — **not** a directory count. |
 | **G1** — Flux SOPS (`--sops-vault-configmap` + ConfigMap + `spec.decryption`) | a named secret needs SOPS decryption. Plan A's Phase C left the OpenBao side (`sops` key, `flux_sops` role) ready. |
 | **Manifest authorization** (Codex #7) — scoped RBAC for the `frontend` kustomize-controller SA + a defined rendered-manifest review path (image approval ≠ authz of the manifests around it) | own review/session. |
