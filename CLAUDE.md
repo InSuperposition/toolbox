@@ -389,8 +389,18 @@ Config files reference scripts by path — never embed them.
 - A script lives in its concern's `scripts/` directory, never loose at a
   concern root or the repo root (§ File Placement).
 - Named `<domain>-<verb>.sh`, `<domain>` = the tool, not the folder
-  (`openbao-bootstrap.sh`, `attestation-sign.sh`). Stem matches
-  `^[a-z]+(-[a-z]+)+$`.
+  (`openbao-bootstrap.sh`). Stem matches `^[a-z]+(-[a-z]+)+$`.
+  - **Named carve-out: multi-tool operator entrypoints.**
+    `deploy/frontend/scripts/frontend-{build,publish}.sh` and
+    `attestation/scripts/attestation-{sign,verify}.sh` keep their concern
+    prefix instead of a single tool name. Each one orchestrates several
+    pinned tools with no single one dominant — `frontend-build.sh` drives
+    Tekton, `oras`, and CUE; `frontend-publish.sh` drives Timoni and
+    `flux push`; `attestation-sign.sh`/`attestation-verify.sh` drive
+    `cosign`, OpenBao Transit, and a CUE schema check. Forcing one tool
+    into the name would misdescribe the script rather than clarify it.
+    These four are the only `<domain>-<verb>.sh` files where `<domain>`
+    is a concern, not a tool.
 - A `mise` task body stays a single inline command **unless** it has a
   loop, a conditional, error classification, or a multi-step sequence with
   an invariant — only then does it get a script.
