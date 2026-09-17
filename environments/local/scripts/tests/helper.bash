@@ -12,6 +12,8 @@ while [ "$_d" != "/" ] && [ ! -e "$_d/mise.toml" ]; do _d="$(dirname "$_d")"; do
 . "$_d/tests/lib/assert.bash"
 # shellcheck source=/dev/null
 . "$_d/tests/lib/registry.bash"
+# shellcheck source=/dev/null
+. "$_d/tests/lib/helm_repo.bash"
 unset _d
 
 # fake_mise_export <outdir> — a stub `mise` on PATH. openbao-bootstrap.sh
