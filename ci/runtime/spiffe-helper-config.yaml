@@ -1,15 +1,13 @@
-# The `spiffe-helper` config the `fetch-svid` step loads via `-config`
-# (SPIRE Phase 1 follow-up, TODOS.md "Wire buildkit-build's real
-# Task..."). `daemon_mode = false` — fetch once and exit — is correct
-# for a Tekton step: TaskRun steps run sequentially in one pod
-# lifetime, well under a fresh SVID's default TTL, so no
-# rotation/signal-reload machinery is needed the way a long-running
-# service would need it.
+# The `spiffe-helper` config the `fetch-svid` step loads via `-config`.
+# `daemon_mode = false` — fetch once and exit — is correct for a Tekton
+# step: TaskRun steps run sequentially in one pod lifetime, well under a
+# fresh SVID's default TTL, so no rotation/signal-reload machinery is
+# needed the way a long-running service would need it.
 #
 # INTERIM + LOCAL-SPECIFIC, same posture as buildkitd-mirror.yaml:
 # `agent_address` is this dev cluster's spire-agent Workload API socket
 # (`environments/local/spire/`, mounted into the step via a hostPath
-# volume — the `spiffe-csi-driver` isn't enabled yet, ADR 0026). A
+# volume — the `spiffe-csi-driver` isn't enabled yet). A
 # production pipeline would bind its own config.
 apiVersion: v1
 kind: ConfigMap

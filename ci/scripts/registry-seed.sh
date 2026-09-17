@@ -7,20 +7,20 @@ set -euo pipefail
 # frontend and each `FROM <ref>@sha256:<digest>` — into a local zot, so an
 # in-cluster BuildKit build never has to reach docker.io / gcr.io.
 #
-# Why (TODOS.md T7b1-followup, /investigate 2026-09-08): this OrbStack cluster
-# hands pods a working AF_INET6 stack + AAAA DNS but no routable IPv6 egress,
+# Why: this OrbStack cluster hands pods a working AF_INET6 stack + AAAA DNS
+# but no routable IPv6 egress,
 # so Go registry clients (buildkit/containerd, and zot's own regclient) can
 # pick an unreachable AAAA and hard-fail ~50% of external image fetches. This
 # script runs on the HOST, where IPv4 works, and seeds the images once; the
 # build Task's buildkitd.toml then mirrors docker.io + gcr.io to zot.
 #
-# Consumer-agnostic (rules/boundary-ci.yml): <dockerfile> is an argument, never
+# Consumer-agnostic: <dockerfile> is an argument, never
 # a literal deploy/ path. `oras cp` is idempotent (skips manifests already
 # present) and digest-preserving (the seeded manifest keeps its sha256, so the
 # Dockerfile's `@sha256:` pins still resolve through the mirror; live-verified
 # against this script's own three real pins). `--to-ca-file "$ZOT_CA"` trusts
-# zot's HTTPS listener (T7c R1b-ii-c) — `$ZOT_CA` defaults to the SAME file
-# `mise run local:zot:trust` (T7c R1b-ii-b) already writes for the node
+# zot's HTTPS listener — `$ZOT_CA` defaults to the SAME file
+# `mise run local:zot:trust` already writes for the node
 # dockerd, no second fetch. Not `crane`: `crane` has no CA-file override at
 # all on this darwin/Go toolchain (only a global `--insecure`); `oras`'s
 # `--to-ca-file`/`--from-ca-file` are independently scoped per endpoint

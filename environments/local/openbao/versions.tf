@@ -1,10 +1,10 @@
 # Exact-pin, no ranges — matches this repo's mise.toml stance (zero
 # `latest`, concrete versions everywhere).
 #
-# The in-cluster local OpenBao (docs/adr/0016). Phase A is the
-# `helm_release`; Phase C is the `provider "vault"` block + the `vault_*`
-# API config, applied by the bootstrap bridge after the key-preserving
-# snapshot restore.
+# The in-cluster local OpenBao — a single-replica, OpenTofu-owned raft
+# StatefulSet. Phase A is the `helm_release`; Phase C is the
+# `provider "vault"` block + the `vault_*` API config, applied by the
+# bootstrap bridge after the key-preserving snapshot restore.
 
 terraform {
   required_version = "= 1.12.6" # matches mise.toml's pinned opentofu version

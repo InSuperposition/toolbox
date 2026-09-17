@@ -12,7 +12,7 @@
 #
 # Pins: `spec.distribution.version` = the Flux release; `spec.distribution.artifact`
 # = the immutable manifests digest (a moving `:latest` would silently change
-# the controller manifests — ADR 0001). Bump via environments/local/flux/flux-operator.lock.
+# the controller manifests). Bump via environments/local/flux/flux-operator.lock.
 #
 # Components: source + kustomize + helm only. helm-controller is here for the
 # operator's own HelmRelease (flux-operator-helmrelease.yaml) — the operator

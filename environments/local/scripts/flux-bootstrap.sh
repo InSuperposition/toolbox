@@ -9,9 +9,9 @@ set -euo pipefail
 #
 # Steps: precondition (cluster reachable) -> cosign-verify the PINNED chart
 # digest -> `helm upgrade --install` that digest -> wait operator + CRD ->
-# apply the FluxInstance -> wait Ready. The digest IS the trust boundary
-# (ADR 0001); a tag is never installed, and there is NO
-# `--insecure-ignore-tlog` fallback.
+# apply the FluxInstance -> wait Ready. The digest IS the trust boundary:
+# a tag is never installed, and there is NO `--insecure-ignore-tlog`
+# fallback.
 #
 # Test seams (environments/local/scripts/tests/flux-bootstrap.bats):
 #   TOOLBOX_FLUX_LOCK          override the lock-file path

@@ -9,7 +9,7 @@
 # the self-heal — and (b) make the object that configures the reconciler a
 # product of that reconciler. The bridge owns it; git owns everything below.
 #
-# `zot-flux-ca` (T7c R1b-ii-c): a CA-ONLY Secret for `OCIRepository
+# `zot-flux-ca`: a CA-ONLY Secret for `OCIRepository
 # frontend`'s `certSecretRef` (source-controller needs a Secret, not a
 # ConfigMap; trust-manager only emits ConfigMaps without widening its RBAC
 # via `secretTargets` — "grant read access to all secrets in the cluster"
@@ -20,10 +20,10 @@
 # IN-CLUSTER by cert-manager and has never left the `toolbox-dev-ca`
 # Secret, never touched git or tofu state), not a live cluster fetch: no
 # new script, no RBAC widening. Trade-off, same one already accepted for
-# the Kyverno admission controller's CA mount (ADR 0022): a committed copy
+# the Kyverno admission controller's CA mount: a committed copy
 # goes stale on a KEY rotation, not a same-key renewal — moot today given
-# `toolbox-dev-ca`'s `duration: 87600h` (10y). See TODOS.md "Dev CA
-# rotation runbook" for the real answer if that stops being true.
+# `toolbox-dev-ca`'s `duration: 87600h` (10y). A rotation-aware fetch
+# mechanism is deferred until that stops being true.
 # `disableNameSuffixHash` keeps the name stable for `certSecretRef` to
 # reference deterministically.
 apiVersion: kustomize.config.k8s.io/v1beta1

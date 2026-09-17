@@ -1,32 +1,19 @@
-# T7a spike-proven build; T7b1 rewired for the Pipeline + local zot.
+# Builds the image with rootless BuildKit and pushes it to the in-cluster zot registry.
 #
-# Consumer-agnostic: params only, never names cv_frontend (ADR 0014,
-# rules/boundary-ci.yml). The per-consumer values are bound by the
-# PipelineRun in deploy/<consumer>/ (a Timoni module — T7b3).
+# Consumer-agnostic: params only, never names cv_frontend. The per-consumer
+# values are bound by the PipelineRun in deploy/<consumer>/ (a Timoni
+# module).
 #
-# No embedded shell (CLAUDE.md § Constraints): every step is a pinned
-# `command` + `args`, never a `script:` block. Three steps — a privileged
-# `disable-ipv6` `sysctl` (see below), the rootless `buildctl-daemonless.sh`,
-# and `extract-digest` (below).
+# No embedded shell: every step is a pinned `command` + `args`, never a
+# `script:` block. Three steps — a privileged `disable-ipv6` `sysctl` (see
+# below), the rootless `buildctl-daemonless.sh`, and `extract-digest`
+# (below).
 #
 #   * The image is pushed as `$(params.IMAGE):$(params.APP_REVISION)` — the
 #     app's git SHA as a deterministic, meaningful tag; the tag stays a
-#     convenience alias (ADR 0001), never the addressing mechanism a
+#     convenience alias, never the addressing mechanism a
 #     downstream Task relies on.
-#   * **`IMAGE_DIGEST` result (TODOS.md "Run-scoped build digest identity",
-#     P2 — reverses the original T7b OPEN-1 "no Tekton result" call,
-#     `~/.claude/plans/t7b-pipeline-recut.md:183`).** That call was right
-#     for its own scope: at the time the digest was only ever needed once,
-#     post-hoc, by `attestation-sign.sh` outside the pipeline, and
-#     `enable-api-fields: alpha` wasn't worth spending just for that. Two
-#     things changed: `provenance-sign` (T8) now needs correct digest
-#     addressing INSIDE the pipeline (mutable-tag re-resolution lets a
-#     concurrent/rerun PipelineRun attach evidence to the wrong image —
-#     sequential Tasks within one run don't serialize across runs); and
-#     `enable-api-fields: alpha` is already flipped on repo-wide for T8's
-#     `stdoutConfig` (`environments/local/scripts/tekton-install.sh`) — the
-#     cost the original decision avoided is already sunk, paid for a
-#     different reason. `buildctl --metadata-file` writes
+#   * **`IMAGE_DIGEST` result**: `buildctl --metadata-file` writes
 #     `containerimage.digest` (the pushed INDEX digest, confirmed via
 #     BuildKit's own docs) to `/tekton/home/build-metadata.json` — a
 #     Task-local path, NOT a workspace (this Task has no `shared`
@@ -34,19 +21,19 @@
 #     already-proven-shared-across-this-Task's-steps directory, the same
 #     one the `build` step's own `HOME` env already points at). The
 #     `extract-digest` step reads it and validates + `stdoutConfig`s the
-#     digest to the `IMAGE_DIGEST` result — same `jq` + `stdoutConfig`
-#     pattern T8's `provenance-sign.yaml` already proved live, no new
-#     mechanism. Downstream Tasks (`scan-attach`, `provenance-sign`)
-#     address the image by THIS captured digest, never a re-resolved tag.
+#     digest to the `IMAGE_DIGEST` result. Downstream Tasks (`scan-attach`,
+#     `provenance-sign`) address the image by THIS captured digest, never a
+#     re-resolved tag — a mutable-tag re-resolution would let a
+#     concurrent/rerun PipelineRun attach evidence to, or sign provenance
+#     for, the wrong image.
 #   * `registry.insecure=$(params.REGISTRY_INSECURE)` — governs the OUTPUT
 #     (push) leg only; the zot MIRROR entry's own trust is set separately in
-#     `buildkitd.toml` (`ci/runtime/buildkitd-mirror.yaml`). T7c R1b-ii-c:
-#     zot is HTTPS with a cert-manager dev CA, so the default is `false` and
-#     that same buildkitd.toml `ca = [...]` entry covers both directions
-#     (buildkitd resolves push and mirror-pull trust by hostname, not by
-#     direction).
-#   * zot now requires a valid SPIFFE client cert to push (SPIRE Phase 1
-#     PR 3, ADR 0025/0026 — no longer credential-free). The `fetch-svid`
+#     `buildkitd.toml` (`ci/runtime/buildkitd-mirror.yaml`). zot is HTTPS
+#     with a cert-manager dev CA, so the default is `false` and that same
+#     buildkitd.toml `ca = [...]` entry covers both directions (buildkitd
+#     resolves push and mirror-pull trust by hostname, not by direction).
+#   * zot now requires a valid SPIFFE client cert to push (mTLS enforced —
+#     no longer credential-free). The `fetch-svid`
 #     step below fetches a fresh SVID from the local node's spire-agent
 #     Workload API (a hostPath socket — the `spiffe-csi-driver` isn't
 #     enabled yet) via the pinned `spiffe-helper` binary, writing it to a
@@ -57,11 +44,9 @@
 #   * The build CONTEXT is the `source` workspace (the app checkout, staged
 #     by the `git-clone` Task). The DOCKERFILE is `$(params.DOCKERFILE_DIR)`
 #     within the `build-defs` workspace (a separate toolbox checkout — the
-#     two-repo split, ADR 0014). Both workspaces are subPaths of one
+#     two-repo split). Both workspaces are subPaths of one
 #     `volumeClaimTemplate` PVC in the Pipeline (ci/README.md § Workspaces).
-#   * `attest:provenance` (T8, TODOS.md — HOTFIX 2026-09-14, was missing
-#     from the original merge despite provenance-sign.yaml's own comments
-#     assuming it existed) makes this push a multi-manifest IMAGE INDEX:
+#   * `attest:provenance` makes this push a multi-manifest IMAGE INDEX:
 #     the platform manifest plus an UNSIGNED attestation manifest whose
 #     OCI 1.1 `subject` points at the PLATFORM manifest specifically, not
 #     the index (BuildKit's own convention — verified live). The INDEX is
@@ -70,8 +55,9 @@
 #     happens in provenance-sign.yaml's own first two steps, not here.
 #
 # The `build` step's posture is the spike-proven minimum for rootless
-# BuildKit on `orb start k8s` — NOT privileged, no SYS_ADMIN (TODOS.md T7a,
-# ci/README.md § Residual privilege surface). The separate `disable-ipv6`
+# BuildKit on `orb start k8s` — NOT privileged, no SYS_ADMIN (see
+# ci/README.md § Residual privilege surface for the full surface). The
+# separate `disable-ipv6`
 # step 0 IS privileged; it runs `sysctl` and exits before the build starts.
 # Do NOT tighten a `build` field without re-running a real build — each was
 # found by iteration:
@@ -101,7 +87,7 @@ spec:
         captured from BuildKit's own `--metadata-file` output at push
         time — not a later `oras resolve` of the mutable tag. This is the
         one run-scoped identity every downstream Task addresses the image
-        by (TODOS.md "Run-scoped build digest identity").
+        by.
   params:
     - name: IMAGE
       type: string
@@ -117,13 +103,13 @@ spec:
       type: string
       description: >-
         Public HTTPS git URL of the app — threaded into the SLSA provenance
-        attestation's vcs:source/vcs:revision build opts (T8, TODOS.md) so
-        the attestation carries the actual source identity, not just the
-        Dockerfile's embedded bytes.
+        attestation's vcs:source/vcs:revision build opts so the attestation
+        carries the actual source identity, not just the Dockerfile's
+        embedded bytes.
     - name: PLATFORM
       type: string
       default: linux/arm64
-      description: Single target platform (ADR 0008 — arm64 only for now).
+      description: Single target platform (arm64 only for now).
     - name: DOCKERFILE
       type: string
       default: Dockerfile
@@ -144,8 +130,8 @@ spec:
       type: string
       default: "false"
       description: >-
-        Passed to buildctl as registry.insecure. "false" — the steady state
-        (T7c R1b-ii-c) — trusts zot's HTTPS listener via `ca-bundle` +
+        Passed to buildctl as registry.insecure. "false" — the steady
+        state — trusts zot's HTTPS listener via `ca-bundle` +
         `buildkitd.toml`'s `ca = [...]` entry; "true" is for a genuinely
         insecure registry, not this one.
     - name: BUILDKITD_FLAGS
@@ -153,7 +139,7 @@ spec:
       default: "--oci-worker-no-process-sandbox"
       description: >-
         Read by buildctl-daemonless.sh. The default is REQUIRED on orb —
-        an empty value makes the build fail to solve (TODOS.md T7a).
+        an empty value makes the build fail to solve.
   workspaces:
     - name: source
       description: The build context — an app checkout (the git-clone Task's app/ subdir).
@@ -161,27 +147,26 @@ spec:
       description: >-
         A separate checkout holding the Dockerfile (toolbox owns
         deploy/<consumer>/Dockerfile; the app owns the context). The
-        two-repo split from ADR 0014.
+        two-repo split.
     - name: buildkitd-config
       mountPath: /cfg
       description: >-
         A ConfigMap with a `buildkitd.toml` key — passed to buildkitd via
         `--config`. Used for the registry mirror that keeps the build off
-        external registries (ci/runtime/buildkitd-mirror.yaml; TODOS.md
-        T7b1-followup). Bound by the PipelineRun.
+        external registries (ci/runtime/buildkitd-mirror.yaml). Bound by
+        the PipelineRun.
     - name: ca-bundle
       mountPath: /ca
       description: >-
         A ConfigMap with a `ca-certificates.crt` key — the merged system +
-        dev-CA bundle (trust-manager's `toolbox-ca-bundle`, T7c R1b-ii-a).
+        dev-CA bundle (trust-manager's `toolbox-ca-bundle`).
         `buildkitd.toml`'s zot entry points its `ca = [...]` field at this
         mount. Bound by the PipelineRun.
   steps:
     # Step 0: this OrbStack cluster gives pods a working AF_INET6 stack +
     # AAAA DNS but no routable v6 egress — buildkitd's registry resolver can
-    # pick an unreachable AAAA and hard-fail (`/investigate` 2026-09-08,
-    # TODOS.md T7b1-followup). Disabling v6 in the pod netns (DNS/AAAA
-    # untouched) forces v4. `sysctl` only, no `script:`. With the mirror
+    # pick an unreachable AAAA and hard-fail. Disabling v6 in the pod netns
+    # (DNS/AAAA untouched) forces v4. `sysctl` only, no `script:`. With the mirror
     # config below the build only talks to the in-cluster zot anyway, but
     # this keeps it deterministic if the mirror is ever unbound. `ci` ns is
     # PSA `privileged`; this is the only privileged container. A v4-only
@@ -198,7 +183,7 @@ spec:
         - "net.ipv6.conf.default.disable_ipv6=1"
         - "net.ipv6.conf.lo.disable_ipv6=1"
     # Fetches this Task's SPIFFE SVID before the build runs — zot now
-    # requires it to push (SPIRE Phase 1 PR 3). No embedded shell: the
+    # requires it to push (mTLS enforced). No embedded shell: the
     # pinned `spiffe-helper` binary is invoked directly, same as every
     # other step in this Task. runAsUser MUST match the `build` step's
     # (1000) — live-verified: spiffe-helper's key file is 0600, owned by
@@ -272,7 +257,7 @@ spec:
   # Task-owned infra mounts, not consumer-parameterized (unlike the
   # `workspaces` above) — same class as `disable-ipv6`'s hardcoded
   # sysctl values. spire-agent's Workload API socket is a hostPath since
-  # the spiffe-csi-driver isn't enabled yet (ADR 0026); the ConfigMap
+  # the spiffe-csi-driver isn't enabled yet; the ConfigMap
   # and emptyDir are `ci/`-owned, fixed, referenced by name directly
   # (same footing as `provenance-signer-sa.yaml`, not per-consumer data).
   volumes:

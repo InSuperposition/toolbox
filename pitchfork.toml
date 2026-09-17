@@ -1,9 +1,8 @@
 # The local OpenBao is NOT a pitchfork daemon. It runs in-cluster as a
-# tofu-owned raft StatefulSet (ADR 0016 — supersedes the ADR 0010
-# machine-global `bao server` daemon). `mise run local:openbao:bootstrap`
-# brings it up in the OrbStack cluster. Any machine that still has the old
+# tofu-owned raft StatefulSet. `mise run local:openbao:bootstrap` brings it
+# up in the OrbStack cluster. Any machine that still has an old
 # `global/openbao` pitchfork daemon registered removes it once, out of band:
 #   pitchfork stop global/openbao && pitchfork daemons remove --global openbao
 
-# No daemons declared today — the cv_frontend demo daemon (ADR 0009) was
-# retired (ADR 0023); delivery is in-cluster only (Plan B M3, ADR 0019).
+# No daemons declared today — delivery of cv_frontend is in-cluster only,
+# not through a pitchfork-supervised process.

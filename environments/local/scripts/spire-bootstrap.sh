@@ -2,14 +2,15 @@
 set -euo pipefail
 
 # environments/local/scripts/spire-bootstrap.sh — the ONE-TIME bridge that
-# stands up SPIRE Server + Agent in the OrbStack cluster (SPIRE Phase 1,
-# TODOS.md; docs/adr/0025, docs/adr/0026).
+# stands up SPIRE Server + Agent in the OrbStack cluster, upstream-signed
+# by OpenBao's `pki` mount, with declarative registration via the chart's
+# own ClusterSPIFFEID CRD.
 #
 # Much simpler than openbao-bootstrap.sh — no key-preserving restore.
-# PR 1's Operational Lifecycle Trace already established SPIRE's CA has
-# no preserve-forever invariant (nothing external is pinned against its
-# intermediate cert the way attestation/cosign-approval.pub is pinned
-# against approval-key): preconditions -> confirm OpenBao is up (a hard
+# This bridge's own Operational Lifecycle Trace already established
+# SPIRE's CA has no preserve-forever invariant (nothing external is pinned
+# against its intermediate cert the way attestation/cosign-approval.pub is
+# pinned against approval-key): preconditions -> confirm OpenBao is up (a hard
 # runtime dependency, not just a tofu one) -> namespace -> verify the
 # pinned charts -> tofu apply -> wait for spire-server -> assert the
 # OpenBao round-trip actually completed -> summary.

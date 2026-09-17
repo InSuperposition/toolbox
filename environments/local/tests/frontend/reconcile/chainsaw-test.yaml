@@ -56,7 +56,7 @@ spec:
                 namespace: flux-system
               spec:
                 # runtime order is not ship order — the workload must not
-                # reconcile before K1's admission webhook is registered
+                # reconcile before the Kyverno admission webhook is registered
                 (dependsOn[?name == 'frontend-ns'] | length(@)): 1
                 (dependsOn[?name == 'kyverno-policy'] | length(@)): 1
                 wait: false

@@ -2,8 +2,7 @@
 
 # attestation-verify.sh — the consumer-side gate, the actual trust boundary.
 # It never touches OpenBao, so it is fully testable with a local zot + a
-# throwaway cosign key. Covers the docs/designs/digest-as-source-of-truth.md
-# § Architecture verify path and its failure modes.
+# throwaway cosign key. Covers the verify path and its failure modes.
 
 setup() {
 	load helper
@@ -14,9 +13,8 @@ setup() {
 	export TOOLBOX_APPROVAL_PUBKEY="$FIX/cosign.pub"
 	# A real OCI index — attestation-sign.sh (used by sign()/run_sign below
 	# to CREATE the fixtures this file verifies) resolves a platform digest
-	# via `oras resolve --platform` before anything else (Kyverno amd64-index
-	# admission fix, `/investigate` 2026-09-15); a bare `make_image` artifact
-	# has no image config and that call errors.
+	# via `oras resolve --platform` before anything else; a bare
+	# `make_image` artifact has no image config and that call errors.
 	IMAGE="$(make_multiplatform_image "$FIX")"
 	PLATFORM_REF="$(oras resolve --plain-http --platform=linux/arm64 "$IMAGE")"
 	PLATFORM_REF="${IMAGE%@*}@${PLATFORM_REF}"
@@ -88,7 +86,7 @@ sign() { # <verdict> -> echoes the attestation digest
 
 @test "wrong predicate type: a validly-signed non-approval attestation is refused (exit 1)" {
 	# sign the image with a DIFFERENT predicate type — cosign's --type check
-	# must still catch it (Codex: don't lose the predicate-type binding).
+	# must still catch it and refuse the predicate-type mismatch.
 	jq -n --arg d "sha256:${IMAGE##*@sha256:}" \
 		'{schemaVersion:1, digest:$d, verdict:"approved", reason:"x",
 		  approvedBy:"bats", approvedAt:"2026-01-01T00:00:00Z",

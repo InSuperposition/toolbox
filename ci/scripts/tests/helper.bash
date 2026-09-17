@@ -8,7 +8,7 @@
 # GitHub-runner failure, not a skip). Real end-to-end coverage is the hk
 # `chainsaw` step itself (`./ci/scripts/chainsaw-test.sh` — skips in CI on
 # the missing orbstack context, runs the live cluster locally) and an
-# operator `tkn pipeline start` (recorded in TODOS.md T7b1).
+# operator running `tkn pipeline start`.
 
 # --- load the shared test lib (per-dir loader, no BATS_LIB_PATH) --------
 _d="$BATS_TEST_DIRNAME"

@@ -1,18 +1,18 @@
-# cert-manager — in-cluster PKI for the local dev cluster (docs/adr/0016).
+# cert-manager — in-cluster PKI for the local dev cluster.
 # Issues the TLS server cert the in-cluster OpenBao listener needs
 # (environments/local/openbao/); TLS on a ClusterIP listener is not
 # optional.
 #
 # Reconciled by helm-controller (already in FluxInstance.spec.components) —
 # cert-manager is a HELPER component, not the secret store, so unlike OpenBao
-# (which stays OpenTofu-owned substrate, ADR 0015 / plan § B5) it is fine
+# (which stays OpenTofu-owned substrate) it is fine
 # behind the GitOps loop.
 #
 # PINNING: the OCIRepository pins `ref.digest` (immutable, content
-# addressed — ADR 0001). cert-manager charts are signed with a STATIC cosign
+# addressed). cert-manager charts are signed with a STATIC cosign
 # key, not keyless, so there is NO `spec.verify` block (it would need a
 # committed third-party key + a Secret for no gain over the digest — see
-# cert-manager.lock, decision d8e2b203). All four component images are
+# cert-manager.lock). All four component images are
 # digest-pinned via chart values.
 #
 # CRDs: installed by the chart (`crds.enabled: true`, `crds.keep: true` so a

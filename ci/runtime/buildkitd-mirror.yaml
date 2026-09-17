@@ -1,29 +1,27 @@
 # The `buildkitd.toml` the build Task loads via `--config`. It mirrors
 # docker.io + gcr.io to the local zot so the in-cluster BuildKit build never
-# reaches an external registry (TODOS.md T7b1-followup, /investigate
-# 2026-09-08 — this OrbStack cluster's pods have a working IPv6 stack + AAAA
-# DNS but no routable v6 egress, so external registry fetches fail ~50% of
-# the time). `mise run frontend:seed` populates zot from the host first.
+# reaches an external registry — this OrbStack cluster's pods have a
+# working IPv6 stack + AAAA DNS but no routable v6 egress, so external
+# registry fetches fail ~50% of the time. `mise run frontend:seed`
+# populates zot from the host first.
 #
-# The zot entry's `ca` path (`/ca/ca-certificates.crt`, T7c R1b-ii-c) is
+# The zot entry's `ca` path (`/ca/ca-certificates.crt`) is
 # NOT baked into this ConfigMap — it's the `ca-bundle` workspace, bound by
 # the PipelineRun to the trust-manager `toolbox-ca-bundle` ConfigMap
-# (already reconciled into ns `ci`, T7c R1b-ii-a/ADR 0022) so a CA
-# rotation flows through without touching this file.
+# (already reconciled into ns `ci`) so a CA rotation flows through
+# without touching this file.
 #
-# The zot entry's `keypair` (SPIRE Phase 1 follow-up, TODOS.md "Wire
-# buildkit-build's real Task...") IS baked in here, unlike `ca` above —
-# the path is a build-time constant (the `fetch-svid` step in
-# buildkit-build.yaml always writes to this same emptyDir mount), not
-# something that rotates independently of a Task/ConfigMap change the
-# way the CA does. zot now requires this cert to push (SPIRE Phase 1
-# PR 3, ADR 0025/0026).
+# The zot entry's `keypair` IS baked in here, unlike `ca` above — the path
+# is a build-time constant (the `fetch-svid` step in buildkit-build.yaml
+# always writes to this same emptyDir mount), not something that rotates
+# independently of a Task/ConfigMap change the way the CA does. zot now
+# requires this cert to push (mTLS enforced).
 #
 # INTERIM + LOCAL-SPECIFIC. The mirror target (`zot.zot.svc.cluster.local:5000`)
 # is this dev cluster's zot; a production pipeline binds its own ConfigMap to
-# the build Task's `buildkitd-config` workspace. Once the Cilium module's
-# datapath is settled (Cilium planning session, TODOS.md), a v4-only datapath
-# makes the mirror an optimization rather than a correctness requirement.
+# the build Task's `buildkitd-config` workspace. Once Cilium's networking
+# module lands with a v4-only datapath, the mirror becomes an optimization
+# rather than a correctness requirement.
 apiVersion: v1
 kind: ConfigMap
 metadata:

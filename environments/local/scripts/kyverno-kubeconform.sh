@@ -2,9 +2,9 @@
 set -euo pipefail
 
 # hk `kubeconform-kyverno` step for environments/local/kyverno/ — static
-# schema validation of the ImageValidatingPolicy (Plan B K1, docs/adr/0020)
-# and the generated approval-pubkey ConfigMap, reconciled by the
-# `kyverno-policy` Flux Kustomization.
+# schema validation of the ImageValidatingPolicy that gates admission on
+# the cv_frontend approval attestation, and the generated approval-pubkey
+# ConfigMap, reconciled by the `kyverno-policy` Flux Kustomization.
 #
 # `kustomize build` first: the configMapGenerator reads
 # attestation/cosign-approval.pub in place (one authored copy, no vendored

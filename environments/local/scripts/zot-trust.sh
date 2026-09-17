@@ -1,32 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# T7c R1b-ii-b — host-side CA trust for the (future HTTPS-only, R1b-ii-c)
-# zot registry. Two independent trust stores, both derived from the SAME
-# live `toolbox-dev-ca` Secret (never a stored copy of the key — the
-# Secret's `ca.crt` only):
+# Host-side CA trust for the zot registry, which serves over HTTPS with
+# mTLS required for push. Two independent trust stores, both derived from
+# the SAME live `toolbox-dev-ca` Secret (never a stored copy of the key —
+# the Secret's `ca.crt` only):
 #
 #   1. `~/.docker/certs.d/<host:port>/ca.crt` — the OrbStack node's dockerd
-#      trust dir (a symlink to `/mnt/mac/Users/<user>/.docker/certs.d`, R1a
-#      spike finding). Read by IN-CLUSTER image pulls of the zot registry
-#      itself — a plain persistent mac file, no privileged pod, no `orb
-#      restart` (`orbstack-node-docker-certs-d-symlink`).
+#      trust dir (a symlink to `/mnt/mac/Users/<user>/.docker/certs.d`,
+#      confirmed by testing directly on a live OrbStack node). Read by
+#      IN-CLUSTER image pulls of the zot registry itself — a plain
+#      persistent mac file, no privileged pod, no `orb restart`
+#      (`orbstack-node-docker-certs-d-symlink`).
 #   2. `$XDG_STATE_HOME/toolbox/zot/zot-bundle.crt` — a concatenation of the
 #      macOS system root snapshot (`/etc/ssl/cert.pem`) + the dev CA, for
 #      HOST CLI calls (`mise.toml [env] SSL_CERT_FILE`). `curl` honors this
 #      env var directly; several pinned Go tools (`flux push`,
 #      `cosign` without `--registry-cacert`) do NOT on this darwin
-#      toolchain — see the R1b-ii-b honor-matrix in
-#      `~/.claude/plans/t7c-distribution-t7d.md`. Those need a per-call
-#      `--ca-file`/`--cacert`/`--registry-cacert` flag instead (R1b-ii-c
-#      wires it per consumer); this script only produces the trust
+#      toolchain — Go's x509 verifier reads only the system keychain on
+#      darwin and ignores `SSL_CERT_FILE` entirely. Those tools need a
+#      per-call `--ca-file`/`--cacert`/`--registry-cacert` flag wired in at
+#      each call site instead; this script only produces the trust
 #      material, not the per-tool flags.
 #
 # Both writes are idempotent (regenerated from source-of-truth every run,
 # never appended-to) and PEM-validated before an atomic same-directory
 # `mv`, so a failed run never leaves a half-written or corrupt file behind.
 # Source is the CLUSTER (`kubectl get secret`), not `$OPENBAO_STATE_DIR` —
-# this script has no OpenBao dependency (Codex #8).
+# this script produces host/node trust material only and never reads or
+# writes any OpenBao state.
 
 ZOT_HOST="${TOOLBOX_ZOT_HOST:-zot.zot.svc.cluster.local:5000}"
 DOCKER_CERTS_DIR="${TOOLBOX_ZOT_DOCKER_CERTS_D:-$HOME/.docker/certs.d}/$ZOT_HOST"

@@ -1,11 +1,16 @@
-# SPIRE Server + Agent in-cluster (SPIRE Phase 1, TODOS.md; docs/adr/0026).
+# SPIRE Server + Agent in-cluster — the first stage of this repo's
+# workload-identity rollout, shipped as one tofu-owned Helm release rather
+# than splitting Server (tofu) from Agent (Flux).
 #
-# `spire-crds` installs first (CRDs the spire-server chart's own
-# controller-manager subcomponent would need — not enabled in this PR,
-# but the CRDs are a hard prerequisite of the umbrella chart regardless).
+# `spire-crds` installs first — CRDs the spire-server chart's own
+# controller-manager subcomponent needs (enabled below, for declarative
+# ClusterSPIFFEID registration) and a hard prerequisite of the umbrella
+# chart regardless.
 # `spire` (the umbrella chart) then installs spire-server + spire-agent
-# as ONE release — see docs/adr/0026 for why they are not split across
-# tofu/Flux.
+# as ONE release — splitting the Agent into a Flux-reconciled path would
+# mean re-implementing the chart's own RBAC/ServiceAccount/DaemonSet shape
+# for zero isolation benefit, since the Agent holds no durable secret a
+# reconcile loop could threaten.
 #
 # NOT applied by `mise run check` — the bootstrap bridge
 # (../scripts/spire-bootstrap.sh) is the only thing that applies it
@@ -33,7 +38,8 @@ locals {
 
       # EXPLICIT — the chart's own fullname-derived default for release
       # name "spire" computes to "spire-spire-server", not "spire-server".
-      # PR 1's OpenBao role already binds the literal name "spire-server"
+      # The OpenBao k8s-auth role for spire-server already binds the
+      # literal name "spire-server"
       # in namespace "spire"; this must match exactly.
       serviceAccount = {
         name = "spire-server"
@@ -63,8 +69,8 @@ locals {
             k8sAuthMountPoint = "kubernetes"   # matches openbao's vault_auth_backend.kubernetes.path
             k8sAuthRoleName   = "spire_server" # matches openbao's vault_kubernetes_auth_backend_role.spire_server
 
-            # EXPLICIT — live-verified 2026-09-15: the chart's own default
-            # ("vault") does NOT match PR 1's OpenBao role, which sets
+            # Set explicitly: the chart's own default ("vault") does NOT
+            # match the OpenBao k8s-auth role's own audience, which sets
             # `audience = var.openbao_endpoint` (the same convention
             # flux_sops/chains_provenance already use). A mismatch here
             # is a 403 "invalid audience (aud) claim" at spire-server
@@ -76,12 +82,12 @@ locals {
         }
       }
 
-      # PR 3 (TODOS.md "zot registry auth"): publishes spire-server's
+      # Publishes spire-server's
       # own trust bundle cross-namespace into ns "zot" — zot's mTLS
       # listener verifies client SVIDs against this. RBAC (Role/
       # RoleBinding) follows the SAME namespace value automatically
       # (spire-server.bundle-namespace-bundlepublisher helper, confirmed
-      # no divergence risk during PR 2's research). format=pem (not the
+      # no divergence risk during this rollout's own research). format=pem (not the
       # chart default "spiffe") so the published key is bundle.crt,
       # plain PEM.
       bundlePublisher = {
@@ -92,8 +98,8 @@ locals {
         }
       }
 
-      # PR 3: flipped back to true (PR 2 disabled this as negative space
-      # — "no consumer yet"). The `ci` namespace's default ServiceAccount
+      # Flipped back to true (an earlier pass disabled this as negative
+      # space — "no consumer yet"). The `ci` namespace's default ServiceAccount
       # (what buildkit-build/scan-attach actually run as) is now a real
       # consumer needing a registration entry. Rather than hand-roll an
       # imperative `spire-server entry create` script, this repo's
@@ -112,22 +118,21 @@ locals {
     "spire-agent" = {
       enabled = true
 
-      # EXPLICIT — live-verified 2026-09-15: the agent's own bootstrap
-      # trust file format (default "spiffe") is an INDEPENDENT setting
-      # from spire-server.bundlePublisher.k8sConfigMap.format above, but
-      # both read the SAME ConfigMap (bundleConfigMap: spire-bundle on
-      # both sides, by chart default) — a mismatch here means the agent
-      # looks for a key ("bundle.spiffe") the server never writes
-      # ("bundle.crt", format=pem), and the agent hangs retrying
-      # "could not parse trust bundle: ... no such file or directory"
-      # forever.
+      # Set explicitly: the agent's own bootstrap trust file format
+      # (default "spiffe") is an INDEPENDENT setting from
+      # spire-server.bundlePublisher.k8sConfigMap.format above, but both
+      # read the SAME ConfigMap (bundleConfigMap: spire-bundle on both
+      # sides, by chart default) — a mismatch here means the agent looks
+      # for a key ("bundle.spiffe") the server never writes ("bundle.crt",
+      # format=pem), and the agent hangs retrying "could not parse trust
+      # bundle: ... no such file or directory" forever.
       trustBundleFormat = "pem"
     }
 
     # Negative space — everything else this umbrella chart can enable,
-    # off. No controller-manager (no ClusterSPIFFEID reconciliation in
-    # this PR), no CSI driver, no OIDC discovery, no UI, no SPIKE, no
-    # nested/upstream federation.
+    # off: no CSI driver, no OIDC discovery, no UI, no SPIKE, no
+    # nested/upstream federation. (controller-manager is ON — see
+    # spire-server.controllerManager above.)
     "spiffe-csi-driver"              = { enabled = false }
     "spiffe-oidc-discovery-provider" = { enabled = false }
     "tornjak-frontend"               = { enabled = false }

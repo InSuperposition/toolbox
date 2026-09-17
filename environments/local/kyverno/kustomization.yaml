@@ -1,6 +1,6 @@
 # The Kyverno policy set for the local dev reference cluster — its own
 # kustomize root so it gets a dedicated Flux `kyverno-policy` Kustomization
-# (Plan B K1, Phase 2): `policies.kyverno.io` custom kinds cannot sit in the
+# — `policies.kyverno.io` custom kinds cannot sit in the
 # flux-system inventory, whose whole-set server-side dry-run rejects an
 # unknown CRD until the Kyverno HelmRelease lands it (same split as
 # cert-manager-pki.yaml / ci-defs.yaml).

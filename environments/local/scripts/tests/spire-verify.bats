@@ -7,10 +7,10 @@
 # the chart-dependent cases (helm pull / helm template) — this repo has
 # no equivalent of tests/lib/registry.bash's throwaway TLS registry for
 # a CLASSIC Helm repo (index.yaml + bare .tgz over plain HTTP), only for
-# OCI/zot. Building that fixture is a real, separate test-infra gap —
-# logged as a new TODOS.md P3 item rather than expanding this PR's
-# scope. Lock-integrity cases (missing field, bad digest format, missing
-# file) need no network and run offline, same as openbao-verify.bats's.
+# OCI/zot. Building that fixture is a real, separate test-infra gap,
+# deliberately deferred rather than built here. Lock-integrity cases
+# (missing field, bad digest format, missing file) need no network and
+# run offline, same as openbao-verify.bats's.
 
 setup() {
 	load helper

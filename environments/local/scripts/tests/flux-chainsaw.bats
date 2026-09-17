@@ -6,7 +6,7 @@
 # end-to-end chainsaw run is the hk `chainsaw` step itself
 # (`./environments/local/scripts/flux-chainsaw.sh` — skips in CI, runs against
 # the live cluster locally) and the documented `mise run local:flux:bootstrap`
-# acceptance run (PR #19).
+# acceptance run.
 
 setup() {
 	load helper

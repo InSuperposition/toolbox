@@ -10,7 +10,7 @@
 # succeeds instantly, then the wait times out with "context deadline
 # exceeded". Every assert passes; only teardown fails. `mise run check` then
 # goes red on a non-signal. Reproduced 100% under 3 parallel wrappers;
-# `fastDelete` fixes it (0.4s vs a 30s timeout) — investigated 2026-09-10.
+# `fastDelete` fixes it (0.4s vs a 30s timeout).
 #
 # `namespace.fastDelete: true` — issue the namespace DELETE, do NOT wait for
 # termination (the `--fast-namespace-deletion` flag). These are running-state

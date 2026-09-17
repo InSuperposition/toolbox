@@ -28,11 +28,11 @@ tekton-cli = "0.46.0"
 timoni = "0.34.0"
 trivy = "0.74.0"
 
-# The local OpenBao runs in-cluster (ADR 0016): a tofu-owned raft
-# StatefulSet the bootstrap bridge brings up, reached over TLS at the
-# ClusterIP DNS name (OrbStack routes the Mac host into the cluster
-# network). Its bootstrap secrets are 0600 files under $OPENBAO_STATE_DIR
-# (ADR 0011 — no keychain, no fnox); the bridge writes root.token + seal.key
+# The local OpenBao runs in-cluster: a tofu-owned raft StatefulSet the
+# bootstrap bridge brings up, reached over TLS at the ClusterIP DNS name
+# (OrbStack routes the Mac host into the cluster network). Its bootstrap
+# secrets are 0600 files under $OPENBAO_STATE_DIR — no keychain, no
+# password-manager integration; the bridge writes root.token + seal.key
 # (the restore bundle's) and tls/ca.crt (the live cert-manager CA) on every
 # successful run. `mise` chains [env] vars and runs a shell for `exec()`, so
 # VAULT_TOKEN / VAULT_CACERT reach every `mise run` task and the interactive
@@ -44,11 +44,11 @@ OPENBAO_STATE_DIR = "{{ exec(command='echo \"${XDG_STATE_HOME:-$HOME/.local/stat
 VAULT_CACERT = "{{ exec(command='f=\"${XDG_STATE_HOME:-$HOME/.local/state}/toolbox/openbao/tls/ca.crt\"; [ -f \"$f\" ] && echo \"$f\" || true') }}"
 VAULT_TOKEN = "{{ exec(command='cat \"$OPENBAO_STATE_DIR/root.token\" 2>/dev/null || true') }}"
 
-# T7c R1b-ii-b — the host-CLI half of zot-trust.sh's output (the node/
-# dockerd half is a separate file the node reads directly, no env needed).
-# `curl` honors this out of the box; several pinned Go tools do not on this
-# darwin toolchain and need a per-call CA flag instead (R1b-ii-c wires
-# those; the honor-matrix is in ~/.claude/plans/t7c-distribution-t7d.md).
+# The host-CLI half of zot-trust.sh's output (the node/dockerd half is a
+# separate file the node reads directly, no env needed). `curl` honors this
+# out of the box; several pinned Go tools do not on this darwin toolchain
+# and instead take a per-call CA flag (`oras --ca-file`, `cosign
+# --registry-cacert`) wired explicitly where they're invoked.
 #
 # mise ALWAYS exports a key declared in [env], even when its templated
 # value is an empty string — unlike VAULT_CACERT/VAULT_TOKEN above, that
@@ -65,23 +65,21 @@ VAULT_TOKEN = "{{ exec(command='cat \"$OPENBAO_STATE_DIR/root.token\" 2>/dev/nul
 # all has bigger problems than this one).
 SSL_CERT_FILE = "{{ exec(command='b=\"${XDG_STATE_HOME:-$HOME/.local/state}/toolbox/zot/zot-bundle.crt\"; [ -f \"$b\" ] && { echo \"$b\"; exit; }; for s in /etc/ssl/cert.pem /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt; do [ -f \"$s\" ] && { echo \"$s\"; exit; }; done; true') }}"
 
-# `mise install` is the only bootstrap step (CLAUDE.md § mise) — wire the
-# hk git hooks as part of it so a fresh clone is gated without a separate
-# manual `hk install`.
+# `mise install` is the only bootstrap step — wire the hk git hooks as part
+# of it so a fresh clone is gated without a separate manual `hk install`.
 [hooks]
 postinstall = "hk install"
 
 [tasks.check]
-description = "Run the full lint/format/test gate — identical to the hk git hooks (CLAUDE.md § hk). shellcheck, pkl, tofu fmt/validate/test, cue fmt, bats."
+description = "Run the full lint/format/test gate — identical to the hk git hooks. shellcheck, pkl, tofu fmt/validate/test, cue fmt, bats."
 run = "hk check --all"
 
 [tasks.fix]
 description = "Apply the auto-fixable half of `mise run check` (formatters)."
 run = "hk fix --all"
 
-# OpenBao tasks are namespaced <environment>:<domain>:<verb>
-# (docs/designs/repo-structure.md § mise task map). The in-cluster unit is
-# environments/local/openbao/ (ADR 0016).
+# OpenBao tasks are namespaced <environment>:<domain>:<verb>. The
+# in-cluster unit is environments/local/openbao/.
 [tasks."local:openbao:verify"]
 description = "Assert environments/local/openbao/openbao.lock's chart_digest matches the pinned tag (the OpenTofu helm provider cannot pin a digest), then render the chart by digest and check the expected shape. Self-skips offline."
 run = "./environments/local/scripts/openbao-verify.sh"
@@ -91,25 +89,24 @@ description = "One-time per cluster (disaster-recovery re-run safe): bring the i
 run = "./environments/local/scripts/openbao-bootstrap.sh"
 
 [tasks."local:openbao:snapshot"]
-description = "Save a COMPLETE restore bundle (raft snapshot + seal.key + root.token) from the in-cluster OpenBao to $OPENBAO_STATE_DIR/snapshots/. Copy that whole directory off-machine — after the host daemon's retirement it is the only genesis path (ADR 0016)."
+description = "Save a COMPLETE restore bundle (raft snapshot + seal.key + root.token) from the in-cluster OpenBao to $OPENBAO_STATE_DIR/snapshots/. Copy that whole directory off-machine — it is the only genesis path for a lost cluster."
 run = "./environments/local/scripts/openbao-snapshot.sh"
 
-# SPIRE Phase 1 (TODOS.md, docs/adr/0026). The in-cluster unit is
-# environments/local/spire/.
+# SPIRE Phase 1. The in-cluster unit is environments/local/spire/.
 [tasks."local:spire:verify"]
 description = "Assert environments/local/spire/spire.lock's chart digests match the pinned versions (a classic, non-OCI Helm repo — no oras resolve equivalent), then render both charts and check the expected shape. Self-skips offline."
 run = "./environments/local/scripts/spire-verify.sh"
 
 [tasks."local:spire:bootstrap"]
-description = "One-time per cluster: bring SPIRE Server + Agent up. Needs the in-cluster OpenBao already up (spire-server's vault upstreamAuthority plugin signs its intermediate cert via OpenBao's pki mount, docs/adr/0025) — create ns, verify the pinned charts, tofu apply, wait for spire-server, assert the OpenBao round-trip actually completed. See environments/local/spire/README.md."
+description = "One-time per cluster: bring SPIRE Server + Agent up. Needs the in-cluster OpenBao already up (spire-server's vault upstreamAuthority plugin signs its intermediate cert via OpenBao's pki mount) — create ns, verify the pinned charts, tofu apply, wait for spire-server, assert the OpenBao round-trip actually completed. See environments/local/spire/README.md."
 run = "./environments/local/scripts/spire-bootstrap.sh"
 
 [tasks."local:zot:trust"]
-description = "T7c R1b-ii-b: (re)generate host CA trust for the zot registry from the live toolbox-dev-ca Secret — the node dockerd file (~/.docker/certs.d/zot.zot.svc.cluster.local:5000/ca.crt) and the host-CLI concat bundle ($XDG_STATE_HOME/toolbox/zot/zot-bundle.crt, injected as SSL_CERT_FILE by mise.toml [env]). Idempotent, safe to re-run any time (e.g. after a dev CA rotation). Needs the cluster up + cert-manager-pki reconciled."
+description = "(Re)generate host CA trust for the zot registry from the live toolbox-dev-ca Secret — the node dockerd file (~/.docker/certs.d/zot.zot.svc.cluster.local:5000/ca.crt) and the host-CLI concat bundle ($XDG_STATE_HOME/toolbox/zot/zot-bundle.crt, injected as SSL_CERT_FILE by mise.toml [env]). Idempotent, safe to re-run any time (e.g. after a dev CA rotation). Needs the cluster up + cert-manager-pki reconciled."
 run = "./environments/local/scripts/zot-trust.sh"
 
-# The attestation sign/verify seam is its own concern (docs/designs/repo-
-# structure.md, ADR 0013) — tasks namespaced attestation:<verb>.
+# The attestation sign/verify seam is its own concern — tasks namespaced
+# attestation:<verb>.
 [tasks."attestation:export-pubkey"]
 description = "Re-export attestation/cosign-approval.pub from openbao://approval-key, then `git add` + commit it (run after a Transit key rotation). Needs OpenBao up."
 run = "cosign public-key --key openbao://approval-key --outfile attestation/cosign-approval.pub"
@@ -123,54 +120,56 @@ description = "Verify a pinned approval attestation, no deploy — args: <regist
 run = "./attestation/scripts/attestation-verify.sh"
 
 # Type-check the cv_frontend Timoni module + its rendered manifests against
-# the vendored k8s CUE schemas (ADR 0019). Same check the `timoni` hk step
-# runs; offline, no cluster.
+# the vendored k8s CUE schemas. Same check the `timoni` hk step runs;
+# offline, no cluster.
 [tasks."frontend:vet"]
 description = "timoni mod vet the cv_frontend module (schema-checks the rendered Deployment/Service/ServiceAccount)."
 run = "timoni mod vet ./deploy/frontend/timoni --name cv-frontend"
 
-# Plan B M3 — the operator entrypoint for in-cluster delivery. Verifies a
-# pinned approval attestation, then renders the Timoni module against that
-# digest and `flux push`es the manifests as an OCI artifact for the
-# `frontend` Flux Kustomization to reconcile (docs/adr/0019). Verify FIRST —
-# nothing renders or pushes unless the attestation holds. Prints D_man (the
-# manifest-artifact digest) + the git-pin lines for the reviewed PR.
+# The operator entrypoint for in-cluster delivery. Verifies a pinned
+# approval attestation, then renders the Timoni module against that digest
+# and `flux push`es the manifests as an OCI artifact for the `frontend`
+# Flux Kustomization to reconcile. Verify FIRST — nothing renders or pushes
+# unless the attestation holds. Prints the manifest-artifact digest + the
+# git-pin lines for the reviewed PR.
 [tasks."frontend:publish"]
 description = "Verify a pinned approval attestation, render the cv_frontend Timoni module against that digest, and flux-push the manifests as an OCI artifact — args: <registry/repo@sha256:...> <sha256:attestation-digest> <revision>."
 run = "./deploy/frontend/scripts/frontend-publish.sh"
 
-# T7b1-followup: mirror the digest-pinned base + `# syntax=` images from
-# deploy/frontend/Dockerfile into the local zot, so the in-cluster build never
-# reaches docker.io / gcr.io (the OrbStack IPv6-egress defect — TODOS.md T7,
-# /investigate 2026-09-08). Runs on the host, where IPv4 works. Idempotent.
+# Mirror the digest-pinned base + `# syntax=` images from
+# deploy/frontend/Dockerfile into the local zot, so the in-cluster build
+# never reaches docker.io / gcr.io directly: pods get a working IPv6 stack
+# with no routable v6 egress, so a registry client that picks the AAAA
+# answer for a dual-stack host hard-fails instead of falling back to A.
+# Runs on the host, where IPv4 works. Idempotent.
 [tasks."frontend:seed"]
-description = "Seed the local zot with cv_frontend's digest-pinned base images so the in-cluster build is hermetic (TODOS.md T7b1-followup) — arg: [zot-registry] (default zot.zot.svc.cluster.local:5000). Needs `mise run local:zot:trust` first (T7c R1b-ii-c — zot is HTTPS)."
+description = "Seed the local zot with cv_frontend's digest-pinned base images so the in-cluster build is hermetic — arg: [zot-registry] (default zot.zot.svc.cluster.local:5000). Needs `mise run local:zot:trust` first (zot is HTTPS-only)."
 run = "./ci/scripts/registry-seed.sh deploy/frontend/Dockerfile"
 
-# T7b3 — the operator entrypoint for the in-cluster build/scan/gate pipeline.
-# Renders deploy/frontend/pipelinerun.cue (plain CUE, not a Timoni module —
-# plan D1), `kubectl create`s the PipelineRun, watches it to a terminal
-# state, and on success hands over the resolved digest + the exact
-# `attestation:sign` line. Preflights context / Pipeline+gate / buildkitd
-# mirror CM / zot / base images first.
+# The operator entrypoint for the in-cluster build/scan/gate pipeline.
+# Renders deploy/frontend/pipelinerun.cue (plain CUE, not a Timoni module),
+# `kubectl create`s the PipelineRun, watches it to a terminal state, and on
+# success hands over the resolved digest + the exact `attestation:sign`
+# line. Preflights context / Pipeline+gate / buildkitd mirror CM / zot /
+# base images first.
 [tasks."frontend:build"]
 description = "Build + scan + gate cv_frontend in-cluster from a commit SHA, then print the digest and the attestation:sign line — arg: <cv_frontend-sha>."
 run = "./deploy/frontend/scripts/frontend-build.sh"
 
 # Platform install — environments/local/ owns vendored-upstream installs (same
-# split as OpenBao), NOT ci/. The Tekton *controller* stays on this script
-# through T7c (Flux cannot install an absent Tekton — it is a named
-# prerequisite for the T7c `ci-runtime` Flux Kustomization). The script
-# downloads the pinned release.yaml, verifies its SHA-256 against
+# split as OpenBao), NOT ci/. The Tekton *controller* stays on this script:
+# Flux cannot install an absent Tekton, and this is a named prerequisite for
+# the `ci-runtime` Flux Kustomization. The script downloads the pinned
+# release.yaml, verifies its SHA-256 against
 # environments/local/tekton/release.lock, then applies the verified local
-# file — never `kubectl apply -f <url>` (ADR 0001). Details:
+# file — never `kubectl apply -f <url>`. Details:
 # environments/local/README.md § Tekton.
 [tasks."local:tekton:install"]
 description = "Checksum-verify + install the pinned Tekton Pipelines controller on orb k8s (a Flux prerequisite — Flux cannot install an absent Tekton)."
 run = "./environments/local/scripts/tekton-install.sh"
 
 [tasks."local:tekton:wait"]
-description = "Block until the Tekton Pipelines control plane (controller + webhook) is Available — the T7c ci-runtime Flux Kustomization and any PipelineRun admission assume Tekton is up."
+description = "Block until the Tekton Pipelines control plane (controller + webhook) is Available — the ci-runtime Flux Kustomization and any PipelineRun admission assume Tekton is up."
 run = "kubectl --context orbstack -n tekton-pipelines wait --for=condition=Available deploy/tekton-pipelines-controller deploy/tekton-pipelines-webhook --timeout=120s"
 
 # Flux — the one-time imperative bridge, then declarative. `local:flux:bootstrap`
@@ -187,8 +186,8 @@ run = "./environments/local/scripts/flux-bootstrap.sh"
 description = "Show the FluxInstance + every Flux source/Kustomization/HelmRelease and its Ready condition."
 run = "flux --context orbstack get all --all-namespaces"
 
-# Interim local registry — TODOS.md T7b0. Committed manifests (zot ships no
-# all-in-one release), pinned by image digest. The INSTALL is now a Flux
+# Interim local registry. Committed manifests (zot ships no all-in-one
+# release), pinned by image digest. The INSTALL is now a Flux
 # Kustomization (environments/local/flux/zot-sync.yaml) reconciled from git —
 # `local:zot:install` / `:uninstall` are retired. `local:zot:wait` stays
 # (frontend-build.sh calls it before a pipeline run). Details:

@@ -7,15 +7,15 @@ set -euo pipefail
 # says nothing about whether this caller can actually reach the Transit key,
 # so this also does a real authenticated read of the key.
 #
-# The local OpenBao runs in-cluster (ADR 0016); VAULT_ADDR / VAULT_CACERT /
-# VAULT_TOKEN come from mise.toml [env] (the bridge writes the token + CA).
+# The local OpenBao runs in-cluster; VAULT_ADDR / VAULT_CACERT / VAULT_TOKEN
+# come from mise.toml [env] (the bridge writes the token + CA).
 #
 # Exit 0  — reachable, unsealed, authorized, key present. Safe to sign.
 # Exit 3  — any of: unreachable / uninitialised / sealed / unauthorized /
 #           missing-key. stderr names which and the fix.
 #
 # Verify (attestation-verify.sh) NEVER calls this — it verifies against the
-# committed public key and does not touch OpenBao (Codex P1-7).
+# committed public key and does not touch OpenBao.
 #
 # Usage: openbao-preflight.sh [key-name]   (default: approval-key)
 
@@ -51,10 +51,10 @@ if [ "$(echo "$status_json" | jq -r '.initialized')" != "true" ]; then
 fi
 
 # --- sealed? ---
-# Static-seal auto-unseal (ADR 0016): the openbao-0 pod unseals itself from
-# the mounted openbao-seal Secret on every start — there is NO printed
-# unseal key. A sealed initialised instance means the Secret is
-# missing/wrong or the pod has not restarted since it went away.
+# Static-seal auto-unseal: the openbao-0 pod unseals itself from the
+# mounted openbao-seal Secret on every start — there is NO printed unseal
+# key. A sealed initialised instance means the Secret is missing/wrong or
+# the pod has not restarted since it went away.
 if [ "$status_rc" -eq 2 ] || [ "$(echo "$status_json" | jq -r '.sealed')" = "true" ]; then
 	die "OpenBao is sealed (static seal did not auto-unseal)" \
 		"re-run mise run local:openbao:bootstrap (it re-creates the openbao-seal Secret and re-does the key-preserving -force restore from the snapshots/ bundle)"

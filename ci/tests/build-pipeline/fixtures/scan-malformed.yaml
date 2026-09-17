@@ -1,4 +1,4 @@
-# G1 fixture: scan.json is not valid JSON. `trivy convert` exits 1 (a decode
+# Fixture: scan.json is not valid JSON. `trivy convert` exits 1 (a decode
 # error), NOT 2 (a CRITICAL match). The TaskRun still fails, but `gate`'s
 # step exitCode is 1 — the signal `frontend-build.sh` uses to report
 # "gate ERRORED, not a vulnerability verdict" instead of the loud override

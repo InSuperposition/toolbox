@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ADR 0018 — no OpenTofu `kubernetes_*` / `kubernetes_manifest` resource.
+# No OpenTofu `kubernetes_*` / `kubernetes_manifest` resource, ever.
 # OpenTofu owns the substrate; in-cluster Kubernetes objects go through Flux
 # plain-YAML or (if ever activated) Crossplane, never tofu.
 #

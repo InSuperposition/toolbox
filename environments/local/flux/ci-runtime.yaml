@@ -7,11 +7,11 @@
 # reconciliation policy. Moving it into ci/ would couple the reusable defs to
 # local source names.
 #
-# targetNamespace is DELIBERATELY OMITTED (a documented departure from the
-# plan's literal `targetNamespace: ci` wording, plan ≈ line 746): ci/runtime
+# targetNamespace is DELIBERATELY OMITTED (a documented departure from an
+# earlier design's literal `targetNamespace: ci` wording): ci/runtime
 # holds a cluster-scoped Namespace object plus a ConfigMap that already pins
 # `namespace: ci`. A kustomize `namespace` transformer over a resource set
-# that includes the Namespace it names is the fragile case; the plan's INTENT
+# that includes the Namespace it names is the fragile case; the intent
 # (resources land in ns `ci`) is already satisfied by the manifests as
 # written.
 #
@@ -28,13 +28,15 @@
 # ci/runtime/kustomization.yaml's `resources:` are applied/pruned.
 #
 # Tekton-absent failure mode (documented, not tested destructively — same
-# "running-state only" discipline as Increment 1b): with no Tekton controller
-# this Kustomization goes NotReady (the CRD/Deployment health checks fail) and
-# retries every retryInterval. ci-tasks / ci-pipelines stay blocked on their
-# `dependsOn: [ci-runtime]`. There is NO human notification — no
-# notification-controller — the state is visible only via
-# `flux get kustomizations` / `kubectl get kustomization -n flux-system`.
-# Fix: `mise run local:tekton:install` (the Increment-0 checksum installer —
+# "running-state only" discipline as the Flux reconcile chainsaw test,
+# which asserts running state and never bootstraps or tears down): with no
+# Tekton controller this Kustomization goes NotReady (the CRD/Deployment
+# health checks fail) and retries every retryInterval. ci-tasks /
+# ci-pipelines stay blocked on their `dependsOn: [ci-runtime]`. There is
+# NO human notification — no notification-controller — the state is
+# visible only via `flux get kustomizations` /
+# `kubectl get kustomization -n flux-system`.
+# Fix: `mise run local:tekton:install` (the pinned checksum installer —
 # Flux cannot install an absent Tekton; the split "Flux owns the defs, a
 # script owns the CRDs they need" is coherent only as an explicit external
 # prerequisite).

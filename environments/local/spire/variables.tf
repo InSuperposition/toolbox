@@ -44,7 +44,7 @@ variable "spire_chart_version" {
 }
 
 variable "trust_domain" {
-  description = "The SPIFFE trust domain for this cluster's SPIRE deployment. Used consistently across global.spire.trustDomain, zot's future uriSanPattern (PR 3), and registration entries."
+  description = "The SPIFFE trust domain for this cluster's SPIRE deployment. Used consistently across global.spire.trustDomain, zot's future uriSanPattern (once zot's mTLS SAN pattern is wired up), and registration entries."
   type        = string
   default     = "toolbox.local"
 }

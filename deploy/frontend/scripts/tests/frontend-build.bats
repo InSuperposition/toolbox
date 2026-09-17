@@ -4,8 +4,7 @@
 # in-cluster build/scan/gate PipelineRun. Every cluster/registry/git/mise
 # call is a stub (helper.bash build_fakebin); `cue` is real, so these
 # render the actual deploy/frontend/pipelinerun.cue. The real end-to-end
-# run is TODOS.md T7b3 (an operator `mise run frontend:build`), the same
-# way T7b1/T7b2 recorded their live proofs.
+# run is an operator `mise run frontend:build` against a live cluster.
 
 setup() {
 	load helper
@@ -109,7 +108,7 @@ setup() {
 	[[ "$output" == *"Valid: 1"* ]]
 }
 
-# --- every kubectl / tkn call is context+namespace pinned (A3) ----------
+# --- every kubectl / tkn call is context+namespace pinned ----------
 
 @test "frontend-build: every kubectl call carries --context and -n ci" {
 	run "$SCRIPTS/frontend-build.sh" "$REV"
@@ -138,7 +137,7 @@ setup() {
 	grep -q 'delete pipelinerun' "$KLOG"
 }
 
-@test "frontend-build: Succeeded -> prints this run's trivy scan-report referrer digest (A5)" {
+@test "frontend-build: Succeeded -> prints this run's trivy scan-report referrer digest" {
 	run "$SCRIPTS/frontend-build.sh" "$REV"
 	[ "$status" -eq 0 ]
 	b64="$(printf 'b%.0s' {1..64})"

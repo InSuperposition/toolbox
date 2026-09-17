@@ -1,11 +1,11 @@
-/// hk is the ONLY git-hook gate for this repo (CLAUDE.md § hk).
+/// hk is the ONLY git-hook gate for this repo.
 ///
 /// One definition, two entry points:
 ///   - git hooks  : `hk install` wires pre-commit / pre-push
 ///   - manual / CI : `mise run check` -> `hk check` (identical steps)
 ///
 /// Call graph is one direction only: `mise run check` -> `hk check`.
-/// hk.pkl NEVER calls back into a mise task (no cycle, CLAUDE.md § mise).
+/// hk.pkl NEVER calls back into a mise task (no cycle).
 ///
 /// Layering:
 ///   pre-commit  fast + side-effect-free : shellcheck, pkl, tofu fmt, cue fmt, ls-lint, ast-grep, kubeconform
@@ -15,11 +15,11 @@
 ///                 orbstack cluster - too heavy for a file-triggered hook, so
 ///                 they live in `check` only; chainsaw self-skips with no cluster)
 ///
-/// ls-lint + ast-grep enforce docs/designs/repo-structure.md: directory case
+/// ls-lint + ast-grep enforce the repo's file-placement rules: directory case
 /// and <domain>-<verb>.sh naming (ls-lint, .ls-lint.yml), and forbidden
 /// cross-concern path refs in shell (ast-grep, sgconfig.yml + rules/). Both
 /// read the whole tree, not a file list — an honestly-scoped lint, not graph
-/// analysis (repo-structure.md § Honest scope).
+/// analysis.
 amends "package://github.com/jdx/hk/releases/download/v1.57.0/hk@1.57.0#/Config.pkl"
 import "package://github.com/jdx/hk/releases/download/v1.57.0/hk@1.57.0#/Builtins.pkl"
 
@@ -49,15 +49,14 @@ local fast = new Mapping<String, Step> {
   // `timoni mod vet` type-checks the cv_frontend module + its rendered
   // Deployment/Service/SA against the vendored k8s CUE schemas. This is the
   // schema gate for the timoni path — NOT kubeconform (a 2nd validator for
-  // one concern; CLAUDE.md § Testing Strategy). Offline, deterministic, no
-  // cluster. The glob only gates whether the step runs.
+  // one concern would be redundant). Offline, deterministic, no cluster.
+  // The glob only gates whether the step runs.
   ["timoni"] {
     glob = List("deploy/frontend/timoni/**")
     check = "timoni mod vet ./deploy/frontend/timoni --name cv-frontend"
   }
-  // Structure + naming (docs/designs/repo-structure.md § Enforcement).
-  // ls-lint reads names only and validates the whole tree against
-  // .ls-lint.yml itself, so it takes no file list.
+  // Structure + naming. ls-lint reads names only and validates the whole
+  // tree against .ls-lint.yml itself, so it takes no file list.
   ["ls-lint"] = Builtins.ls_lint
   // Forbidden cross-concern path refs in shell (rules/boundary-shell-*,
   // boundary-*-ref) + no `script:` block in a Tekton manifest
@@ -74,27 +73,27 @@ local fast = new Mapping<String, Step> {
     batch = false
     check = "ast-grep scan"
   }
-  // ADR 0018: no OpenTofu `kubernetes_*` / `kubernetes_manifest` resource —
-  // OpenTofu owns the substrate, never the cluster's own object graph
-  // (in-cluster objects go render→reconcile→enforce→provision). ast-grep
-  // ships no HCL grammar (sgconfig.yml), so this is a `git grep` in a tiny
-  // guard that classifies match / no-match / grep-error explicitly (a bare
+  // No OpenTofu `kubernetes_*` / `kubernetes_manifest` resource — OpenTofu
+  // owns the substrate, never the cluster's own object graph (in-cluster
+  // objects go render→reconcile→enforce→provision). ast-grep ships no HCL
+  // grammar (sgconfig.yml), so this is a `git grep` in a tiny guard that
+  // classifies match / no-match / grep-error explicitly (a bare
   // `! git grep` inverts a grep ERROR into a green gate). The glob only
   // gates whether the step runs; the script scans the tracked tree.
   ["no-kubernetes-tf"] {
     glob = List("**/*.tf", "tests/check-tf-boundary.sh")
     check = "./tests/check-tf-boundary.sh"
   }
-  // Static schema validation of the ci/ Tekton manifests (CLAUDE.md
-  // § Testing Strategy — no cluster needed, fast pre-merge gate). A wrapper
-  // script: the kubeconform -schema-location template collides with hk's
-  // own command templating. Rationale + CRD-schema caveats in the script.
-  // The glob only gates whether the step runs.
+  // Static schema validation of the ci/ Tekton manifests — no cluster
+  // needed, fast pre-merge gate. A wrapper script: the kubeconform
+  // -schema-location template collides with hk's own command templating.
+  // Rationale + CRD-schema caveats in the script. The glob only gates
+  // whether the step runs.
   ["kubeconform"] {
     glob = List("ci/tasks/**/*.yaml", "ci/runtime/**/*.yaml", "ci/pipelines/**/*.yaml", "ci/tests/crd-schemas/**/*.json", "ci/scripts/kubeconform-scan.sh")
     check = "./ci/scripts/kubeconform-scan.sh"
   }
-  // The interim local zot registry manifests (TODOS.md T7b0). All core-API
+  // The interim local zot registry manifests. All core-API
   // kinds (Namespace/PVC/ConfigMap/Deployment/Service) — the default schema
   // location covers them, so no `-schema-location` template and no wrapper
   // (unlike the ci/ Tekton CRDs above). Inline is safe: no `{{ }}` in the
@@ -132,7 +131,7 @@ local fast = new Mapping<String, Step> {
     glob = List("environments/local/kyverno/**/*.yaml", "environments/local/kyverno/tests/crd-schemas/**/*.json", "environments/local/scripts/kyverno-kubeconform.sh", "attestation/cosign-approval.pub")
     check = "./environments/local/scripts/kyverno-kubeconform.sh"
   }
-  // The `frontend` Namespace manifest (Plan B M3) reconciled by the
+  // The `frontend` Namespace manifest, reconciled by the
   // `frontend-ns` Flux Kustomization. A core kind — no CRD schema, so
   // inline (no `-schema-location` template to collide with hk's).
   ["kubeconform-frontend"] {
@@ -143,8 +142,8 @@ local fast = new Mapping<String, Step> {
 
 /// Offline correctness. pre-push and check.
 ///
-/// `tofu-init` is an ordered PREREQUISITE of tofu-validate and tofu-test
-/// (CX #8), not a parallel sibling: `tofu validate` needs an initialised
+/// `tofu-init` is an ordered PREREQUISITE of tofu-validate and tofu-test,
+/// not a parallel sibling: `tofu validate` needs an initialised
 /// workspace, and an unordered init racing the validate/test steps under
 /// hk corrupts `.terraform/`. `depends` serialises it; `-backend=false`
 /// keeps it offline.
@@ -167,15 +166,15 @@ local validate = new Mapping<String, Step> {
 local heavy = new Mapping<String, Step> {
   ["tofu-test"] {
     // modules/** for a future published module; environments/** for the
-    // in-repo units (the local-OpenBao unit moved here in Phase 2, ADR
-    // 0012). `workspace_indicator` scopes each run to one versions.tf dir;
-    // `tofu test` in a dir with no tests/ is a clean 0-pass no-op.
+    // in-repo units. `workspace_indicator` scopes each run to one
+    // versions.tf dir; `tofu test` in a dir with no tests/ is a clean
+    // 0-pass no-op.
     glob = List("modules/**/*.tf", "modules/**/*.tftest.hcl", "environments/**/*.tf", "environments/**/*.tftest.hcl")
     check = "tofu -chdir={{workspace}} test"
     workspace_indicator = "versions.tf"
     depends = "tofu-init"
   }
-  // chart-pin gate for environments/local/openbao/ (ADR 0016).
+  // chart-pin gate for environments/local/openbao/.
   // `oras resolve <tag>` == openbao.lock's chart_digest (the OpenTofu helm
   // provider cannot pin an OCI chart by digest —
   // hashicorp/terraform-provider-helm#1596), then `helm template` BY DIGEST
@@ -189,11 +188,11 @@ local heavy = new Mapping<String, Step> {
     )
     check = "./environments/local/scripts/openbao-verify.sh"
   }
-  // chart-pin gate for environments/local/spire/ (SPIRE Phase 1,
-  // TODOS.md; docs/adr/0026). Classic (non-OCI) Helm repo — `helm pull`
-  // + sha256sum instead of oras resolve, then `helm template` and assert
-  // the expected shape. Needs network — self-skips (exit 0) offline /
-  // repo-down, so a flapping upstream repo does not red the check.
+  // chart-pin gate for environments/local/spire/. Classic (non-OCI) Helm
+  // repo — `helm pull` + sha256sum instead of oras resolve, then `helm
+  // template` and assert the expected shape. Needs network — self-skips
+  // (exit 0) offline / repo-down, so a flapping upstream repo does not
+  // red the check.
   ["spire-verify"] {
     glob = List(
       "environments/local/spire/**",
@@ -205,7 +204,7 @@ local heavy = new Mapping<String, Step> {
     // *.bash (helper.bash) is a fixture, not a suite - excluded
     glob = List("**/tests/*.bats")
     // --print-output-on-failure: on a red case, dump its stdout/stderr so a
-    // CI failure names its cause instead of a bare "assertion failed" (T9a).
+    // CI failure names its cause instead of a bare "assertion failed".
     // No-op when everything passes.
     check = "bats --print-output-on-failure {{files}}"
   }
@@ -225,7 +224,7 @@ local heavy = new Mapping<String, Step> {
     glob = List(".chainsaw.yaml", "environments/local/tests/flux/**/*.yaml", "environments/local/flux/**/*.yaml", "environments/local/scripts/flux-chainsaw.sh")
     check = "./environments/local/scripts/flux-chainsaw.sh"
   }
-  // The in-cluster OpenBao running state (ADR 0016). Same [k8s] gate as
+  // The in-cluster OpenBao running state. Same [k8s] gate as
   // chainsaw-flux — skips in CI (no OrbStack) and skips locally until
   // `mise run local:openbao:bootstrap` has deployed it (probe: the
   // `openbao` StatefulSet). Asserts the running state; does not run the
@@ -240,7 +239,7 @@ local heavy = new Mapping<String, Step> {
     )
     check = "./environments/local/scripts/openbao-chainsaw.sh"
   }
-  // The in-cluster SPIRE running state (SPIRE Phase 1, TODOS.md). Same
+  // The in-cluster SPIRE running state. Same
   // [k8s] gate as chainsaw-openbao — skips in CI (no OrbStack) and skips
   // locally until `mise run local:spire:bootstrap` has deployed it
   // (probe: the `spire-server` StatefulSet). Asserts the running state;
@@ -255,8 +254,8 @@ local heavy = new Mapping<String, Step> {
     )
     check = "./environments/local/scripts/spire-chainsaw.sh"
   }
-  // The Kyverno ImageValidatingPolicy running state (Plan B K1, ADR 0020).
-  // Same [k8s] gate as chainsaw-flux — skips in CI (no OrbStack) and skips
+  // The Kyverno ImageValidatingPolicy running state. Same [k8s] gate as
+  // chainsaw-flux — skips in CI (no OrbStack) and skips
   // locally until the `kyverno-policy` Flux Kustomization has reconciled the
   // policy (probe: `kubectl get imagevalidatingpolicy frontend-approval`,
   // which is only present post-merge). Asserts admission both ways against
@@ -271,8 +270,8 @@ local heavy = new Mapping<String, Step> {
     )
     check = "./environments/local/scripts/kyverno-chainsaw.sh"
   }
-  // The cv_frontend in-cluster delivery running state (Plan B M3, ADR 0019).
-  // Same [k8s] gate — skips in CI and until the `frontend` Flux Kustomization
+  // The cv_frontend in-cluster delivery running state. Same [k8s] gate —
+  // skips in CI and until the `frontend` Flux Kustomization
   // has reconciled (probe: `kubectl get kustomization frontend`, only present
   // post-merge). Asserts DELIVERY (the rendered Deployment runs the approved
   // digest, its container started, the approval policy admitted it), NOT app
@@ -288,7 +287,7 @@ local heavy = new Mapping<String, Step> {
     )
     check = "./environments/local/scripts/frontend-chainsaw.sh"
   }
-  // Silent-coverage-drop guard (F5). Diffs the suites on disk, the
+  // Silent-coverage-drop guard. Diffs the suites on disk, the
   // committed tests/manifest.txt, and what hk schedules — a mismatch fails
   // the gate. Runs last: it reads `hk check --plan`, it does not re-run
   // the suites.

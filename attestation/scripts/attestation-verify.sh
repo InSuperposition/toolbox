@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# The consumer-side gate — and the one shared seam every consumer goes
-# through (docs/designs/digest-as-source-of-truth.md § Architecture; ADR
-# 0013): the in-cluster path's `mise run frontend:publish` and T10's VEX
-# check both call this. Given an image digest and the digest of a specific
-# approval attestation, it answers one question: is THIS attestation a
-# valid "approved" decision, signed by the approval key, for THIS image?
+# The consumer-side gate — the one shared seam every consumer goes through:
+# the in-cluster path's `mise run frontend:publish` and any VEX check both
+# call this. Given an image digest and the digest of a specific approval
+# attestation, it answers one question: is THIS attestation a valid
+# "approved" decision, signed by the approval key, for THIS image?
 #
 #   attestation-verify.sh <registry/repo@sha256:<image>> <sha256:<attestation>>
 #
-# It NEVER touches OpenBao (Codex P1-7). Verification is against the
-# committed public key (attestation/cosign-approval.pub), exported once from
+# It NEVER touches OpenBao. Verification is against the committed public
+# key (attestation/cosign-approval.pub), exported once from
 # openbao://approval-key at bootstrap. Losing the OpenBao raft store stops
 # future signing but does not invalidate past approvals.
 #

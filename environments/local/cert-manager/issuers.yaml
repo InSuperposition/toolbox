@@ -1,5 +1,5 @@
-# Dev PKI for the in-cluster OpenBao TLS listener (T7c Increment 4) and,
-# since T7c R1b-ii, the zot registry's HTTPS listener.
+# Dev PKI for the in-cluster OpenBao TLS listener and,
+# since zot became HTTPS-only, the zot registry's HTTPS listener.
 #
 # Chain: a selfSigned root ClusterIssuer -> a CA Certificate (its key
 # generated IN-CLUSTER, never in repo or tofu state) -> a CA ClusterIssuer
@@ -80,7 +80,7 @@ spec:
     algorithm: ECDSA
     size: 256
   # OrbStack routes the Mac host into the cluster network, so the host
-  # reaches the ClusterIP DNS name directly (plan confirm #8); 127.0.0.1
+  # reaches the ClusterIP DNS name directly; 127.0.0.1
   # covers the `kubectl port-forward` fallback the bridge uses when it does
   # not.
   dnsNames:
@@ -107,7 +107,7 @@ spec:
   privateKey:
     algorithm: ECDSA
     size: 256
-  # T7c R1b-ii A3: zot's Service is ClusterIP only (the NodePort is
+  # zot's Service is ClusterIP only (the NodePort is
   # dropped) — every consumer (host tools via OrbStack's host->cluster
   # routing, in-cluster Pipeline steps) resolves the same cluster DNS
   # name, so ONE cert SAN set covers all of them. No `localhost` /

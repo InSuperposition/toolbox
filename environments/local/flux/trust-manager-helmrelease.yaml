@@ -1,16 +1,16 @@
 # trust-manager — in-cluster CA-bundle distribution for the local dev
-# reference cluster (docs/adr/0022). cert-manager's sibling: a `Bundle` CR
+# reference cluster. cert-manager's sibling: a `Bundle` CR
 # merges the pinned Debian public-root snapshot (`useDefaultCAs`) with the
-# `toolbox-dev-ca` Secret into a target ConfigMap. First (R1b, only)
-# consumer: the Kyverno admission controller's `caCertificates.volume`
-# (T7c R1b-ii) — so the pod trusts the dev CA for the HTTPS zot pull without
-# losing the public roots.
+# `toolbox-dev-ca` Secret into a target ConfigMap. The first, and so far
+# only, consumer is the Kyverno admission controller's
+# `caCertificates.volume` mount — so the pod trusts the dev CA for the
+# HTTPS zot pull without losing the public roots.
 #
-# R1b-i installs the tool ONLY. The `Bundle` CRs land in R1b-ii, in their
-# own dir `environments/local/trust-manager/` under a dedicated Flux
-# Kustomization (mirrors `cert-manager-pki.yaml`) — a `trust.cert-manager.io`
-# custom kind in `flux-system` would deadlock the whole apply on the unknown
-# CRD (see `cert-manager-pki.yaml`).
+# This step installs the tool ONLY. The `Bundle` CRs land in a follow-on
+# step, in their own dir `environments/local/trust-manager/` under a
+# dedicated Flux Kustomization (mirrors `cert-manager-pki.yaml`) — a
+# `trust.cert-manager.io` custom kind in `flux-system` would deadlock the
+# whole apply on the unknown CRD (see `cert-manager-pki.yaml`).
 #
 # Reconciled by helm-controller (already in FluxInstance.spec.components).
 # `dependsOn` the `cert-manager` HelmRelease: the chart's own
@@ -19,7 +19,7 @@
 # injected by cert-manager's cainjector — independent of `toolbox-dev-ca`.
 #
 # PINNING: the OCIRepository pins `ref.digest` (immutable, content
-# addressed — ADR 0001). The trust-manager chart is NOT cosign-signed (same
+# addressed). The trust-manager chart is NOT cosign-signed (same
 # as OpenBao / cert-manager / Kyverno), so there is NO `spec.verify` block;
 # the digest is the whole pin. BOTH component images are digest-pinned via
 # chart values — the `defaultPackageImage` digest is the actual public-trust
@@ -31,10 +31,11 @@
 # so `Bundle`s cluster-wide are not garbage-collected.
 #
 # Secret targets: DELIBERATELY OFF (`secretTargets` unset → chart default
-# `authorizedSecretsAll: false`, `authorizedSecrets: []`). ADR 0022 scopes
+# `authorizedSecretsAll: false`, `authorizedSecrets: []`). This unit scopes
 # trust-manager to the Kyverno CA-bundle ConfigMap only; routing buildkitd /
 # Flux source-controller through trust-manager (which would need a Secret
-# target + its RBAC) is an R1b-ii decision, not this chunk.
+# target + its RBAC) is a decision deferred to that follow-on step, not
+# this chunk.
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: OCIRepository

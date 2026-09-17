@@ -3,10 +3,9 @@
 # deploy/frontend/Dockerfile line 1 must pin the BuildKit frontend by
 # digest, not just by the mutable `docker/dockerfile:1` tag. Pinning the
 # BuildKit image + the base images does NOT pin the build implementation —
-# the `# syntax=` directive pulls a frontend image at build time. For a
-# repo whose thesis is "the content digest is the trust boundary"
-# (ADR 0001) an unpinned `# syntax=` is an input-trust hole (T7a; the
-# dockerfile-syntax-directive-is-unpinned-executable-input learning).
+# the `# syntax=` directive pulls a frontend image at build time, and for a
+# repo whose thesis is "the content digest is the trust boundary" an
+# unpinned `# syntax=` is an input-trust hole.
 #
 # Catches a future revert of the pin — `mise run check` goes red.
 

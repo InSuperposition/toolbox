@@ -6,11 +6,10 @@
 # through a stub `bao` (helper.bash `fake_bao`) so each is deterministic;
 # the real-server round-trip is covered by openbao-bootstrap.bats.
 #
-# CX #9: the sealed-state advice used to say "use the printed unseal key" —
-# wrong since the static seal (ADR 0010/0011), which auto-unseals from a
-# 0600 file and prints no key. And a never-initialised instance also reports
-# sealed=true, so the initialised check must come first. Both are asserted
-# here.
+# The sealed-state advice must never say to use a printed unseal key — the
+# static seal auto-unseals from a 0600 file and prints no key. A
+# never-initialised instance also reports sealed=true, so the initialised
+# check must come first. Both are asserted here.
 
 setup() {
 	load helper

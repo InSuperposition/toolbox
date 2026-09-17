@@ -1,11 +1,11 @@
-# T7b3 — the blocking CRITICAL gate. Runs last (`runAfter: [scan-attach]`)
+# The blocking CRITICAL gate. Runs last (`runAfter: [scan-attach]`)
 # in build-scan-approve.yaml; a CRITICAL finding fails the PipelineRun.
 #
-# Consumer-agnostic (ADR 0014, rules/boundary-ci.yml): no params, no
-# consumer name — it reads a fixed file off the shared workspace.
+# Consumer-agnostic: no params, no consumer name — it reads a fixed file
+# off the shared workspace.
 #
-# No embedded shell (CLAUDE.md § Constraints): one pinned `trivy`
-# `command` + `args`, never a `script:` block.
+# No embedded shell: one pinned `trivy` `command` + `args`, never a
+# `script:` block.
 #
 #   trivy convert --scanners=vuln --exit-code=2 --severity=CRITICAL \
 #     --format=table scan.json

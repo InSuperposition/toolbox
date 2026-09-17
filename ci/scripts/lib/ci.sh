@@ -1,15 +1,15 @@
 # shellcheck shell=bash
 #
 # ci/scripts/lib/ci.sh — shared shell for the ci/ concern's scripts
-# (tekton-taskrun.sh today; pipeline-bundle-push.sh in T7b). Self-contained,
+# (tekton-taskrun.sh today; pipeline-bundle-push.sh later). Self-contained,
 # no repo-level runtime lib (docs/designs/repo-structure.md § Naming).
 # Source it; do not execute.
 #
-# Consumer-agnostic (ADR 0014): nothing here names a consumer or a
+# Consumer-agnostic: nothing here names a consumer or a
 # deploy/ path — callers pass concrete paths as arguments.
 
 # ci_repo_root — the checkout root, walking up from this lib for the
-# mise.toml marker. Depth-independent (F2, same idiom as lib/frontend.sh).
+# mise.toml marker. Depth-independent, same idiom as lib/frontend.sh.
 ci_repo_root() {
 	local d
 	d="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,7 +25,7 @@ ci_repo_root() {
 
 # ci_is_strict_digest <s> — true only for a canonical image manifest
 # digest: literally "sha256:" + exactly 64 lowercase hex. This repo's
-# thesis is that the digest IS the trust boundary (ADR 0001), so a tag, a
+# thesis is that the digest IS the trust boundary, so a tag, a
 # short digest, or "sha256:" + uppercase is a hard reject, not a warning.
 ci_is_strict_digest() {
 	case "$1" in
@@ -38,7 +38,7 @@ ci_is_strict_digest() {
 }
 
 # ci_kube_context — the kube-context every kubectl/tkn call is pinned to.
-# Overridable for tests; the default is orbstack (Codex #9 — never act on
+# Overridable for tests; the default is orbstack (never act on
 # whatever context happens to be current).
 ci_kube_context() { printf '%s\n' "${TOOLBOX_CI_KUBE_CONTEXT:-orbstack}"; }
 

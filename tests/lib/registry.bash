@@ -123,17 +123,16 @@ make_image() {
 
 # make_multiplatform_image <dir> -> echoes "<REG>/mimg@sha256:<INDEX-digest>",
 # a genuine OCI index (one linux/arm64 child, matching BuildKit's real
-# shape closely enough for `oras resolve --platform` to work — verified
-# live: a bare `oras push` artifact has no image config and --platform
-# errors "unknown config ... expect application/vnd.oci.image.config.v1+json";
-# an INDEX with a platform-annotated descriptor resolves correctly even
-# when the child itself is a plain artifact, since oras reads the
-# platform off the descriptor, not the child's own config). Evidence is
-# attached to the INDEX digest (matching scan-attach.yaml's real
-# addressing — TODOS.md "Run-scoped build digest identity"), never the
-# child — this is what makes the index provably run-unique in production
-# and is exactly the shape attestation-sign.sh's new platform-resolution
-# step must be tested against.
+# shape closely enough for `oras resolve --platform` to work: a bare
+# `oras push` artifact has no image config and --platform errors "unknown
+# config ... expect application/vnd.oci.image.config.v1+json"; an INDEX
+# with a platform-annotated descriptor resolves correctly even when the
+# child itself is a plain artifact, since oras reads the platform off the
+# descriptor, not the child's own config). Evidence is attached to the
+# INDEX digest, matching scan-attach.yaml's real addressing, never the
+# child — this is what makes the index run-unique in production and is
+# exactly the shape attestation-sign.sh's platform-resolution step is
+# tested against.
 make_multiplatform_image() {
 	local dir="$1" child_digest child_size index_digest
 	echo "multiplatform child $(date +%s%N)" >"$dir/mchild.bin"

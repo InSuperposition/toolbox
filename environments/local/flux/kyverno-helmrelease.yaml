@@ -1,5 +1,5 @@
 # Kyverno — admission-policy engine for the local dev reference cluster
-# (Plan B K1, docs/adr/0020). Runs one ImageValidatingPolicy that verifies
+# Runs one ImageValidatingPolicy that verifies
 # the cv_frontend approval attestation at pod admission
 # (environments/local/kyverno/, reconciled by the `kyverno-policy`
 # Kustomization).
@@ -8,7 +8,8 @@
 # Kyverno is a HELPER component behind the GitOps loop, like cert-manager;
 # nothing secret-bearing depends on its reconcile being tofu-driven.
 #
-# PINNING (docs/adr/0001, digests in environments/local/flux/kyverno.lock):
+# PINNING (content digest is the trust boundary; digests recorded in
+# environments/local/flux/kyverno.lock):
 #   - the OCIRepository pins `ref.digest` (immutable, content addressed)
 #   - the Kyverno *chart* is NOT cosign-signed (verified — `cosign tree`
 #     empty), so there is NO `spec.verify`; the committed chart digest is the
@@ -64,7 +65,7 @@ spec:
     # reference deployment, not a resilient one.
     admissionController:
       replicas: 1
-      # T7c R1b-ii: trusts the dev CA (bundled with the public roots into
+      # Trusts the dev CA (bundled with the public roots into
       # ConfigMap `toolbox-ca-bundle`, ns `kyverno`, by the trust-manager
       # `toolbox-ca-bundle` Bundle) so IVPol referrer verification can pull
       # from the HTTPS zot.
@@ -88,14 +89,14 @@ spec:
       # behavior independent of which chart branch it's wired through, so it
       # narrows our own ConfigMap-backed volume to the single needed file
       # without duplicating the ~150 KB PEM blob into this HelmRelease
-      # (avoiding `.data` was the whole point — ADR 0022).
+      # (avoiding `.data` was the whole point of using trust-manager here).
       #
       # Acknowledged limitation: the container reads this file once at
       # process start, so a CA *rotation* needs a pod roll to pick up the
       # new bundle (no live reload). Moot today — `toolbox-dev-ca`'s
       # `duration: 87600h` (10y) means the cluster is rebuilt long before a
-      # renewal is due (TODOS.md "Dev CA rotation runbook" tracks the real
-      # answer for when that stops being true).
+      # renewal is due. A rotation-aware answer is deferred until that
+      # stops being true.
       extraVolumes:
         - name: toolbox-ca-bundle
           configMap:
@@ -125,7 +126,7 @@ spec:
         tag: "v1.19.1@sha256:67a48e62a8d8f8120c86914ff822b90017c54054c7b64ef8a1555645e9d9761e"
     reportsController:
       replicas: 1
-      # T7c R3: the background PolicyReport scanner runs the same
+      # The background PolicyReport scanner runs the same
       # attestation-verification code as admissionController but is a
       # SEPARATE pod with its own trust store — the admissionController
       # mount above does not cover it. Found live: PolicyReports showed

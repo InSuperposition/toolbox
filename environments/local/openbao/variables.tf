@@ -94,13 +94,13 @@ variable "openbao_ca" {
 # This unit NEVER manages the `transit` mount or `approval-key` — the
 # key-preserving snapshot restore creates them and tofu must
 # not touch them (managing = a possible recreate = a key rotation that
-# breaks every past approval attestation, plan § B3). `sops` and every
+# breaks every past approval attestation). `sops` and every
 # `transit_keys` entry are NEW keys under that pre-existing mount, referenced
 # by the literal path string "transit". openbao-verify.sh greps this
 # unit's *.tf for `approval-key` / `vault_mount` and fails closed.
 
 variable "transit_keys" {
-  description = "ADDITIONAL Transit keys to create under the pre-existing transit/ mount — the extension point for future consumers (e.g. a `chains-provenance-key` for T8). Each is `{name, type}`. Empty by default. `approval-key` is NOT here (restore-managed) and `sops` has its own resource."
+  description = "ADDITIONAL Transit keys to create under the pre-existing transit/ mount — the extension point for future consumers (e.g. a `chains-provenance-key` for signing build provenance). Each is `{name, type}`. Empty by default. `approval-key` is NOT here (restore-managed) and `sops` has its own resource."
   type = list(object({
     name = string
     type = string
@@ -135,7 +135,7 @@ variable "sops_auth" {
   default = {}
 }
 
-# T8 — build provenance (TODOS.md). Binds a NEW, narrowly-scoped k8s-auth
+# Build provenance signing. Binds a NEW, narrowly-scoped k8s-auth
 # role to the provenance-sign Tekton Task's own ServiceAccount (owned by
 # `ci/runtime/`, this unit never creates it — a cross-concern reference by
 # name only, not a file edge). Short TTL: signing happens once, immediately,
@@ -150,14 +150,14 @@ variable "chains_auth" {
   default = {}
 }
 
-# SPIRE Phase 1 (TODOS.md). Binds a NEW, narrowly-scoped k8s-auth role to
-# the future spire-server ServiceAccount (created by the `spire` Helm
-# release, PR 2 — not yet created; this unit never creates it, a
+# SPIRE's phased workload-identity rollout. Binds a NEW, narrowly-scoped
+# k8s-auth role to the future spire-server ServiceAccount (created by the
+# `spire` Helm release — not yet created; this unit never creates it, a
 # cross-concern reference by name only, not a file edge). Short TTL: the
 # vault upstreamAuthority plugin logs in, signs its intermediate CSR, and
 # is done — same reasoning as sops_auth/chains_auth.
 variable "spire_auth" {
-  description = "Binds the OpenBao k8s-auth role `spire_server` to the future spire-server ServiceAccount (`environments/local/spire/`, PR 2). token_ttl in SECONDS."
+  description = "Binds the OpenBao k8s-auth role `spire_server` to the future spire-server ServiceAccount (`environments/local/spire/`, not yet created). token_ttl in SECONDS."
   type = object({
     service_account_name      = optional(string, "spire-server")
     service_account_namespace = optional(string, "spire")

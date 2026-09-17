@@ -1,80 +1,43 @@
-# T8 — build provenance (TODOS.md). Signs BuildKit's own native SLSA
-# provenance output (pushed as an UNSIGNED referrer by the `build` Task's
-# `attest:provenance=` opt) with the `chains-provenance-key` OpenBao
-# Transit key — the exact `cosign attest` + OpenBao-Transit pattern
-# `attestation-sign.sh` already proves out for `approval-key`, reused here
-# instead of installing Tekton Chains (rejected — upstream alpha, TODOS.md).
+# Signs BuildKit's own native SLSA provenance output (pushed as an
+# UNSIGNED referrer by the `build` Task's `attest:provenance=` opt) with
+# the `chains-provenance-key` OpenBao Transit key — the same `cosign
+# attest` + OpenBao-Transit pattern `attestation-sign.sh` uses for
+# `approval-key`, reused here instead of a separate provenance tool.
 #
-# **HOTFIX 2026-09-14** (this comment previously claimed the opt "already"
-# existed — it didn't; `buildkit-build.yaml` never requested provenance
-# output at merge, and even once added, `oras discover` against the TAG
-# found zero referrers). BuildKit's attestation manifest carries an OCI 1.1
-# `subject` pointing at the PLATFORM manifest, never the index the tag
-# resolves to when provenance is enabled — both bugs verified live before
-# this fix, not assumed. See `resolve-platform-digest`, the new first step.
-# A third bug, same hotfix: `openbao-login`/`cosign-attest` set
-# HOME=$(workspaces.shared.path)/openbao-home, a PVC subdir nothing ever
-# creates — `bao login` authenticated fine but failed writing
-# `.vault-token.tmp` ("no such file or directory", exit 2), and
-# `cosign-attest` then skipped as a downstream failure. Fixed by pointing
-# HOME at `/tekton/home` instead — Tekton's own per-pod `emptyDir`,
-# pre-created and already shared across every step's container (the same
-# convention `buildkit-build.yaml`'s `build` step relies on) — so
-# `bao login`'s token-helper write and cosign's hashivault KMS read of it
-# share that directory with no explicit `mkdir` step needed. A fourth bug,
-# found only once the first three were fixed and a real run reached this
-# far: sharing the emptyDir wasn't enough on its own — `bao login` writes
-# `.vault-token` `0600`, owned by whichever UID the container ran as. The
-# two images default to DIFFERENT UIDs (`openbao`'s named `openbao` user
-# vs. cosign's distroless `65532`), so cosign's read failed
-# `permission denied` even with the file present and the directory
-# shared. Both steps now pin the SAME explicit `runAsUser: 65532` — keeps
-# the token `0600`-owner-only (never loosened to world-readable) while
-# making both containers that same owning UID.
-# A fifth bug, found once auth and signing itself both worked: the actual
-# sign call succeeded, then `cosign attest`'s PUSH of the attestation to
-# zot failed TLS verification. `VAULT_CACERT` only configures the
-# hashivault KMS client's Vault connection — the registry push is a
-# separate Go `net/http` client (go-containerregistry) that doesn't read
-# that var. Fixed with `SSL_CERT_FILE`, which Go's `crypto/x509` DOES
-# honor on Linux (this pod's OS — the darwin exception that bit `crane`/
-# `flux push` on the operator's Mac doesn't apply here).
+# BuildKit's attestation manifest carries an OCI 1.1 `subject` pointing at
+# the PLATFORM manifest, never the index the tag resolves to — the
+# attestation manifest's own sentinel entry is
+# `platform: {architecture: unknown, os: unknown}`, filtered out by
+# `resolve-platform-digest` below, matching BuildKit's own convention for
+# marking a non-runnable index entry.
 #
-# **Run-scoped digest identity (TODOS.md, /plan-eng-review 2026-09-15,
-# 2 Codex outside-voice findings folded in):** this Task now takes a
-# `DIGEST` param (the INDEX digest `build` captured at push time and
-# propagated as a Pipeline result) instead of re-resolving the mutable
-# `APP_REVISION` tag — closes the gap where a concurrent/rerun
-# PipelineRun could sign provenance for the wrong image. A SECOND,
-# deeper gap Codex found: even with the index digest fixed, the OLD
-# `discover-referrer` step picked `.referrers[0]` on the platform
-# digest — a first-match pick, ambiguous if two runs ever produce a
-# byte-identical platform manifest (same source, same Dockerfile,
-# unchanged deps — plausible, not rare) with different provenance.
-# Replaced by `resolve-attestation-digest`: derives the attestation
-# manifest's digest from BuildKit's own OCI-native linking annotations
-# on the SAME index (`vnd.docker.reference.type`/`vnd.docker.reference.digest`,
-# verified live against docs.docker.com's attestation-storage docs) — an
-# exact match, not a guess. **Live-found while verifying this fix:**
-# `resolve-attestation-digest`'s go-template `index .annotations "..."`
-# panicked ("index of untyped nil") on manifest entries with NO
-# `annotations` field at all — the platform manifest entries, which
-# never carry `vnd.docker.reference.*` (only the attestation entry
-# does). Fixed with a `{{if .annotations}}` guard before indexing.
+# `resolve-attestation-digest` derives the attestation manifest's digest
+# from BuildKit's own OCI-native linking annotations on the SAME index
+# (`vnd.docker.reference.type` / `vnd.docker.reference.digest`) rather than
+# a separate `oras discover` query — `oras discover`'s `.referrers[0]` is a
+# first-match pick, ambiguous if two runs ever produce a byte-identical
+# platform manifest with different provenance. The platform manifest
+# entries in the index carry no `annotations` field at all (only the
+# attestation entry does), so the go-template guards with
+# `{{if .annotations}}` before indexing into it.
 #
-# Consumer-agnostic (ADR 0014, rules/boundary-ci.yml): params only. Runs
-# `runAfter: [scan-attach]` in build-scan-approve.yaml (sequential — see
-# that Pipeline's own header comment for why not parallel).
+# This Task takes a `DIGEST` param (the INDEX digest `build` captured at
+# push time and propagated as a Pipeline result) instead of re-resolving
+# the mutable `APP_REVISION` tag — closes the gap where a concurrent/rerun
+# PipelineRun could sign provenance for the wrong image.
 #
-# No embedded shell (CLAUDE.md § Constraints): every step is a single
-# pinned `command` + `args`, never a `script:` block. Seven steps, each one
-# CLI call. The only non-obvious plumbing is `stdoutConfig` (Tekton alpha,
+# Consumer-agnostic: params only. Runs `runAfter: [scan-attach]` in
+# build-scan-approve.yaml (sequential — see that Pipeline's own header
+# comment for why not parallel).
+#
+# No embedded shell: every step is a single pinned `command` + `args`,
+# never a `script:` block. Seven steps, each one CLI call. The only
+# non-obvious plumbing is `stdoutConfig` (Tekton alpha,
 # `environments/local/scripts/tekton-install.sh` enables it) — a step's
 # stdout is duplicated to a file by TEKTON ITSELF (no shell redirection),
 # and a LATER step's `args` can reference an earlier step's captured
 # result via `$(steps.<name>.results.<name>)` — pure declarative
-# substitution, verified live against this exact cluster (2026-09-14,
-# TODOS.md T8). Small values (digests, refs) go through `results:`
+# substitution. Small values (digests, refs) go through `results:`
 # (Tekton's ~4KB size cap); the predicate content itself (can exceed that
 # for a real build) goes straight to a `shared`-workspace file instead.
 #
@@ -82,23 +45,25 @@
 # every endpoint this Task reaches (zot, OpenBao) is in-cluster ClusterIP
 # DNS — the OrbStack IPv6-egress defect only affects EXTERNAL fetches.
 #
-# Auth (round-2 Codex outside-voice finding, live-verified 2026-09-14 —
-# not mocked): the `provenance-signer` ServiceAccount
+# Auth: the `provenance-signer` ServiceAccount
 # (`ci/runtime/provenance-signer-sa.yaml`) is bound, by the PipelineRun's
 # `taskRunSpecs` override (`deploy/frontend/pipelinerun.cue`), to run ONLY
 # this Task — every other Task keeps the namespace default SA. It
 # authenticates to OpenBao's `chains_provenance` k8s-auth role
 # (`environments/local/openbao/main.tf`) via a PROJECTED token whose
-# `audience` matches the role's config exactly (the role's `audience`
-# field requires it — a default-automounted token's audience does NOT
-# match and login fails 403, confirmed live). `bao login` writes
+# `audience` matches the role's config exactly — a default-automounted
+# token's audience does NOT match and login fails 403. `bao login` writes
 # `$HOME/.vault-token` (its own token-helper convention); cosign's
-# hashivault KMS client reads that file automatically
-# (sigstore/sigstore v1.10.8 pkg/signature/kms/hashivault/client.go) — no
-# VAULT_TOKEN env needed, no token ever appears in a Task param or log.
-# Live-verified: this role signs `chains-provenance-key` and is DENIED
-# `approval-key` (403) — both proven against the real cluster, not a
-# tofu mock.
+# hashivault KMS client reads that file automatically — no VAULT_TOKEN env
+# needed, no token ever appears in a Task param or log. `openbao-login`
+# and `cosign-attest` both run as the SAME explicit `runAsUser: 65532` and
+# share `HOME=/tekton/home` (Tekton's own per-pod pre-created `emptyDir`)
+# — `bao login` writes `.vault-token` `0600`, owner-only, so both
+# containers must be the same UID for cosign to read it back.
+# `VAULT_CACERT` only configures the hashivault KMS client's connection to
+# OpenBao; the registry push to zot is a separate Go `net/http` client
+# that instead honors `SSL_CERT_FILE`, set explicitly here. This role
+# signs `chains-provenance-key` and is denied `approval-key`.
 apiVersion: tekton.dev/v1
 kind: Task
 metadata:
@@ -110,7 +75,7 @@ spec:
     Sign BuildKit's own SLSA provenance attestation (already pushed
     unsigned) with the chains-provenance-key OpenBao Transit key.
     Evidence-only — never a second enforced gate; approval-key remains the
-    one real gate (docs/designs/digest-as-source-of-truth.md § Architecture).
+    one real gate.
   params:
     - name: IMAGE
       type: string
@@ -135,7 +100,7 @@ spec:
       mountPath: /ca
       description: >-
         The merged system + dev-CA bundle (trust-manager's
-        `toolbox-ca-bundle`, T7c R1b-ii-a) — the SAME `toolbox-dev-ca` root
+        `toolbox-ca-bundle`) — the SAME `toolbox-dev-ca` root
         signs both zot's and OpenBao's listener certs, so one bundle
         covers oras/cosign→zot AND bao→OpenBao TLS trust.
   steps:
@@ -144,16 +109,15 @@ spec:
       results:
         - name: platform-digest
           description: >-
-            The single-platform manifest's digest (ADR 0008, arm64-only) —
+            The single-platform manifest's digest (arm64-only) —
             NOT the index digest the tag resolves to. BuildKit's provenance
             attestation manifest carries an OCI 1.1 `subject` pointing at
-            THIS digest, never the index (verified live, 2026-09-14 —
-            `oras discover` against the tag/index finds zero referrers;
-            against this digest it finds the attestation manifest). The
-            attestation manifest's own sentinel is
-            `platform: {architecture: unknown, os: unknown}` — filtered out
-            here, matching BuildKit's own convention for marking a
-            non-runnable entry in the index.
+            THIS digest, never the index — `oras discover` against the
+            tag/index finds zero referrers; against this digest it finds
+            the attestation manifest. The attestation manifest's own
+            sentinel is `platform: {architecture: unknown, os: unknown}` —
+            filtered out here, matching BuildKit's own convention for
+            marking a non-runnable entry in the index.
       stdoutConfig:
         path: $(step.results.platform-digest.path)
       command: ["oras"]
@@ -171,14 +135,12 @@ spec:
           description: >-
             The unsigned attestation manifest's digest, resolved from the
             SAME index `resolve-platform-digest` fetched — not a separate
-            `oras discover` registry query (Run-scoped build digest
-            identity, Codex outside-voice finding: `oras discover`'s
+            `oras discover` registry query, since `oras discover`'s
             `.referrers[0]` is a first-match pick, ambiguous if two runs
-            ever produce a byte-identical platform manifest with
-            different provenance). Matched by BuildKit's own OCI-native
-            linking annotations on the attestation descriptor within the
-            index (verified live against
-            docs.docker.com/build/metadata/attestations/attestation-storage/):
+            ever produce a byte-identical platform manifest with different
+            provenance. Matched by BuildKit's own OCI-native linking
+            annotations on the attestation descriptor within the index
+            (see docs.docker.com/build/metadata/attestations/attestation-storage/):
             `vnd.docker.reference.type: "attestation-manifest"` +
             `vnd.docker.reference.digest: <platform-manifest-digest>` —
             an exact link, not a guess.
@@ -262,9 +224,8 @@ spec:
         - $(params.IMAGE)@$(steps.resolve-platform-digest.results.platform-digest)
   # cosign-attest's subject stays the PLATFORM digest (not the INDEX
   # `$(params.DIGEST)`) — matches where BuildKit's own `subject` field on
-  # the attestation manifest points (verified live, T8 hotfix). The INDEX
-  # digest and the PLATFORM digest are DIFFERENT values by design; never
-  # asserted equal.
+  # the attestation manifest points. The INDEX digest and the PLATFORM
+  # digest are DIFFERENT values by design; never asserted equal.
   volumes:
     - name: openbao-auth-token
       projected:

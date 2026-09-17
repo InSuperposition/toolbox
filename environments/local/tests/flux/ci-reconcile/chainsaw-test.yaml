@@ -5,12 +5,12 @@
 # In its own subdir so chainsaw discovers it (chainsaw's default --test-file
 # is the fixed name `chainsaw-test`; a sibling second test needs a subdir —
 # same layout as ci/tests/<name>/chainsaw-test.yaml). flux-chainsaw.sh runs
-# `flux-reconcile/` ONLY (skipping this test) until the Increment-2
-# Kustomization CRs are on the branch the FluxInstance syncs — the probe is
-# `kubectl -n flux-system get kustomization ci-runtime`.
+# `flux-reconcile/` ONLY (skipping this test) until the ci-runtime and
+# ci-defs Kustomization CRs are on the branch the FluxInstance syncs — the
+# probe is `kubectl -n flux-system get kustomization ci-runtime`.
 #
-# Asserts the RUNNING state of the ci/{runtime,tasks,pipelines} reconcile
-# (T7c Increment 2) — it does NOT bootstrap or tear down (same discipline as
+# Asserts the RUNNING state of the ci/{runtime,tasks,pipelines} reconcile —
+# it does NOT bootstrap or tear down (same discipline as
 # ../chainsaw-test.yaml). The dev cluster normally has Tekton via
 # `mise run local:tekton:install`, so this is the Tekton-PRESENT reconcile.
 #

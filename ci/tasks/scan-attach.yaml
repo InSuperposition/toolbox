@@ -1,40 +1,39 @@
-# T7b2 — scan the built image and attach the evidence as OCI 1.1 referrers.
+# Scans the built image and attaches the evidence as OCI 1.1 referrers.
 #
-# Consumer-agnostic (ADR 0014, rules/boundary-ci.yml): params only, never
-# names cv_frontend. Runs `runAfter: [build]` in build-scan-approve.yaml.
+# Consumer-agnostic: params only, never names cv_frontend. Runs
+# `runAfter: [build]` in build-scan-approve.yaml.
 #
-# No embedded shell (CLAUDE.md § Constraints): every step is a pinned
-# `command` + `args`, never a `script:` block. Four work steps plus a
-# privileged `disable-ipv6` step 0 (see below):
+# No embedded shell: every step is a pinned `command` + `args`, never a
+# `script:` block. Four work steps plus a privileged `disable-ipv6` step 0
+# (see below):
 #
 #   1. trivy image --format json      -> shared/scan.json      (never blocks —
-#      no --exit-code; the T7b3 `gate` Task reads this same file so its
+#      no --exit-code; the `gate` Task reads this same file so its
 #      CRITICAL verdict can't drift from the attached evidence)
 #   2. trivy image --format cyclonedx -> shared/sbom.cdx.json  (trivy's
 #      NATIVE CycloneDX — keeps per-component CVE ratings, unlike
-#      `buildx --sbom`; docs/designs/digest-as-source-of-truth.md)
+#      `buildx --sbom`)
 #   3. oras attach  application/vnd.trivy.report+json  scan.json
 #   4. oras attach  application/vnd.cyclonedx+json     sbom.cdx.json
 #
 # The image is addressed by `$(params.IMAGE)@$(params.DIGEST)` — the
 # INDEX digest `build` captured at push time and propagated as a Pipeline
-# result (TODOS.md "Run-scoped build digest identity"), never a
-# re-resolved `$(APP_REVISION)` tag. Re-resolving the tag independently
+# result, never a re-resolved `$(APP_REVISION)` tag. Re-resolving the tag
+# independently
 # here is exactly the gap that let a concurrent/rerun PipelineRun attach
 # evidence to the wrong image — sequential Tasks within one run don't
-# serialize across runs. ADR 0001 still holds: the digest is the trust
-# boundary, the tag was only ever a convenience handle.
+# serialize across runs. The digest is the trust boundary; the tag was
+# only ever a convenience handle.
 #
 # ONE trivy DB pull: both trivy steps share `--cache-dir
 # $(workspaces.shared.path)/trivy-cache`; step 1 populates it, step 2 reuses.
 #
-# Registry TLS (T7c R1b-ii-c — zot is HTTPS-only, cert-manager dev CA):
+# Registry TLS (zot is HTTPS-only, cert-manager dev CA):
 # `TRIVY_INSECURE` (env, from the param) still carries `$(params.REGISTRY_INSECURE)`
 # for a genuinely insecure target, but the real steady state here is
 # `false` + `--cacert`/`TRIVY_CACERT` — the `ca-bundle` workspace mounts the
 # trust-manager `toolbox-ca-bundle` ConfigMap (already reconciled into ns
-# `ci` for exactly this, T7c R1b-ii-a/ADR 0022), never a second committed
-# copy of the CA.
+# `ci` for exactly this), never a second committed copy of the CA.
 #
 # Steps run as root (`stepTemplate`, like git-clone): the OrbStack
 # `local-path` PVC is not reliably group-writable under `fsGroup`, so
@@ -43,14 +42,12 @@
 # Step 0 `disable-ipv6` (privileged `sysctl`, no `script:`): trivy's
 # vulnerability-DB pull (`mirror.gcr.io` / `ghcr.io`) is an external fetch,
 # and this OrbStack cluster's pods have a working IPv6 stack + AAAA DNS but
-# no routable v6 egress (`/investigate` 2026-09-08, TODOS.md T7b1-followup).
-# Disabling v6 in the pod netns forces v4; DNS/AAAA untouched. This is the
-# 3rd Task to need the workaround — TODOS.md § Cilium notes that a 4th is
-# the trigger to bring the Cilium datapath decision forward (a v4-only
-# datapath retires every `disable-ipv6` step at once). The step image is
-# reused (`moby/buildkit:rootless`, already node-cached from the build) — no
-# extra digest to track. `ci` ns is PSA `privileged`; this and the build
-# step are the only privileged containers.
+# no routable v6 egress. Disabling v6 in the pod netns forces v4; DNS/AAAA
+# untouched. A v4-only Cilium datapath would retire every `disable-ipv6`
+# step at once. The step image is reused (`moby/buildkit:rootless`,
+# already node-cached from the build) — no extra digest to track. `ci` ns
+# is PSA `privileged`; this and the build step are the only privileged
+# containers.
 apiVersion: tekton.dev/v1
 kind: Task
 metadata:
@@ -61,7 +58,7 @@ spec:
   description: >-
     Scan a pushed image with trivy (JSON report + native CycloneDX SBOM)
     and attach both to the image's manifest digest as OCI 1.1 referrers.
-    Never blocks — the blocking CRITICAL gate is a separate Task (T7b3).
+    Never blocks — the blocking CRITICAL gate is a separate Task.
   params:
     - name: IMAGE
       type: string
@@ -77,14 +74,12 @@ spec:
       type: string
       default: linux/arm64
       description: >-
-        Single target platform (ADR 0008 — arm64 only for now), same
-        default as `buildkit-build`. HOTFIX 2026-09-14: once `build` gained
-        `attest:provenance` (T8), its push became a multi-manifest image
-        INDEX instead of a single manifest — trivy's own platform
-        auto-selection then defaults to linux/amd64 and fails closed
-        ("no child with platform linux/amd64 in index"), verified live
-        against a real PipelineRun. `--platform` makes the selection
-        explicit instead of relying on trivy's host-arch guess.
+        Single target platform (arm64 only for now), same default as
+        `buildkit-build`. `build`'s multi-manifest image INDEX (from
+        `attest:provenance`) makes trivy's own platform auto-selection
+        default to linux/amd64 and fail closed ("no child with platform
+        linux/amd64 in index"). `--platform` makes the selection explicit
+        instead of relying on trivy's host-arch guess.
     - name: REGISTRY_INSECURE
       type: string
       default: "false"
@@ -101,7 +96,7 @@ spec:
       mountPath: /ca
       description: >-
         A ConfigMap with a `ca-certificates.crt` key — the merged system +
-        dev-CA bundle (trust-manager's `toolbox-ca-bundle`, T7c R1b-ii-a).
+        dev-CA bundle (trust-manager's `toolbox-ca-bundle`).
         Bound by the PipelineRun, same ConfigMap `buildkit-build` uses.
   stepTemplate:
     securityContext:

@@ -1,15 +1,14 @@
 #!/usr/bin/env bats
 
 # ci/scripts/registry-seed.sh — host-seeds the local zot with the digest-
-# pinned base images a Dockerfile references, so an in-cluster BuildKit build
-# never reaches docker.io / gcr.io (TODOS.md T7b1-followup, the OrbStack
+# pinned base images a Dockerfile references, so an in-cluster BuildKit
+# build never reaches docker.io / gcr.io (works around an OrbStack
 # IPv6-egress defect). A fake `oras` on PATH captures the cp args, so
 # these cases cover argument handling + the ref -> zot-path mapping without
-# a network. The real copy is proven by `mise run frontend:seed` (recorded
-# in TODOS.md T7b1-followup). `oras`, not `crane` (R1b-ii-c pre-plan): the
-# darwin/Go toolchain gives `crane` no CA-file override at all; `oras
-# --to-ca-file`/`--from-ca-file` are independently scoped per endpoint and
-# confirmed digest-preserving against this script's own pins.
+# a network. The real copy is proven by `mise run frontend:seed`. `oras`,
+# not `crane`: the darwin/Go toolchain gives `crane` no CA-file override at
+# all; `oras --to-ca-file`/`--from-ca-file` are independently scoped per
+# endpoint and confirmed digest-preserving against this script's own pins.
 
 setup() {
 	load helper
@@ -89,7 +88,7 @@ setup() {
 	[ "$(grep -c 'oras cp' <<<"$output")" -eq 3 ]
 }
 
-@test "uses --to-ca-file (zot is HTTPS, T7c R1b-ii-c), never --insecure or --to-plain-http" {
+@test "uses --to-ca-file since zot requires HTTPS with a CA-signed cert, never --insecure or --to-plain-http" {
 	run "$SW" "$DF"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"--to-ca-file $TOOLBOX_ZOT_CA"* ]]
