@@ -5,17 +5,17 @@ set -euo pipefail
 # Tekton Pipelines controller on the local OrbStack k8s cluster.
 #
 # environments/local/ owns vendored-upstream installs (Tekton's controller,
-# zot) — never ci/, same split as the OpenBao unit (README, ADR 0012).
+# zot) — never ci/, same split as the OpenBao unit (README).
 #
 # Downloads `<base-url>/<version>/release.yaml`, verifies its SHA-256 against
 # environments/local/tekton/release.lock, and only then applies the VERIFIED
 # LOCAL FILE. `kubectl apply -f <url>` is never used — the digest/checksum is
-# the trust boundary (ADR 0001). A mismatch is a hard refusal, not a warning.
+# the trust boundary. A mismatch is a hard refusal, not a warning.
 #
-# Stays this script through T7c: Flux cannot install an absent Tekton, so the
-# controller install is a named external prerequisite for the T7c `ci-runtime`
-# Flux Kustomization. T7c moves the Task/Pipeline *defs* (ci/tasks, ci/pipelines)
-# to Flux, not the controller (README § Tekton, ADR 0014).
+# Flux cannot install an absent Tekton, so the controller install stays a
+# named external prerequisite for the `ci-runtime` Flux Kustomization; only
+# the Task/Pipeline *defs* (ci/tasks, ci/pipelines) move to Flux, never the
+# controller (README § Tekton).
 #
 # Test seams (environments/local/scripts/tests/tekton-install.bats):
 #   TOOLBOX_TEKTON_LOCK              override the lock-file path
@@ -59,15 +59,13 @@ actual="$(shasum -a 256 "$manifest" | awk '{print $1}')"
 echo "tekton-install: checksum OK — applying Tekton Pipelines $version (context '$CONTEXT')"
 kubectl --context "$CONTEXT" apply --server-side -f "$manifest"
 
-# T8 — build provenance (TODOS.md): the pinned release ships
-# enable-api-fields=beta by default. `stdoutConfig` (a step's stdout
-# duplicated to a file, consumed declaratively by a later step via
-# $(steps.<name>.results.<name>) — no embedded shell, verified live
-# 2026-09-14) needs alpha. The BASE manifest above stays untouched and
-# checksum-verified (the trust boundary, ADR 0001) — this is a small,
-# separate, auditable patch applied after it, same pattern the OpenBao
-# bridge uses for its own post-apply steps. Idempotent: a merge patch to
-# an unchanged value is a no-op.
-echo "tekton-install: patching feature-flags (enable-api-fields: alpha — T8 stdoutConfig)"
+# The pinned release ships enable-api-fields=beta by default. `stdoutConfig`
+# (a step's stdout duplicated to a file, consumed declaratively by a later
+# step via $(steps.<name>.results.<name>) — no embedded shell) needs alpha.
+# The BASE manifest above stays untouched and checksum-verified (the trust
+# boundary) — this is a small, separate, auditable patch applied after it,
+# same pattern the OpenBao bridge uses for its own post-apply steps.
+# Idempotent: a merge patch to an unchanged value is a no-op.
+echo "tekton-install: patching feature-flags (enable-api-fields: alpha, for stdoutConfig)"
 kubectl --context "$CONTEXT" patch configmap feature-flags -n tekton-pipelines \
 	--type merge -p '{"data":{"enable-api-fields":"alpha"}}'

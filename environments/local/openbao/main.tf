@@ -1,7 +1,9 @@
-# The in-cluster local OpenBao (docs/adr/0016). Two phases share this file:
+# The in-cluster local OpenBao — a single-replica, OpenTofu-owned raft
+# StatefulSet moved here from a machine-global pitchfork daemon without
+# rotating approval-key. Two phases share this file:
 #
 #   Phase A — `helm_release.openbao`, the tofu-owned OpenBao Helm release.
-#     WHOLLY OpenTofu-owned substrate (docs/adr/0015): a `helm_release`
+#     WHOLLY OpenTofu-owned substrate: a `helm_release`
 #     resource IS tofu owning the release lifecycle (create / upgrade via a
 #     chart_version + openbao.lock bump / destroy, all tracked in state). It
 #     is deliberately NOT a Flux HelmRelease — putting the secret store
@@ -29,7 +31,7 @@ locals {
   helm_values = yamlencode({
     global = {
       # The loopback-only justification for tls_disable dies on the move to a
-      # ClusterIP listener (plan § B4). false flips the chart's port names to
+      # ClusterIP listener. false flips the chart's port names to
       # https* ; the readiness probe is `exec: bao status -tls-skip-verify`
       # so no probe-scheme override is needed.
       tlsDisable = false
@@ -44,7 +46,7 @@ locals {
 
       # The chart renders podAntiAffinity whenever server.ha.enabled, NOT
       # gated on replicas > 1 — an empty string clears it so the single
-      # replica schedules on OrbStack's one node (plan confirm #1).
+      # replica schedules on OrbStack's one node.
       affinity = ""
 
       ha = {
@@ -58,7 +60,7 @@ locals {
         }
 
         # One voter: a PodDisruptionBudget would block its own drain, and
-        # there is no quorum to protect (plan confirm #1 / § Topology).
+        # a single-voter raft has no quorum to protect.
         disruptionBudget = {
           enabled = false
         }
@@ -76,7 +78,7 @@ locals {
       }
 
       # Deliver both Secrets as read-only file mounts — matches the host
-      # daemon's file:// shape exactly (plan § B1). `volumes`/`volumeMounts`
+      # daemon's file:// shape exactly. `volumes`/`volumeMounts`
       # pass through verbatim (toYaml), unlike the deprecated `extraVolumes`.
       # Neither Secret is created here: the seal Secret is the bridge's (4b),
       # the TLS Secret is cert-manager's.
@@ -118,7 +120,7 @@ resource "helm_release" "openbao" {
   # auto-unseal). `wait = true` cannot be used here: the chart's readiness
   # probe is `bao status`, which only passes once the raft store is
   # initialised AND unsealed — never true for a fresh PVC at Phase A (a
-  # bundle-only recovery, ADR 0016), so `wait`+`atomic` would deadlock for
+  # bundle-only recovery), so `wait`+`atomic` would deadlock for
   # `timeout` then roll the release back. `cleanup_on_fail` still purges a
   # genuinely failed install (bad manifest, image pull).
   atomic          = false
@@ -154,8 +156,9 @@ resource "vault_transit_secret_backend_key" "sops" {
   depends_on = [helm_release.openbao]
 }
 
-# The extension point — future consumers (a chains-provenance key for T8, a
-# crossplane-system key) add entries to var.transit_keys. approval-key is
+# The extension point — future consumers (a chains-provenance key for
+# signing build provenance, a crossplane-system key) add entries to
+# var.transit_keys. approval-key is
 # rejected by the variable's validation.
 resource "vault_transit_secret_backend_key" "extra" {
   for_each = { for k in var.transit_keys : k.name => k }
@@ -193,7 +196,8 @@ resource "vault_auth_backend" "kubernetes" {
 
 # Same-cluster shortcut: kubernetes_host only. OpenBao reads its own pod SA
 # token + CA from /var/run/secrets/... so token_reviewer_jwt and
-# kubernetes_ca_cert are omitted (plan § Verified upstream facts).
+# kubernetes_ca_cert are omitted (verified against the Kubernetes auth
+# method's own upstream behavior).
 resource "vault_kubernetes_auth_backend_config" "this" {
   backend         = vault_auth_backend.kubernetes.path
   kubernetes_host = var.kubernetes_host
@@ -209,21 +213,20 @@ resource "vault_kubernetes_auth_backend_role" "flux_sops" {
   token_ttl                        = var.sops_auth.token_ttl_seconds
 }
 
-# T8 — build provenance (TODOS.md). Sign AND read (round-2 Codex outside-
-# voice finding: `sign` alone omits the pubkey-read path cosign's hashivault
-# KMS client needs just to run at all — sigstore/sigstore v1.10.8
-# pkg/signature/kms/hashivault/client.go). Never `approval-key` — this is a
-# separate key, `vault_transit_secret_backend_key.extra["chains-provenance-key"]`,
-# not the restore-managed one.
+# Build provenance signing. Sign AND read — `sign` alone omits the
+# pubkey-read path cosign's hashivault KMS client needs just to run at all
+# (sigstore/sigstore v1.10.8 pkg/signature/kms/hashivault/client.go). Never
+# `approval-key` — this is a separate key,
+# `vault_transit_secret_backend_key.extra["chains-provenance-key"]`, not
+# the restore-managed one.
 #
-# HOTFIX 2026-09-14: the `sign` path was an EXACT match with no glob —
-# cosign's hashivault client actually calls
+# The `sign` path needs a trailing `*` with no slash before it — a
+# Vault/OpenBao PREFIX match, covering the bare path (star matches empty)
+# and any suffixed variant. cosign's hashivault client actually calls
 # `transit/sign/chains-provenance-key/<hash-algo>` (e.g. `/sha2-256`, the
-# API's optional hash-algorithm URL segment), so every real sign attempt
-# got a live 403 "permission denied" even with a valid token and the
-# right role. Verified live before fixing, not assumed. A trailing `*`
-# with no slash before it is a Vault/OpenBao PREFIX match — it covers the
-# bare path (star matches empty) and any suffixed variant.
+# API's optional hash-algorithm URL segment); an exact-match path with no
+# glob denies every real sign attempt with 403, even with a valid token
+# and the right role.
 resource "vault_policy" "chains_provenance_sign" {
   name = "chains_provenance_sign"
 
@@ -249,14 +252,14 @@ resource "vault_kubernetes_auth_backend_role" "chains_provenance" {
   token_ttl                        = var.chains_auth.token_ttl_seconds
 }
 
-# ─── PKI mount — SPIRE's upstream authority (SPIRE Phase 1, TODOS.md) ────
+# ─── PKI mount — SPIRE's upstream authority ─────────────────────────────
 #
 # FIRST use of OpenBao's PKI engine in this repo. Unlike `transit`, this
 # mount is NOT restore-managed — nothing else creates or seeds it — so it
 # carries no key-preservation constraint and is an ordinary tofu-owned
 # resource, same footing as `vault_auth_backend "kubernetes"` above.
 # Keeps OpenBao the one root of trust: no third independent CA alongside
-# `toolbox-dev-ca` and OpenBao's own listener cert (docs/adr/0025).
+# `toolbox-dev-ca` and OpenBao's own listener cert.
 #
 # No consumer yet — the future `environments/local/spire/` unit's
 # spire-server reaches this at RUNTIME via its own vault upstreamAuthority
@@ -299,8 +302,9 @@ resource "vault_policy" "spire_sign_intermediate" {
 }
 
 # Bound to the ServiceAccount name/namespace the future spire-server Helm
-# release will create (PR 2) — referenced here by plain string, not a live
-# lookup, since that chart doesn't exist yet.
+# release will create (that release lands in a later change, not this
+# unit) — referenced here by plain string, not a live lookup, since that
+# chart doesn't exist yet.
 resource "vault_kubernetes_auth_backend_role" "spire_server" {
   backend                          = vault_auth_backend.kubernetes.path
   role_name                        = "spire_server"

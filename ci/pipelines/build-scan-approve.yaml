@@ -1,34 +1,33 @@
-# T7b1/T7b2/T7b3/T8 — the in-cluster build pipeline:
+# The in-cluster build pipeline:
 #   clone-app -> clone-defs -> build -> scan-attach -> provenance-sign -> gate.
 # `gate` (ci/tasks/gate.yaml) runs last and fails the run on a CRITICAL
 # finding, reading the same scan.json scan-attach attached as evidence.
-# `provenance-sign` (T8, TODOS.md) runs sequentially after `scan-attach`,
-# not in parallel with it — both would write to the same `shared` PVC from
-# separate pods; sequential avoids a concurrent-mount question this repo
-# hasn't needed to answer yet, at the cost of one extra step's latency on
-# a single-node dev cluster. It sits BEFORE `gate` (like `scan-attach`) —
-# evidence is attached regardless of the scan verdict, same reasoning as
-# scan-attach's own comment below.
+# `provenance-sign` runs sequentially after `scan-attach`, not in parallel
+# with it — both would write to the same `shared` PVC from separate pods;
+# sequential avoids a concurrent-mount question this repo hasn't needed to
+# answer yet, at the cost of one extra step's latency on a single-node dev
+# cluster. It sits BEFORE `gate` (like `scan-attach`) — evidence is attached
+# regardless of the scan verdict, same reasoning as scan-attach's own
+# comment below.
 #
-# Consumer-agnostic (ADR 0014, rules/boundary-ci.yml): every concrete value
-# is a param. The per-consumer PipelineRun that binds cv_frontend's repo
-# URLs + SHAs + image ref lives in deploy/<consumer>/, rendered from plain
-# CUE (`deploy/frontend/pipelinerun.cue`, T7b3 — not a Timoni module).
-# Human approval (`attestation-sign.sh`) and consumption
-# (`frontend-deploy.sh`) stay OUTSIDE this pipeline.
+# Consumer-agnostic: every concrete value is a param. The per-consumer
+# PipelineRun that binds cv_frontend's repo URLs + SHAs + image ref lives
+# in deploy/<consumer>/, rendered from plain CUE
+# (`deploy/frontend/pipelinerun.cue` — not a Timoni module). Human approval
+# (`attestation-sign.sh`) and consumption (`frontend-deploy.sh`) stay
+# OUTSIDE this pipeline.
 #
 # Workspace `shared` is backed by a per-run `volumeClaimTemplate` in the
-# PipelineRun (ci/README.md § Workspaces — Tekton `coschedule: workspaces`
-# forbids a TaskRun binding two distinct PVCs, so the clones and the build
-# share ONE claim and address their trees by sub-directory / subPath).
-# Workspace `buildkitd-config` is a ConfigMap (not a PVC — no coschedule
-# constraint); the PipelineRun binds it to `ci/runtime/buildkitd-mirror.yaml`
-# so the build talks only to the in-cluster zot (TODOS.md T7b1-followup —
-# the OrbStack IPv6-egress defect). Workspace `ca-bundle` is the
-# trust-manager `toolbox-ca-bundle` ConfigMap (T7c R1b-ii-a/ADR 0022,
-# already reconciled into ns `ci`) — the dev CA for zot's HTTPS listener
-# (T7c R1b-ii-c), shared by `build` and `scan-attach` rather than a second
-# committed copy.
+# PipelineRun — Tekton `coschedule: workspaces` forbids a TaskRun binding
+# two distinct PVCs, so the clones and the build share ONE claim and
+# address their trees by sub-directory / subPath. Workspace
+# `buildkitd-config` is a ConfigMap (not a PVC — no coschedule constraint);
+# the PipelineRun binds it to `ci/runtime/buildkitd-mirror.yaml` so the
+# build talks only to the in-cluster zot, working around an OrbStack
+# IPv6-egress defect. Workspace `ca-bundle` is the trust-manager
+# `toolbox-ca-bundle` ConfigMap (already reconciled into ns `ci`) — the dev
+# CA for zot's HTTPS listener, shared by `build` and `scan-attach` rather
+# than a second committed copy.
 #
 # `retries: 2` on the clone tasks: the same OrbStack cluster intermittently
 # fails DNS on an external host (`git`'s resolver, ~10% — an OrbStack DNS
@@ -36,9 +35,8 @@
 # build mirror handle). A retry clears it; the build has no external egress
 # left to retry.
 #
-# The build digest IS a Pipeline result, `IMAGE_DIGEST` (TODOS.md
-# "Run-scoped build digest identity" — reverses the original T7b OPEN-1
-# call; see ci/tasks/buildkit-build.yaml's header for the full rationale).
+# The build digest IS a Pipeline result, `IMAGE_DIGEST`, captured once by
+# `build` at push time (see ci/tasks/buildkit-build.yaml's header for how).
 # `scan-attach`/`provenance-sign` address the image by this digest, never
 # a re-resolved `$(APP_REVISION)` tag — closes a real correctness gap
 # where a concurrent/rerun PipelineRun could attach evidence to, or sign
@@ -91,8 +89,7 @@ spec:
     - name: IMAGE_DIGEST
       description: >-
         The pushed image's INDEX digest, captured once by `build` at push
-        time (TODOS.md "Run-scoped build digest identity") — the operator
-        reads this instead of a post-hoc `oras resolve`.
+        time — the operator reads this instead of a post-hoc `oras resolve`.
       value: $(tasks.build.results.IMAGE_DIGEST)
   tasks:
     - name: clone-app

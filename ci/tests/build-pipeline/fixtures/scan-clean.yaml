@@ -1,4 +1,4 @@
-# G1 fixture: a trivy JSON report whose only finding is LOW — proves `gate`
+# Fixture: a trivy JSON report whose only finding is LOW — proves `gate`
 # filters by severity (--severity=CRITICAL), not the mere presence of
 # vulnerabilities. `gate` must pass its TaskRun (step exitCode 0).
 apiVersion: v1

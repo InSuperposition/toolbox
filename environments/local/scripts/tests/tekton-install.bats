@@ -2,7 +2,7 @@
 
 # environments/local/scripts/tekton-install.sh — the interim Tekton controller
 # installer. It MUST verify the pinned SHA-256 before `kubectl apply` and MUST
-# refuse on a mismatch (ADR 0001 — the checksum is the trust boundary). Fake
+# refuse on a mismatch (the checksum is the trust boundary). Fake
 # `curl` + `kubectl` on PATH cover the verify/refuse decision without a
 # network or a cluster; the real apply rides with `mise run local:tekton:install`
 # against orb k8s (README § Tekton).
@@ -57,7 +57,7 @@ setup() {
 	[ "$status" -ne 0 ]
 }
 
-@test "checksum matches -> also patches feature-flags to enable-api-fields=alpha (T8 stdoutConfig)" {
+@test "checksum matches -> also patches feature-flags to enable-api-fields=alpha, needed for Tekton Chains' deferred stdoutConfig build-provenance" {
 	run "$SW"
 	[ "$status" -eq 0 ]
 	grep -q -- '--context testctx patch configmap feature-flags -n tekton-pipelines --type merge -p {"data":{"enable-api-fields":"alpha"}}' "$KLOG"

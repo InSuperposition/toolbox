@@ -74,8 +74,8 @@ spec:
       try:
         # bundlePublisher.k8sConfigMap (format=pem) — proves the OpenBao
         # sign-intermediate round-trip actually completed, not just "pod
-        # is Running". PR 3: repointed cross-namespace into ns "zot" —
-        # zot's mTLS listener verifies client SVIDs against this.
+        # is Running". This ConfigMap is repointed cross-namespace into ns
+        # "zot" — zot's mTLS listener verifies client SVIDs against this.
         - assert:
             resource:
               apiVersion: v1
@@ -88,7 +88,7 @@ spec:
 
     - name: default-clusterspiffeid-covers-ci-namespace
       try:
-        # PR 3: controllerManager.enabled=true — proves declarative
+        # controllerManager.enabled=true proves declarative
         # registration is live, not just rendered (spire-verify.sh
         # already proves the chart renders it; this proves the
         # controller actually reconciled it in the real cluster).

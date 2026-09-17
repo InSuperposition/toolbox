@@ -37,7 +37,7 @@ online() {
 	# Both refs the script itself depends on — a chart-only check let a
 	# quay.io-only outage pass this gate while the script's own image-digest
 	# call skipped internally, falsely failing "fails closed on a mutated
-	# image digest" (found 2026-09-14, fixed here alongside the oras swap).
+	# image digest" — fixed here alongside the oras swap.
 	oras resolve ghcr.io/openbao/charts/openbao:0.29.4 >/dev/null 2>&1 &&
 		oras resolve quay.io/openbao/openbao:2.6.2 >/dev/null 2>&1
 }
@@ -183,8 +183,8 @@ push_local_fixture() {
 }
 
 @test "anti-rotation guard: a DIFFERENT vault_mount (e.g. pki) is not the transit mount and passes the guard" {
-	# narrowed 2026-09-15 (SPIRE Phase 1, docs/adr/0025): the guard used to
-	# ban ANY vault_mount resource; a new pki mount has no key-preservation
+	# Narrowed when SPIRE's own pki mount was added: the guard used to ban
+	# ANY vault_mount resource; a new pki mount has no key-preservation
 	# constraint (nothing else creates/seeds it) and must be allowed.
 	printf '\nresource "vault_mount" "pki" { path = "pki" }\n' \
 		>>"$SCRATCH/environments/local/openbao/main.tf"

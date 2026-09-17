@@ -16,9 +16,9 @@ unset _d
 
 # fake_mise_export <outdir> — a stub `mise` on PATH. openbao-bootstrap.sh
 # calls `mise run attestation:export-pubkey` (a task in the attestation/
-# concern — it must not write the pubkey file across the boundary itself,
-# ADR 0013 / CX #3). Under bats there is no repo mise.toml above the scratch
-# to resolve that task, so this stub records the call and runs the same one
+# concern — it must not write the pubkey file across the boundary itself).
+# Under bats there is no repo mise.toml above the scratch to resolve that
+# task, so this stub records the call and runs the same one
 # `cosign public-key` line against the scratch OpenBao, writing into
 # <outdir>. Any other `mise` invocation is an error — the bootstrap should
 # call nothing else.

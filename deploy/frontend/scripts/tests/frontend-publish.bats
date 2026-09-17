@@ -2,7 +2,7 @@
 
 # frontend-publish.sh — `mise run frontend:publish`. Renders the cv_frontend
 # Timoni module against an APPROVED image digest and flux-pushes the
-# manifests as an OCI artifact (Plan B M3, docs/adr/0019).
+# manifests as an OCI artifact.
 #
 # These cover argument validation and the verify gate — the operator-boundary
 # contract that NOTHING is rendered or pushed unless the pinned approval

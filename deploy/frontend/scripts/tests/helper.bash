@@ -9,7 +9,7 @@ while [ "$_d" != "/" ] && [ ! -e "$_d/mise.toml" ]; do _d="$(dirname "$_d")"; do
 . "$_d/tests/lib/scratch.bash"
 unset _d
 
-# --- frontend-build.sh fake-bin PATH shim (T7b3) --------------------------
+# --- frontend-build.sh fake-bin PATH shim -----------------------------
 # frontend-build.sh drives a real cluster (kubectl/tkn) + registry (oras) +
 # git + the frontend:seed mise task. None of that belongs in a pre-merge
 # gate, so every one is a stub whose behaviour each test tweaks via STUB_*

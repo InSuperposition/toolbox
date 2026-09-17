@@ -1,4 +1,4 @@
-# G1 fixture (ci/tests/build-pipeline/chainsaw-test.yaml): a trivy JSON
+# Fixture (ci/tests/build-pipeline/chainsaw-test.yaml): a trivy JSON
 # report carrying one CRITICAL finding. Delivered as a ConfigMap so the
 # chainsaw step binds it straight to the `gate` Task's `shared` workspace
 # with a plain `apply` — no `kubectl create --from-file`, no shell.

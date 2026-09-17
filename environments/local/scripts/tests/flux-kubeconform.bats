@@ -25,8 +25,8 @@ teardown() {
 	# flux-instance (1) + operator OCIRepository+HelmRelease (2) + zot-sync (1)
 	# + ci-runtime (1) + ci-defs ci-tasks/ci-pipelines (2) + cert-manager
 	# OCIRepository+HelmRelease (2) + cert-manager-pki Flux Kustomization (1)
-	# + trust-manager OCIRepository+HelmRelease (2 — T7c R1b-i, ADR 0022)
-	# + trust-manager-bundles Flux Kustomization (1 — T7c R1b-ii)
+	# + trust-manager OCIRepository+HelmRelease (2)
+	# + trust-manager-bundles Flux Kustomization (1)
 	# + kyverno OCIRepository+HelmRelease (2) + kyverno-policy Flux
 	# Kustomization (1) + frontend OCIRepository + frontend-ns/frontend Flux
 	# Kustomizations (3) = 19.

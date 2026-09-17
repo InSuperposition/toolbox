@@ -16,9 +16,9 @@ set -euo pipefail
 #      the same value toggles main.tf sets, then assert the rendered
 #      shape: spire-crds' CRDs exist, spire-server is a StatefulSet with
 #      the overridden ServiceAccount name and the vault upstreamAuthority
-#      plugin wired to PR 1's OpenBao mount/role, spire-agent is a
-#      DaemonSet, the k8sPSAT TokenReview ClusterRole exists, and (PR 3)
-#      the controller-manager's default ClusterSPIFFEID + its
+#      plugin wired to OpenBao's `pki` mount and its kubernetes-auth role,
+#      spire-agent is a DaemonSet, the k8sPSAT TokenReview ClusterRole
+#      exists, and the controller-manager's default ClusterSPIFFEID + its
 #      ValidatingWebhookConfiguration render — declarative registration
 #      for the ci-namespace consumer, not a hand-rolled entry-create
 #      script.
@@ -186,11 +186,11 @@ check "spire-server's ServiceAccount name is the explicit override" \
 	"grep -qE '^\\s+serviceAccountName: spire-server\$' '$rendered'"
 check "spire-agent is a DaemonSet" \
 	"grep -qxE 'kind: DaemonSet' '$rendered'"
-check "vault upstreamAuthority wired to PR 1's OpenBao mount/role" \
+check "vault upstreamAuthority wired to OpenBao's pki mount and kubernetes-auth role" \
 	"grep -qF '\"pki_mount_point\": \"pki\"' '$rendered' && grep -qF '\"k8s_auth_mount_point\": \"kubernetes\"' '$rendered' && grep -qF '\"k8s_auth_role_name\": \"spire_server\"' '$rendered'"
 check "k8sPSAT TokenReview ClusterRole is present" \
 	"grep -qE 'resources: \\[tokenreviews\\]' '$rendered'"
-check "controller-manager's default ClusterSPIFFEID is present (PR 3 — declarative registration)" \
+check "controller-manager's default ClusterSPIFFEID is present (declarative registration, not a hand-rolled entry-create script)" \
 	"grep -qE 'kind: ClusterSPIFFEID' '$rendered' && grep -qE 'kind: ValidatingWebhookConfiguration' '$rendered'"
 check "the default ClusterSPIFFEID covers ns ci (excludes only spire's own namespaces)" \
 	"grep -qF 'operator: NotIn' '$rendered'"

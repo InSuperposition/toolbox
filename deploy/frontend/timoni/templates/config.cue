@@ -12,7 +12,7 @@ import (
 // so a tag-only or malformed image reference fails `timoni mod vet` before
 // anything is rendered — the same "a tag is mutable, which is the whole
 // point of this pipeline" contract `frontend-deploy.sh` / `frontend-serve.sh`
-// enforce for the pitchfork path (ADR 0009). Proven by the negative fixture
+// enforce for the pitchfork path. Proven by the negative fixture
 // in `../tests/`.
 #Config: {
 	// Set at apply-time from the cluster API (timoni.cue).
@@ -92,8 +92,8 @@ import (
 //
 // ServiceAccount + Service + Deployment only. No ConfigMap (the app carries
 // its own config), no test Job (the k8s path is delivery-only — the app has
-// a known Remix v3 boot crash, `deploy/frontend/README.md`; workload health
-// is asserted by chainsaw at the "container started" level, not "Available").
+// a known boot crash under Remix v3); workload health is asserted by
+// chainsaw at the "container started" level, not "Available".
 #Instance: {
 	config: #Config
 

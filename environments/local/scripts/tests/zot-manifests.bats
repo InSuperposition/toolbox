@@ -1,13 +1,13 @@
 #!/usr/bin/env bats
 
-# environments/local/zot/zot.yaml invariants — the interim local zot registry
-# (TODOS.md T7b0). Static assertions only; the real in-cluster push / pull /
-# Referrers proof rides with T7b1 (the first build Task that targets zot),
-# the same way T7a proved buildkit in a spike, not a lint.
+# environments/local/zot/zot.yaml invariants. Static assertions only; the
+# real in-cluster push / pull / Referrers proof rides with the first build
+# Task that targets zot, the same way an earlier build-time spike proved
+# buildkit's own push/pull path, not a lint.
 #
 # Catches a future regression: an un-pinned image, mTLS silently dropped,
-# GC turned back on, or the exposure widened from NodePort to LoadBalancer —
-# `mise run check` goes red.
+# GC turned back on, or the exposure widened from ClusterIP to NodePort or
+# LoadBalancer — `mise run check` goes red.
 
 setup() {
 	load helper
@@ -25,7 +25,7 @@ setup() {
 	[ "$status" -ne 0 ]
 }
 
-@test "the zot config requires mTLS for push (SPIRE Phase 1 PR 3 — anonymous read stays open)" {
+@test "the zot config requires a SPIFFE client cert (mTLS) for push, anonymous read stays open" {
 	run grep -n '"mtls"' "$ZOT"
 	[ "$status" -eq 0 ]
 	run grep -n '"identityAttributes"' "$ZOT"
@@ -35,9 +35,9 @@ setup() {
 @test "the zot accessControl grants read/create/update to the registered ci-namespace identity" {
 	run grep -nF 'spiffe://toolbox.local/ns/ci/sa/default' "$ZOT"
 	[ "$status" -eq 0 ]
-	# update (2026-09-16, live-verified): create alone only authorizes the
-	# first-ever push to a given tag/repo — a CI re-run on an unchanged
-	# commit needs update too, or its second push gets a 403.
+	# update matters because create alone only authorizes the first-ever
+	# push to a given tag/repo — a CI re-run on an unchanged commit needs
+	# update too, or its second push gets a 403.
 	run grep -n '"actions": \["read", "create", "update"\]' "$ZOT"
 	[ "$status" -eq 0 ]
 	run grep -n '"defaultPolicy": \["read"\]' "$ZOT"
@@ -49,12 +49,12 @@ setup() {
 	[ "$status" -eq 0 ]
 }
 
-@test "GC is off (subsumes deleteUntagged: false for the interim store)" {
+@test "GC is off (subsumes deleteUntagged: false — this store never deletes)" {
 	run grep -nE '"gc":\s*false' "$ZOT"
 	[ "$status" -eq 0 ]
 }
 
-@test "the Service is ClusterIP, never NodePort or LoadBalancer (T7c R1b-ii-c drops the exposed port)" {
+@test "the Service is ClusterIP, never NodePort or LoadBalancer, since one in-cluster name and cert SAN set needs no host-exposed port" {
 	run grep -nE 'type:\s*ClusterIP' "$ZOT"
 	[ "$status" -eq 0 ]
 	run grep -nE 'type:\s*NodePort' "$ZOT"

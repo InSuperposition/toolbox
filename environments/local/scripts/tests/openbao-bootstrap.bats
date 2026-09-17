@@ -1,8 +1,7 @@
 #!/usr/bin/env bats
 
 # environments/local/scripts/openbao-bootstrap.sh — the one-time
-# imperative bridge that moves / recovers the local OpenBao in the cluster
-# (T7c Increment 4).
+# imperative bridge that moves / recovers the local OpenBao in the cluster.
 #
 # The full migration needs an OrbStack cluster + Flux (+ optionally a live
 # host daemon), so it is proven by the [k8s] chainsaw
@@ -51,7 +50,7 @@ seed_bundle() {
 	run "$SW"
 	[ "$status" -ne 0 ]
 	[[ "$output" == *"no migration source"* ]]
-	[[ "$output" == *"ADR 0016"* ]]
+	[[ "$output" == *"no host daemon left to fall back to"* ]]
 	[[ "$output" == *"resume signing"* ]]
 	[[ "$output" == *"attestation:export-pubkey"* ]]
 }
@@ -87,9 +86,9 @@ seed_bundle() {
 }
 
 @test "the seal Secret is created from the bundle key file, never a literal or stdin" {
-	# Codex #1 — the pod auto-unseals from this Secret; its bytes must be the
-	# restore bundle's 0600 seal key, delivered --from-file (never state,
-	# never a helm value, never --from-literal / a piped heredoc).
+	# The pod auto-unseals from this Secret; its bytes must be the restore
+	# bundle's 0600 seal key, delivered --from-file (never state, never a
+	# helm value, never --from-literal / a piped heredoc).
 	run grep -Eq 'create secret generic openbao-seal' "$SW"
 	[ "$status" -eq 0 ]
 	run grep -Eq -- '--from-file=seal\.key="\$SNAP_DIR/seal\.key"' "$SW"
@@ -99,9 +98,9 @@ seed_bundle() {
 }
 
 @test "the approval-key assertion reads the endpoint directly, never via a nested \`mise run\`" {
-	# T7c Increment 4 eng review, Codex #4: `mise run` re-applies mise.toml's
-	# [env], pinning VAULT_ADDR at the host loopback — so an assertion routed
-	# through `mise run attestation:export-pubkey` verifies the host, not the
+	# A nested `mise run` re-applies mise.toml's [env], pinning VAULT_ADDR at
+	# the host loopback — so an assertion routed through
+	# `mise run attestation:export-pubkey` verifies the host, not the
 	# migrated cluster. assert_key_preserved must call cosign directly.
 	# the bug was `(cd "$root" && mise run attestation:export-pubkey)` — guard
 	# the two invocation shapes, not the backtick-quoted hint in a die message
@@ -123,8 +122,8 @@ seed_bundle() {
 # migration), so the function body is extracted into its own snippet and
 # sourced on its own, then exercised against a stub `bao` on PATH. No
 # cluster, no network — a pure exit-code classification test, mandatory
-# per the project's regression-test rule (this PR rewrote the caller's
-# reachability logic; the classifier itself needs its own proof).
+# per the project's regression-test rule: the caller's reachability logic
+# changed, so the classifier itself needs its own proof.
 setup_bao_reachable() {
 	local snippet="$SCRATCH/bao_reachable.sh"
 	sed -n '/^bao_reachable() {/,/^}/p' "$SW" >"$snippet"

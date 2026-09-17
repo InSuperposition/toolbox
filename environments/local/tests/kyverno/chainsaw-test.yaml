@@ -6,26 +6,26 @@
 #
 # Asserts the RUNNING state — it does not install Kyverno or tear anything
 # down beyond the pods it creates. The deny variants (signed rejection,
-# wrong subject, malformed predicate) are covered by the K1 T6 build-time
-# spike (docs/adr/0020) + attestation-verify.bats; this only exercises the
-# admit path and the common unsigned-image deny.
+# wrong subject, malformed predicate) are covered by a build-time spike
+# that live-proved semantic equivalence to attestation-verify.sh for all
+# four approval-selection cases, plus attestation-verify.bats; this only
+# exercises the admit path and the common unsigned-image deny.
 #
-# Fixtures are REAL, on the in-cluster zot (T7c R2 — repointed from GHCR):
+# Fixtures are REAL, on the in-cluster zot (repointed here from GHCR once
+# Kyverno's referrer-discovery worked against it directly):
 #   - approved: cv-frontend@sha256:fc86908bbe... carries a real approval
 #     attestation signed by openbao://approval-key (annotated referrer).
-#     This is the PLATFORM digest, not the index the tag resolves to —
-#     confirmed live, `/investigate` 2026-09-15: Kyverno's
-#     ImageValidatingPolicy has no platform-selection config and denies
-#     every index reference with "no child with platform linux/amd64"
-#     (BuildKit's `attest:provenance` opt, T8, makes every real push a
-#     multi-manifest index). `attestation-sign.sh` now resolves+signs
-#     this platform digest itself (`oras resolve --platform=linux/arm64`)
-#     — never hand-pin the index digest here again.
-#     Re-pinned 2026-09-15 (P3 TODOS.md item, then again for this fix) —
-#     the prior digest (sha256:d0c92cb1...) had been evicted from zot
-#     (404, unclear when); this is a re-approval of the same cv_frontend
-#     revision (db174d91), rebuilt fresh, mirroring
-#     deploy/frontend/timoni.lock's `image_ref` re-pin.
+#     This is the PLATFORM digest, not the index the tag resolves to:
+#     Kyverno's ImageValidatingPolicy has no platform-selection config and
+#     denies every index reference with "no child with platform
+#     linux/amd64" (BuildKit's `attest:provenance` opt, which records
+#     build provenance, makes every real push a multi-manifest index).
+#     `attestation-sign.sh` resolves+signs this platform digest itself
+#     (`oras resolve --platform=linux/arm64`) — never hand-pin the index
+#     digest here.
+#     If this digest is ever missing from zot (evicted, or the fixture
+#     re-pinned after re-approval), regenerate it per the instructions
+#     below rather than reusing a stale value.
 #   - unsigned: cv-frontend@sha256:dc2d74b2... (a busybox stand-in pushed
 #     with no attestation — the deny path only cares that no referrer verifies)
 # Regenerate the approved one after an approval-key rotation, or if it

@@ -1,4 +1,4 @@
-# cv_frontend in-cluster delivery (Plan B M3, docs/adr/0019) — the Timoni
+# cv_frontend in-cluster delivery — the Timoni
 # module rendered by `mise run frontend:publish`, pushed as an OCI artifact
 # to the local zot, and reconciled here.
 #
@@ -7,16 +7,16 @@
 #
 #   OCIRepository frontend   — pulls the rendered-manifest artifact (D_man,
 #                              deploy/frontend/timoni.lock) from the
-#                              in-cluster zot over HTTPS (T7c R1b-ii-c;
+#                              in-cluster zot over HTTPS;
 #                              credential-free — `certSecretRef` trusts the
 #                              dev CA via the CA-only `zot-flux-ca` Secret,
 #                              `environments/local/flux/kustomization.yaml`).
 #                              `ref.digest`, NO spec.verify — the digest is
-#                              the trust boundary (ADR 0001); the cv_frontend
-#                              IMAGE's approval attestation + K1's
+#                              the trust boundary; the cv_frontend
+#                              IMAGE's approval attestation + the
 #                              ImageValidatingPolicy are the workload trust
 #                              gate, not this manifest wrapper. (An OpenBao
-#                              Transit manifest-signing key is an O4
+#                              Transit manifest-signing key is a deferred
 #                              follow-up.)
 #   frontend-ns Kustomization — applies ONLY deploy/frontend/k8s/ (the
 #                              `frontend` Namespace + its PSA + approval

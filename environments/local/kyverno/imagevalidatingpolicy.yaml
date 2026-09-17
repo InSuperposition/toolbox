@@ -1,10 +1,10 @@
 # Admission-time verification of the cv_frontend approval attestation on the
-# local dev reference cluster (Plan B K1, docs/adr/0020). The declarative
+# local dev reference cluster. The declarative
 # equivalent of frontend-serve.sh's launch re-verify, for the in-cluster
-# delivery path (docs/adr/0019).
+# delivery path.
 #
-# Semantic contract (proven equivalent to attestation-verify.sh by the K1
-# build-time spike, 2026-09-10 — docs/adr/0020):
+# Semantic contract (proven equivalent to attestation-verify.sh by a
+# build-time spike):
 #   - the attestation is signed by the approval key (verifyAttestationSignatures
 #     > 0; the key is read from the `kyverno-approval-pubkey` ConfigMap in ns
 #     kyverno — one source of truth, exported from openbao://approval-key)
@@ -19,17 +19,17 @@
 #     cv_frontend pod is admitted
 #
 # Scope: any namespace LABELLED `toolbox.dev/cv-frontend: approval-enforced`
-# (M3's `frontend` namespace carries it; `chainsaw-kyverno`'s ephemeral test
+# (the `frontend` namespace delivered by `frontend:publish` carries it; `chainsaw-kyverno`'s ephemeral test
 # namespace carries it). A label, not `kubernetes.io/metadata.name: frontend`,
 # so the blast radius stays scoped (plan intent — a Kyverno outage with
 # failurePolicy: Fail blocks cv_frontend pod creation only in labelled
 # namespaces) while an ephemeral-namespace chainsaw test can still exercise
 # it. `matchImageReferences` narrows further to the cv_frontend repo.
 #
-# tlog is ignored: toolbox cosign is keyed via OpenBao Transit, no Rekor
-# (docs/adr/0004). Image source: the in-cluster zot (T7c R2 — repointed
-# from GHCR now that zot is HTTPS-only, T7c R1b-ii-c, and Kyverno's
-# referrer discovery works against it, TODOS T12 resolved).
+# tlog is ignored: toolbox cosign is keyed via OpenBao Transit, no Rekor.
+# Image source: the in-cluster zot — repointed from GHCR once zot became
+# HTTPS-only and Kyverno's referrer discovery started working against it
+# directly.
 apiVersion: policies.kyverno.io/v1
 kind: ImageValidatingPolicy
 metadata:

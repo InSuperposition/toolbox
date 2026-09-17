@@ -2,22 +2,22 @@
 # orbstack cluster running a bootstrapped Flux). ALWAYS-RUN — no probe: once
 # trust-manager-helmrelease.yaml is on the ref the FluxInstance syncs, this
 # test must pass, and a regression that drops it from the Flux inventory
-# must turn the run RED, not green-skip (T7c R1b-i eng review, Codex #4).
+# must turn the run RED, not green-skip.
 #
 # In its own subdir so chainsaw discovers it (chainsaw's default --test-file
 # is the fixed name `chainsaw-test`; a sibling test needs its own subdir —
 # same layout as ci-reconcile/, flux-reconcile/).
 #
-# Asserts the RUNNING state of the trust-manager install (docs/adr/0022) —
-# it does NOT bootstrap or tear down. "HelmRelease Ready" alone does not
+# Asserts the RUNNING state of the trust-manager install — it does NOT
+# bootstrap or tear down. "HelmRelease Ready" alone does not
 # prove trust-manager works: the chart ships its own ValidatingWebhookConfig
 # (`failurePolicy: Fail`) whose caBundle is populated by cert-manager's
 # cainjector from a chart-created self-signed Certificate. So the dry-run
 # step server-side dry-run applies a Bundle — if the webhook cert / caBundle
-# / controller is broken, that apply fails (R1b-i eng review, Codex #2).
+# / controller is broken, that apply fails.
 #
-# T7c R1b-ii adds the REAL `toolbox-ca-bundle` Bundle: asserts the
-# `trust-manager-bundles` Flux Kustomization is Ready, the Bundle itself
+# The REAL `toolbox-ca-bundle` Bundle: asserts the `trust-manager-bundles`
+# Flux Kustomization is Ready, the Bundle itself
 # reports Synced, and the merged ConfigMap actually landed in BOTH consumer
 # namespaces (`kyverno`, `ci`) with more than one certificate PEM block —
 # proof the `useDefaultCAs` public-root snapshot and the `toolbox-dev-ca`

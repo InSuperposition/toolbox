@@ -1,10 +1,10 @@
-# T8 — build provenance (TODOS.md). The ServiceAccount the provenance-sign
-# Task's pod runs as — bound by `deploy/frontend/pipelinerun.cue`'s
+# The ServiceAccount the provenance-sign Task's pod runs as — bound by
+# `deploy/frontend/pipelinerun.cue`'s
 # taskRunSpecs override to just that one PipelineTask, never the whole
 # PipelineRun. No RBAC (no Role/RoleBinding) — this SA's only job is being
 # a bindable identity for OpenBao's k8s-auth method
 # (`environments/local/openbao/main.tf`'s `chains_provenance` role, bound
-# by name only — a cross-concern reference, not a file edge, ADR 0012/0013).
+# by name only — a cross-concern reference, not a file edge).
 # It never touches the k8s API.
 #
 # automountServiceAccountToken stays the k8s default (true, unset here) —

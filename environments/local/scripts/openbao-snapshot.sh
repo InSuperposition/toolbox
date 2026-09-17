@@ -9,11 +9,11 @@ set -euo pipefail
 # The three MUST travel together. `bao operator raft snapshot restore
 # -force` replaces the seal config and the token store, so the restored
 # instance is sealed by the snapshot's ORIGINAL seal key and only its
-# ORIGINAL root token authenticates (ADR 0011/0016;
-# environments/local/README.md § Disaster restore). A bare `.snap` on its
-# own is not recoverable. Copy the whole snapshots/ directory off-machine
-# for real disaster recovery — after the host daemon's retirement this
-# bundle is the ONLY genesis path (ADR 0016).
+# ORIGINAL root token authenticates (environments/local/README.md §
+# Disaster restore). A bare `.snap` on its own is not recoverable. Copy
+# the whole snapshots/ directory off-machine for real disaster recovery —
+# now that no host daemon exists to fall back to, this bundle is the ONLY
+# genesis path.
 #
 # `mise run local:openbao:snapshot` calls this with no arguments; the
 # bootstrap bridge also calls it to refresh the bundle post-migration. Test

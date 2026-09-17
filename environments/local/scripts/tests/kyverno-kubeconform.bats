@@ -2,7 +2,7 @@
 
 # environments/local/scripts/kyverno-kubeconform.sh — the static schema gate
 # for the Kyverno ImageValidatingPolicy + generated approval-pubkey
-# ConfigMap (Plan B K1). Runs on a scratch copy so a deliberately broken
+# ConfigMap. Runs on a scratch copy so a deliberately broken
 # manifest can be asserted to fail (the guard must FAIL on bad input, not
 # only pass on good). The scratch copy includes attestation/cosign-approval.pub
 # because the configMapGenerator reads it via `../../../`.

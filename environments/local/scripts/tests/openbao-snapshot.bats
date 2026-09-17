@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
 
 # environments/local/scripts/openbao-snapshot.sh — writes OpenBao's
-# disaster-recovery bundle (the raft snapshot + seal.key + root.token,
-# ADR 0011/0016). The real `bao operator raft snapshot save` needs a live
+# disaster-recovery bundle (the raft snapshot + seal.key + root.token).
+# The real `bao operator raft snapshot save` needs a live
 # OpenBao endpoint, so it's stubbed here (no existing fake in this repo
 # implements it — the others only fake `bao status`/`bao read`); the real
 # end-to-end restore claim is proven by the [k8s] chainsaw suite and the

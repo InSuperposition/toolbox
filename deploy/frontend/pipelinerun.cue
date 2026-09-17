@@ -5,10 +5,10 @@
 //
 // `frontend-build.sh` runs that, pipes it to `kubectl create -f -`, and
 // watches the run. Plain CUE, one self-contained file, no cue.mod, no
-// cross-concern import — the exact shape of attestation/verdict-approved.cue
-// (T7b3 plan D1/D2: Timoni's module+bundle+~1.3MB vendored cue.mod only
-// earns its footprint for a reconciled Instance; a PipelineRun is
-// fire-and-forget and stays operator-triggered through Phase 3).
+// cross-concern import — the exact shape of attestation/verdict-approved.cue.
+// Timoni's module+bundle+~1.3MB vendored cue.mod only earns its footprint
+// for a reconciled Instance; a PipelineRun is fire-and-forget and stays
+// operator-triggered instead.
 //
 // CUE is the schema here (this repo's "schemas required for core
 // functionality"): _rev / _defsRev carry a hex-SHA regex and are @tag
@@ -16,9 +16,9 @@
 // closed (exit 1, non-concrete / constraint violation) before anything
 // reaches the cluster.
 //
-// ci/ never names a consumer (ADR 0014); this file is where cv_frontend's
-// repo URLs and image ref live, binding the params-only
-// `build-scan-approve` Pipeline by name.
+// ci/ never names a consumer; this file is where cv_frontend's repo URLs
+// and image ref live, binding the params-only `build-scan-approve`
+// Pipeline by name.
 
 package pipelinerun
 
@@ -30,18 +30,18 @@ _defsRev: =~"^[0-9a-f]{7,40}$" @tag(defsRev)
 // cv_frontend's registry facts — the ONE place these hostnames live.
 // The pipeline pushes/scans over the in-cluster service DNS; every
 // host-side tool (`oras resolve`, `attestation:sign`, `frontend:deploy`,
-// `frontend:publish`) addresses the SAME name (T7c R1b-ii-c — zot's NodePort
-// is gone; OrbStack routes the Mac host into the cluster network directly,
-// same as `openbao-tls`, so `.host` and `.inCluster` are now identical —
-// kept as two fields, not collapsed to one, so every existing
-// `-e image.host` / `-e image.manifests.host` call site keeps working
-// unchanged). `cue export -e image.host` hands the operator that name;
+// `frontend:publish`) addresses the SAME name — zot's NodePort is gone;
+// OrbStack routes the Mac host into the cluster network directly, same as
+// `openbao-tls`, so `.host` and `.inCluster` are now identical — kept as
+// two fields, not collapsed to one, so every existing `-e image.host` /
+// `-e image.manifests.host` call site keeps working unchanged.
+// `cue export -e image.host` hands the operator that name;
 // `-e image.manifests.inCluster` the form the Flux `OCIRepository frontend`
-// pulls (Plan B M3, ADR 0019).
+// pulls.
 #image: {
 	inCluster: "zot.zot.svc.cluster.local:5000/cv-frontend"
 	host:      "zot.zot.svc.cluster.local:5000/cv-frontend"
-	// The rendered-manifest OCI artifact (D_man) — `frontend:publish`
+	// The rendered-manifest OCI artifact — `frontend:publish`
 	// `flux push`es it to `.host`, the Flux `OCIRepository` pulls `.inCluster`.
 	manifests: {
 		inCluster: "zot.zot.svc.cluster.local:5000/cv-frontend-manifests"
@@ -56,7 +56,7 @@ image: #image
 	metadata: {
 		generateName: "cv-frontend-"
 		// Never rely on the ambient kubeconfig namespace (the default-vs-ci
-		// bug that bit twice in T7b1-followup / T7b2 verification).
+		// bug that previously landed the run in the wrong namespace).
 		namespace: "ci"
 	}
 	spec: {
@@ -65,7 +65,7 @@ image: #image
 		// terminal condition rather than orphaning pods.
 		timeouts: pipeline: "15m"
 		pipelineRef: name:  "build-scan-approve"
-		// T8 (TODOS.md): only provenance-sign runs as provenance-signer —
+		// Only provenance-sign runs as provenance-signer —
 		// every other PipelineTask keeps the ci namespace's default SA.
 		// The role it authenticates to is scoped to chains-provenance-key
 		// only (environments/local/openbao/main.tf), never approval-key.
@@ -93,9 +93,9 @@ image: #image
 				configMap: name: "buildkitd-mirror"
 			},
 			{
-				// T7c R1b-ii-c: zot is HTTPS-only — the trust-manager
-				// toolbox-ca-bundle ConfigMap (already in ns `ci`, R1b-ii-a)
-				// gives `build`/`scan-attach` the dev CA.
+				// zot is HTTPS-only — the trust-manager toolbox-ca-bundle
+				// ConfigMap (already in namespace `ci`) gives
+				// `build`/`scan-attach` the dev CA.
 				name: "ca-bundle"
 				configMap: name: "toolbox-ca-bundle"
 			},

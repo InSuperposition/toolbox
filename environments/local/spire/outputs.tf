@@ -14,6 +14,6 @@ output "release_name" {
 }
 
 output "bundle_configmap_name" {
-  description = "Name of the ConfigMap spire-server publishes its own trust bundle to (bundlePublisher.k8sConfigMap, format=pem, key bundle.crt) — the chart's own default name, for PR 3 (zot) to reference."
+  description = "Name of the ConfigMap spire-server publishes its own trust bundle to (bundlePublisher.k8sConfigMap, format=pem, key bundle.crt) — the chart's own default name, for zot's mTLS listener to reference."
   value       = "spire-bundle"
 }

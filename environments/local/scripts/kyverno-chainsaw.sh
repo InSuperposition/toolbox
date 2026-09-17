@@ -1,25 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# hk `chainsaw-kyverno` step â the [k8s]-gated running-state check for the
-# Kyverno ImageValidatingPolicy (Plan B K1, docs/adr/0020). Same gate shape
-# as environments/local/scripts/flux-chainsaw.sh / openbao-chainsaw.sh:
+# hk `chainsaw-kyverno` step — the [k8s]-gated running-state check for the
+# Kyverno ImageValidatingPolicy that gates admission on the cv_frontend
+# approval attestation. Same gate shape as
+# environments/local/scripts/flux-chainsaw.sh / openbao-chainsaw.sh:
 #
 #   - no chainsaw / no kube-context / cluster unreachable -> skip, exit 0
-#     (GitHub runners have no OrbStack â this must not be fatal in CI)
+#     (GitHub runners have no OrbStack — this must not be fatal in CI)
 #   - the `frontend-approval` ImageValidatingPolicy absent -> skip, exit 0
 #     (the `kyverno-policy` Flux Kustomization has not reconciled onto this
-#     cluster yet â it only exists once this branch is on the ref the
+#     cluster yet — it only exists once this branch is on the ref the
 #     FluxInstance syncs, i.e. after merge; same as ci-reconcile in
 #     flux-chainsaw.sh)
 #
 # It asserts admission behaviour against a REAL approved cv_frontend digest
-# and a REAL unsigned one â the live equivalent of `attestation-verify.sh`.
+# and a REAL unsigned one — the live equivalent of `attestation-verify.sh`.
 # It does NOT install Kyverno or tear anything down. The deny variants
-# (signed rejection, wrong subject, malformed predicate) are proven by the
-# K1 T6 build-time spike (docs/adr/0020) and attestation-verify.bats â this
-# test's unique value is that the Flux-reconciled policy gates a real
-# cv_frontend pod BOTH ways.
+# (signed rejection, wrong subject, malformed predicate) are proven by a
+# build-time spike that live-proved semantic equivalence to
+# attestation-verify.sh for all four approval-selection cases, plus
+# attestation-verify.bats — this test's unique value is
+# that the Flux-reconciled policy gates a real cv_frontend pod BOTH
+# ways.
 #
 # Test seam: TOOLBOX_KYVERNO_SKIP_CHAINSAW=1 forces the skip path.
 
@@ -34,7 +37,7 @@ REPO_ROOT="$SCRIPT_DIR"
 while [ "$REPO_ROOT" != / ] && [ ! -e "$REPO_ROOT/mise.toml" ]; do REPO_ROOT="$(dirname "$REPO_ROOT")"; done
 
 skip() {
-	echo "kyverno-chainsaw: $* â skipping ([k8s] gate)"
+	echo "kyverno-chainsaw: $* — skipping ([k8s] gate)"
 	exit 0
 }
 

@@ -10,11 +10,11 @@ set -euo pipefail
 # environments/local/tests/flux/. Each subdir holds ONE Test asserting the
 # RUNNING state of one slice of the reconcile — it does NOT bootstrap or
 # tear down (the bootstrap path + drift-and-revert are the documented
-# `mise run local:flux:bootstrap` acceptance run, PR #19).
+# `mise run local:flux:bootstrap` acceptance run).
 #
 # SUBDIR GATING (`subdir_gate`): a subdir whose CRs are merged to `main`
 # ALWAYS runs — a regression that drops one from the Flux inventory must
-# turn the run RED, not green-skip (R1b-i eng review, Codex #4). A subdir
+# turn the run RED, not green-skip. A subdir
 # whose CRs are not yet on the ref the FluxInstance syncs gets a `kubectl
 # get` probe so a feature branch does not fail on the not-yet-reconciled
 # state; that probe is transitional and removed once the chunk merges.
@@ -45,7 +45,7 @@ subdir_gate() {
 	ci-reconcile)
 		# ci-runtime Kustomization exists on the cluster only once
 		# environments/local/flux/{ci-runtime,ci-defs}.yaml are on the synced
-		# ref (T7c Increment 2 — merged PR #21; probe kept for branch safety).
+		# ref (already merged to main; probe kept for branch safety).
 		kubectl --context "$CONTEXT" -n flux-system \
 			get kustomization.kustomize.toolkit.fluxcd.io ci-runtime >/dev/null 2>&1
 		;;

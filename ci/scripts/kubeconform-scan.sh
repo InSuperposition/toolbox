@@ -17,8 +17,8 @@ set -euo pipefail
 # manifests — only the manifest dirs are validated.
 #
 # Each manifest dir also carries a kustomization.yaml (kustomize.config.k8s.io,
-# not a cluster kind — the per-path inventory Flux reconciles, T7c Increment
-# 2). It has no CRD schema and is skipped by filename, same as the
+# not a cluster kind — the per-path inventory Flux reconciles). It has no
+# CRD schema and is skipped by filename, same as the
 # environments/local/flux/ gate does.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 
 # The load-bearing integration: mise.toml's [env] injects VAULT_TOKEN by
-# reading the 0600 root.token file (ADR 0011). This proves the actual
+# reading the 0600 root.token file. This proves the actual
 # `mise` resolution, not just "a file exists".
 
 setup() {
@@ -53,7 +53,7 @@ _ssl_cert_file() {
 }
 
 @test "mise [env] SSL_CERT_FILE falls back to a real OS trust-store file (never empty) when zot-bundle.crt is absent" {
-  # A bug shipped and caught live (T7c R1b-ii-b): mise ALWAYS exports a key
+  # A bug shipped and caught live: mise ALWAYS exports a key
   # declared in [env], even an empty-string template result — and SSL_CERT_FILE
   # is a convention `hk` itself reads to build its own HTTP client, which
   # crashes outright ("Error loading CA root certificate ... at ''") the

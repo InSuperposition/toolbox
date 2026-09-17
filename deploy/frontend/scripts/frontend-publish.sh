@@ -4,40 +4,38 @@ set -euo pipefail
 # `mise run frontend:publish -- <registry/repo@sha256:...> <sha256:attestation-digest> <revision>`
 #
 # Render the cv_frontend Timoni module against the APPROVED image digest and
-# publish the rendered manifests as an OCI artifact for Flux to reconcile
-# (docs/adr/0019, Plan B M3).
+# publish the rendered manifests as an OCI artifact for Flux to reconcile.
 #
 # Verify FIRST — nothing is rendered or pushed unless the pinned approval
 # attestation holds. This is the operator-boundary gate, the same shape as
 # `attestation:sign`'s own verify step (the verify seam is the
 # attestation/ concern's, reached through lib/frontend.sh's
-# TOOLBOX_ATTESTATION_VERIFY seam — the one allowed cross-concern edge,
-# repo-structure.md § The concerns, ADR 0013). The render + push are
-# deterministic (`timoni build` is reproducible; a digest is content
-# addressed), so they need no privileged in-cluster pipeline — a Tekton Task
-# would only add a container image to source for a CLI that ships no image.
+# TOOLBOX_ATTESTATION_VERIFY seam — the one allowed cross-concern edge).
+# The render + push are deterministic (`timoni build` is reproducible; a
+# digest is content addressed), so they need no privileged in-cluster
+# pipeline — a Tekton Task would only add a container image to source for
+# a CLI that ships no image.
 #
-# Three distinct digests (docs/designs/digest-as-source-of-truth.md):
+# Three distinct digests:
 #   D_img — the approved cv_frontend container image ($1). Goes in the
-#           rendered Deployment; K1's ImageValidatingPolicy verifies it.
+#           rendered Deployment; the ImageValidatingPolicy verifies it.
 #   D_att — the approval attestation on D_img ($2). Verified here.
 #   D_man — the manifest-artifact digest this script PRINTS. A human copies
 #           it into deploy/frontend/timoni.lock and
 #           environments/local/flux/frontend.yaml in the reviewed PR — the
-#           git pin is the reviewed artifact (ADR 0001). Never auto-committed.
+#           git pin is the reviewed artifact. Never auto-committed.
 #
-# The push targets zot's HTTPS listener (T7c R1b-ii-c) via `flux push
-# artifact`, which has no CA-file override (only `--insecure-registry` —
-# researched, `~/.claude/plans/t7c-distribution-t7d.md` § "R1b-ii-c
-# PRE-PLAN": flux2 can't be source-built, `oras push` would mean
-# hand-building its OCI layer). `--insecure-registry` is a named,
-# time-boxed interim, not a permanent accept (TODOS.md § R1b-ii-c) —
-# live-verified it skip-verifies over TLS rather than forcing plain HTTP,
-# so this still talks real HTTPS to zot, just without checking the cert.
-# The Flux `OCIRepository frontend` pulls the identical digest over the
-# same in-cluster Service DNS, WITH real verification (`certSecretRef` →
-# the dev CA) — the interim is scoped to this one operator-boundary push,
-# not the thing that actually matters for the running cluster.
+# The push targets zot's HTTPS listener via `flux push artifact`, which has
+# no CA-file override — only `--insecure-registry` (flux2 can't be
+# source-built; `oras push` would mean hand-building its OCI layer by
+# hand). `--insecure-registry` is a named, time-boxed interim, not a
+# permanent accept — live-verified it skip-verifies over TLS rather than
+# forcing plain HTTP, so this still talks real HTTPS to zot, just without
+# checking the cert. The Flux `OCIRepository frontend` pulls the identical
+# digest over the same in-cluster Service DNS, WITH real verification
+# (`certSecretRef` → the dev CA) — the interim is scoped to this one
+# operator-boundary push, not the thing that actually matters for the
+# running cluster.
 #
 # Exit: 0 published · 1 verification failed (nothing rendered or pushed) ·
 #       2 bad args · 5 timoni render failed · 6 flux push failed
@@ -130,7 +128,7 @@ echo "PUBLISHED  ${MANIFESTS_HOST}:${REVISION}"
 echo "  D_man (manifest artifact): $D_MAN"
 echo "  D_img (approved image):    $IMAGE_HEX"
 echo
-echo "record it in the reviewed PR (the git pin IS the artifact — ADR 0001):"
+echo "record it in the reviewed PR (the git pin IS the artifact):"
 echo "  deploy/frontend/timoni.lock         manifest_digest=$D_MAN"
 echo "  environments/local/flux/frontend.yaml  OCIRepository frontend  ref.digest: $D_MAN"
 echo "  (Flux pulls oci://${MANIFESTS_INCLUSTER}@${D_MAN})"

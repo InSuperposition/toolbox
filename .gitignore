@@ -5,3 +5,6 @@
 # ADR 0010) — nothing OpenBao-related is written under the worktree.
 **/tests/tmp/
 *.tfstate*
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

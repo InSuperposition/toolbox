@@ -2,15 +2,15 @@
 # orbstack cluster running a bootstrapped Flux). Server-side checks the static
 # kubeconform-flux gate cannot do: the operator ACCEPTED the committed
 # FluxInstance and reconciled it; source-controller actually fetched from git
-# (an artifact revision, not just a host clone — the OrbStack IPv6-egress
-# defect, TODOS.md); the OCIRepository is Ready, which means its
-# `spec.verify` cosign check passed (it fails closed); helm-controller adopted
-# the bridge's release into ONE HelmRelease; and the zot Kustomization
-# applied.
+# as an artifact revision, not just a host clone (OrbStack's IPv6-only
+# egress makes a host clone insufficient evidence); the OCIRepository is
+# Ready, which means its `spec.verify` cosign check passed (it fails
+# closed); helm-controller adopted the bridge's release into ONE
+# HelmRelease; and the zot Kustomization applied.
 #
 # It asserts the RUNNING state — it does not bootstrap or tear down. The
 # bootstrap path + the drift-and-revert are the documented `mise run
-# local:flux:bootstrap` acceptance run (PR #19).
+# local:flux:bootstrap` acceptance run.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -62,8 +62,9 @@ spec:
       try:
         # HelmRelease Ready => helm-controller adopted the bridge's release
         # (name+namespace match) and drives it. That it is an ADOPT, not a
-        # reinstall, is proven by `helm history` in the PR #19 acceptance run
-        # (revision 1 Install -> 2 Upgrade, one release).
+        # reinstall, is proven by `helm history` in the documented
+        # `mise run local:flux:bootstrap` acceptance run (revision 1 Install
+        # -> 2 Upgrade, one release).
         - assert:
             resource:
               apiVersion: helm.toolkit.fluxcd.io/v2

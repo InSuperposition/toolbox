@@ -5,7 +5,7 @@
 # before `helm`, MUST install a digest (never a tag), and MUST thread one
 # kube-context through every call. Fake `cosign` / `helm` / `kubectl` on
 # PATH cover the decision logic without a cluster; the real install is the
-# documented live `mise run local:flux:bootstrap` acceptance run (PR #<1a>).
+# documented live `mise run local:flux:bootstrap` acceptance run.
 
 setup() {
 	load helper

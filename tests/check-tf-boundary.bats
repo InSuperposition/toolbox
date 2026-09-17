@@ -1,9 +1,9 @@
 #!/usr/bin/env bats
 
-# Mutation tests for tests/check-tf-boundary.sh (ADR 0018): the guard must
-# FAIL when a `kubernetes_*` / `kubernetes_manifest` resource is present, not
-# just pass on a clean tree. Each case runs the script inside a throwaway git
-# repo (it resolves its scan root from `git rev-parse --show-toplevel`).
+# Mutation tests for tests/check-tf-boundary.sh: the guard must FAIL when a
+# `kubernetes_*` / `kubernetes_manifest` resource is present, not just pass
+# on a clean tree. Each case runs the script inside a throwaway git repo
+# (it resolves its scan root from `git rev-parse --show-toplevel`).
 
 setup() {
 	SCRIPT="$(cd "$BATS_TEST_DIRNAME" && pwd)/check-tf-boundary.sh"

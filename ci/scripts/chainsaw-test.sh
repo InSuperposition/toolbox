@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # hk `chainsaw` step for the ci/ concern. [k8s]-gated: without an orbstack
-# cluster running Tekton it prints a skip line and exits 0 — T7a's
+# cluster running Tekton it prints a skip line and exits 0 — the
 # in-cluster checks are a local spike, not a pre-merge gate, and GitHub
 # runners have no OrbStack (ci/scripts/tests/helper.bash § [k8s] gate).
 #

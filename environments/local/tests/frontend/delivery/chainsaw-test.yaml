@@ -3,18 +3,16 @@
 # so this checks the rendered Deployment carries the approved image digest
 # and its pod's container actually started (pulled + ran, even though the
 # app then crashes) — NOT that the Deployment is Available or serving HTTP.
-# TODOS tracks adding the HTTP-200 assertion once cv_frontend is fixed.
+# An HTTP-200 assertion is deferred until cv_frontend's boot crash is fixed.
 #
 # The pinned digest below is the PLATFORM digest (not the index the tag
-# resolves to) — `attestation-sign.sh` resolves+signs it internally now
-# (Kyverno amd64-index admission fix, `/investigate` 2026-09-15; see
-# environments/local/tests/kyverno/chainsaw-test.yaml's own header for the
-# full root cause). Steps 2 and 3 below assert THIS SAME digest on the
-# selected Pod, not just the `app.kubernetes.io/name` label alone — a
-# stale surviving Pod (scheduled before a redeploy, still Running) would
-# otherwise satisfy both assertions regardless of whether a NEW admission
-# attempt ever succeeded (Codex outside-voice finding, confirmed: this
-# test would have passed throughout the entire period this bug was live).
+# resolves to) — `attestation-sign.sh` resolves+signs it internally now;
+# see environments/local/tests/kyverno/chainsaw-test.yaml's own header for
+# the full root cause (Kyverno's amd64-index admission behavior). Steps 2
+# and 3 below assert THIS SAME digest on the selected Pod, not just the
+# `app.kubernetes.io/name` label alone — a stale surviving Pod (scheduled
+# before a redeploy, still Running) would otherwise satisfy both
+# assertions regardless of whether a NEW admission attempt ever succeeded.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -62,7 +60,7 @@ spec:
     - name: the-image-was-admitted-by-the-approval-policy
       try:
         # a Pod exists in ns `frontend` (PSA restricted + the approval label)
-        # running THIS digest => K1's ImageValidatingPolicy, whose
+        # running THIS digest => the Kyverno ImageValidatingPolicy, whose
         # failurePolicy is Fail, evaluated and ADMITTED it. A denied image
         # would leave the ReplicaSet unable to create any pod. Digest-scoped,
         # not just `cv-frontend` — see the digest-scoping note above.

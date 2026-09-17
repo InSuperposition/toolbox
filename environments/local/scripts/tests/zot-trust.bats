@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 
-# environments/local/scripts/zot-trust.sh — the T7c R1b-ii-b host trust
-# install. Fakes `kubectl` on PATH (no live cluster in bats) and points
+# environments/local/scripts/zot-trust.sh — the host-side CA trust
+# install for the zot registry. Fakes `kubectl` on PATH (no live cluster
+# in bats) and points
 # every real path at scratch so a run never touches this machine's actual
 # ~/.docker/certs.d or $XDG_STATE_HOME.
 

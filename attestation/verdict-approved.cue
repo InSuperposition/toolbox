@@ -1,15 +1,15 @@
 // Approval-attestation schema and consumer-side gate — ONE file, TWO uses.
 //
 // The digest-as-source-of-truth pipeline signs a human's approve/reject
-// decision as an in-toto attestation over the built image digest
-// (docs/designs/digest-as-source-of-truth.md § Architecture). This file is both the
-// schema that decision is checked against before signing AND the policy the
-// consumer checks a pinned attestation against before running the image.
+// decision as an in-toto attestation over the built image digest. This
+// file is both the schema that decision is checked against before signing
+// AND the policy the consumer checks a pinned attestation against before
+// running the image.
 //
 //   attestation-sign.sh    cue vet <predicate>.json    -d '#Predicate'          verdict-approved.cue
 //   attestation-verify.sh  cue vet <in-toto-stmt>.json  -d '#ApprovedStatement' verdict-approved.cue
 //
-// Why two definitions (Codex P1-3):
+// Why two definitions:
 //   - #Predicate is PERMISSIVE — it accepts verdict "approved" OR "rejected".
 //     attestation-sign.sh vets against it before signing so a reject record
 //     is a well-formed, signed, durable audit entry, never a silent drop.
@@ -20,10 +20,6 @@
 //     "verdict rejected", and a good approval sitting next to a signed reject
 //     still verifies when selected by its own digest (the selection model —
 //     no "any reject poisons the image").
-//
-// See docs/designs/digest-as-source-of-truth.md § Architecture (still uses
-// the pre-restructure `approve.sh` / `verify-approval.sh` names — Phase 5
-// docs sweep re-points it).
 //
 // Not JSON Schema: CUE is a schema language (satisfies this repo's "schemas
 // required for core functionality"), and one CUE file avoids maintaining the
@@ -47,14 +43,14 @@ package approval
 	// reason is not an acceptable audit trail.
 	reason: string & !=""
 
-	// Who decided. In T5's interim auth this is self-asserted (anyone with
-	// the OpenBao root token can write any value) — the "Auth + DX" planning
-	// session replaces it with a per-member cryptographic identity. Still
-	// required: an empty approver is never valid.
+	// Who decided. Interim auth is self-asserted (anyone with the OpenBao
+	// root token can write any value); a future per-member cryptographic
+	// identity would tighten this. Still required: an empty approver is
+	// never valid.
 	approvedBy: string & !=""
 
-	// RFC 3339 timestamp, self-asserted (no trusted timestamp authority in
-	// T5). Audit metadata only — NEVER a selection or trust input.
+	// RFC 3339 timestamp, self-asserted (no trusted timestamp authority
+	// yet). Audit metadata only — NEVER a selection or trust input.
 	approvedAt: =~"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
 
 	// Digest of the trivy scan-report OCI referrer the decision was made

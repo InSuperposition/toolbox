@@ -3,8 +3,7 @@ set -euo pipefail
 
 # environments/local/scripts/openbao-bootstrap.sh — the ONE-TIME
 # imperative bridge that moves / recovers the local dev OpenBao in the
-# OrbStack cluster (T7c Increment 4, docs/adr/0016,
-# ~/.claude/plans/t7c-increment4-in-cluster-openbao.md).
+# OrbStack cluster.
 #
 # Model: environments/local/scripts/flux-bootstrap.sh — pick source -> verify
 # -> install -> init -> restore -> assert -> configure, nothing more. Runs
@@ -19,8 +18,8 @@ set -euo pipefail
 # in-cluster `approval-key` public half is not byte-identical to the
 # committed pub file.
 #
-# Source selection (host-independent — the host daemon retires in Plan A
-# O2/O3, ADR 0016):
+# Source selection (host-independent — works whether or not an on-machine
+# OpenBao daemon is running):
 #   host reachable (init + unsealed)  -> snapshot the host, migrate from it
 #   host unreachable + a valid bundle -> restore from $SNAP_DIR (no host)
 #   host unreachable + no bundle      -> the disaster case: exit, name the
@@ -130,7 +129,7 @@ wait_pod_running() {
 # NOT via `mise run attestation:export-pubkey`: a nested `mise run`
 # re-applies mise.toml's [env], which pins VAULT_ADDR at the host loopback
 # and VAULT_TOKEN at the host root token — the check would silently verify
-# the wrong instance (T7c Increment 4 eng review, Codex #4).
+# the wrong instance.
 current_pubkey() { cosign public-key --key openbao://approval-key; }
 
 # committed_pubkey — attestation/cosign-approval.pub, read in place. Reading
@@ -188,8 +187,10 @@ phase_c_apply() {
 # repair_client_creds — persist the bundle's root token + seal key to
 # $STATE_DIR so `mise.toml [env]`'s `cat $OPENBAO_STATE_DIR/root.token` and
 # any future re-run reflect the now-authoritative cluster. The `-force`
-# restore preserves both, so $SNAP_DIR's copies are the cluster's
-# (Codex #1/#2 — the bridge previously only set VAULT_TOKEN in-memory).
+# restore preserves both, so $SNAP_DIR's copies are the cluster's —
+# an earlier version of this bridge only set VAULT_TOKEN in-memory and
+# never persisted it here, so a later re-run had no on-machine credential
+# to read.
 repair_client_creds() {
 	install -m 600 "$SNAP_DIR/root.token" "$STATE_DIR/root.token"
 	install -m 600 "$SNAP_DIR/seal.key" "$STATE_DIR/seal.key"
@@ -198,8 +199,8 @@ repair_client_creds() {
 # refresh_bundle_from_cluster — the host bundle omits the cluster-created
 # `sops` key material (Phase C recreates config, not AES bytes), and after a
 # machine loss the external tofu state must travel with the bundle. Re-snap
-# the now-authoritative cluster and back the state up alongside it
-# (Codex #5/#6). VAULT_ADDR/VAULT_TOKEN/VAULT_CACERT already point here.
+# the now-authoritative cluster and back the state up alongside it.
+# VAULT_ADDR/VAULT_TOKEN/VAULT_CACERT already point here.
 refresh_bundle_from_cluster() {
 	echo "==> Refreshing the disaster bundle from the in-cluster instance"
 	"$SCRIPT_DIR/openbao-snapshot.sh"
@@ -215,7 +216,7 @@ finish() {
 	echo "    CA cert  : $CA_FILE"
 	echo "    tfstate  : $TFSTATE  (backed up in $TFSTATE_BUNDLE)"
 	tofu -chdir="$UNIT_DIR" output -state="$TFSTATE" 2>/dev/null | sed 's/^/    /' || true
-	echo "    Flux SOPS wiring (--sops-vault-configmap) is deferred (Plan B / G1), gated on a named secret."
+	echo "    Flux SOPS wiring (--sops-vault-configmap) is deferred, gated on a named secret."
 }
 
 # ── 1. preconditions (local checks first) ─────────────────────────────
@@ -226,7 +227,7 @@ done
 # ── 2. pick the migration source ──────────────────────────────────────
 if host_reachable; then
 	echo "==> Source: the host daemon at $HOST_ADDR"
-	# Codex #4 — never snapshot a diverged host over a good bundle.
+	# Never snapshot a diverged host over a good bundle.
 	if bundle_valid; then
 		host_pub="$(VAULT_ADDR="$HOST_ADDR" VAULT_TOKEN="$(cat "$STATE_DIR/root.token")" current_pubkey 2>/dev/null || true)"
 		[ -n "$host_pub" ] && [ "$host_pub" = "$(committed_pubkey)" ] ||
@@ -242,8 +243,9 @@ elif bundle_valid; then
 else
 	die "no migration source — the host daemon at $HOST_ADDR is not reachable AND there is no restore bundle at $SNAP_DIR/{latest.snap,seal.key,root.token}.
 
-  This is the disaster case (ADR 0016 — there is no
-  from-scratch bootstrap). Restore an off-machine copy of the snapshots/ bundle
+  This is the disaster case: the on-machine snapshot bundle is the only
+  genesis path, and there is no host daemon left to fall back to for a
+  from-scratch bootstrap. Restore an off-machine copy of the snapshots/ bundle
   into $SNAP_DIR and re-run. If approval-key itself is unrecoverable, follow the
   'resume signing' runbook: fresh \`bao operator init\` ->
   \`mise run attestation:export-pubkey\` + commit -> re-sign the current image ->
@@ -255,7 +257,7 @@ kc cluster-info >/dev/null 2>&1 || die "kube-context '$CONTEXT' unreachable — 
 kc -n flux-system get helmrelease cert-manager >/dev/null 2>&1 ||
 	die "cert-manager HelmRelease absent — is Flux bootstrapped and reconciling? (\`mise run local:flux:bootstrap\`)"
 
-# ── 4. namespace (bridge-owned — the acyclic anchor, plan § B1) ───────
+# ── 4. namespace (bridge-owned — never tofu's, so no create-order cycle) ──
 echo "==> Namespace $NS"
 kc create namespace "$NS" --dry-run=client -o yaml | kc apply -f - >/dev/null
 
@@ -296,7 +298,7 @@ if [ ! -s "$TFSTATE" ] && [ -s "$STATE_DIR/openbao-cluster.tfstate" ]; then
 fi
 # After a machine loss the external state is gone but the release + Phase-C
 # objects may still exist in-cluster; restore the state from the bundle so
-# `tofu apply` converges instead of trying to re-create them (Codex #6).
+# `tofu apply` converges instead of trying to re-create them.
 if [ ! -s "$TFSTATE" ] && [ -s "$TFSTATE_BUNDLE" ]; then
 	echo "==> Restoring OpenTofu state from the bundle -> $TFSTATE"
 	cp -f "$TFSTATE_BUNDLE" "$TFSTATE"
@@ -305,11 +307,12 @@ echo "==> Phase A — tofu apply helm_release.openbao (state: $TFSTATE)"
 export TF_VAR_kube_context="$CONTEXT"
 export TF_VAR_openbao_endpoint="$ENDPOINT"
 export TF_VAR_openbao_ca="$CA_FILE"
-# T8 — build provenance (TODOS.md): the one extra Transit key this bridge
+# Build-provenance support: the one extra Transit key this bridge
 # provisions via the var.transit_keys extension point. Every successful
-# bootstrap run already re-snapshots the raft store (refresh_bundle_from_cluster,
-# below) and backs up tfstate, so this key's disaster-recovery story is
-# covered by the existing flow — no separate capture step needed.
+# bootstrap run already re-snapshots the raft store
+# (refresh_bundle_from_cluster, below) and backs up tfstate, so this key's
+# disaster-recovery story is covered by the existing flow — no separate
+# capture step needed.
 export TF_VAR_transit_keys='[{"name":"chains-provenance-key","type":"ecdsa-p256"}]'
 tofu -chdir="$UNIT_DIR" init -input=false >/dev/null
 tofu -chdir="$UNIT_DIR" apply -auto-approve -input=false \
@@ -361,7 +364,7 @@ init_token="${CLUSTER_DIR}/root.token"
 	die "the in-cluster OpenBao is initialised but neither the bundle root token nor a first-init token authenticates against it — a half-migrated state. Recover with: kubectl --context $CONTEXT delete namespace $NS  (cascades the PVC), then re-run."
 VAULT_TOKEN="$(cat "$init_token")" bao operator raft snapshot restore -force "$SNAP_DIR/latest.snap"
 # the restored seal config names current_key_id=toolbox-local + the same 32
-# bytes we mounted, so no key swap is needed (plan § B3 step 6 / confirm #5).
+# bytes we mounted, so no key swap is needed.
 # Delete the pod so it re-reads the restored config on restart (OnDelete
 # StatefulSet — the controller recreates it, static seal auto-unseals).
 kc -n "$NS" delete pod openbao-0 --wait=false

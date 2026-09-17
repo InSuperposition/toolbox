@@ -2,11 +2,8 @@
 #
 # Packages the external consumer `cv_frontend` as a distroless Node image.
 #
-# This is the ONE hand-authored Dockerfile in toolbox -- see CLAUDE.md
-# "No code inside configuration files" for the named carve-out and its
-# reasoning. It is deliberately a minimal two-stage build (two RUN lines,
-# no shell logic), not the "RUN soup" that rule targets. Design:
-# docs/designs/digest-as-source-of-truth.md, section "Pivot (2026-09-06)".
+# The one hand-authored Dockerfile in this repo: deliberately a minimal
+# two-stage build (two RUN lines, no shell logic), not generated RUN soup.
 #
 # Build context is a cv_frontend checkout:
 #   docker buildx build -f deploy/frontend/Dockerfile --platform linux/arm64 \

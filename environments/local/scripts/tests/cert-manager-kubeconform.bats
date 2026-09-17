@@ -1,10 +1,9 @@
 #!/usr/bin/env bats
 
 # environments/local/scripts/cert-manager-kubeconform.sh — the static
-# schema gate for the dev-PKI CRs (T7c Increment 4) and, since T7c R1b-ii,
-# the trust-manager Bundle. Runs on a scratch copy so a deliberately broken
-# manifest can be asserted to fail (the guard must FAIL on bad input, not
-# only pass on good).
+# schema gate for the dev-PKI CRs and the trust-manager Bundle. Runs on a
+# scratch copy so a deliberately broken manifest can be asserted to fail
+# (the guard must FAIL on bad input, not only pass on good).
 
 setup() {
 	load helper

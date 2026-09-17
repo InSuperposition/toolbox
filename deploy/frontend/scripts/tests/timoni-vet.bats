@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 
-# The cv_frontend Timoni module (ADR 0019). `timoni mod vet` is the schema
+# The cv_frontend Timoni module. `timoni mod vet` is the schema
 # gate for the timoni path — it type-checks the module + its rendered
 # Deployment/Service/ServiceAccount against the vendored k8s CUE schemas.
 # There is no wrapper script (declarative-first): the `timoni` hk step runs

@@ -3,9 +3,9 @@
 # mounts its referenced ConfigMap whole and hardcodes reading a key
 # literally named `ca.crt` (confirmed live against the spire-server
 # chart's templates) — a different key name than the shared Bundle's
-# `ca-certificates.crt`, and ADR 0022's own stated pattern is "a new
-# specific need gets its own entry, not a mutation of the shared
-# Bundle." SPIRE Phase 1 (TODOS.md), docs/adr/0025, docs/adr/0026.
+# `ca-certificates.crt`, and this repo's stated pattern for the shared CA
+# bundle is "a new specific need gets its own entry, not a mutation of the
+# shared Bundle." Part of this repo's phased workload-identity rollout.
 #
 # No `useDefaultCAs` — SPIRE only needs to verify OpenBao's own
 # dev-CA-issued listener cert, not the public root store (narrower than

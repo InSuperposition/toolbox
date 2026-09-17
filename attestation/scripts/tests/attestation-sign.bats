@@ -26,11 +26,10 @@ setup() {
 	FIX="$FIX_FILE"
 	export TOOLBOX_APPROVAL_PUBKEY="$FIX/cosign.pub"
 	# A real OCI index (one linux/arm64 child), not a bare artifact push —
-	# matches production shape after the Kyverno amd64-index admission fix
-	# (`/investigate` 2026-09-15): attestation-sign.sh now resolves a
-	# platform digest via `oras resolve --platform` before anything else,
-	# and that call errors on a plain non-index artifact (live-verified:
-	# "unknown config ... expect application/vnd.oci.image.config.v1+json").
+	# matches production shape: attestation-sign.sh resolves a platform
+	# digest via `oras resolve --platform` before anything else, and that
+	# call errors on a plain non-index artifact ("unknown config ... expect
+	# application/vnd.oci.image.config.v1+json").
 	IMAGE="$(make_multiplatform_image "$FIX")"
 	PLATFORM_REF="$(oras resolve --plain-http --platform=linux/arm64 "$IMAGE")"
 	PLATFORM_REF="${IMAGE%@*}@${PLATFORM_REF}"
@@ -97,8 +96,8 @@ setup() {
 	[[ "$output" == *"application/vnd.dev.sigstore.bundle.v0.3+json"* ]]
 	# ... whose referrer manifest carries the two `dev.sigstore.bundle.*`
 	# annotations cosign's discovery (`cosign.GetBundles`) filters on — the
-	# reason Kyverno's ImageValidatingPolicy (Plan B K1) can find it. Without
-	# these a bare `oras attach` referrer is invisible to that path.
+	# reason Kyverno's ImageValidatingPolicy can find it. Without these a
+	# bare `oras attach` referrer is invisible to that path.
 	[ "$(printf '%s' "$output" | jq -r '.annotations["dev.sigstore.bundle.content"]')" = "dsse-envelope" ]
 	[ "$(printf '%s' "$output" | jq -r '.annotations["dev.sigstore.bundle.predicateType"]')" = "https://insuperposition.github.io/toolbox/attestations/approval/v1" ]
 	# ... and whose bundle also carries the predicate type in the SIGNED

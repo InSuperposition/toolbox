@@ -1,21 +1,19 @@
 # shellcheck shell=bash
 #
 # deploy/frontend/scripts/lib/frontend.sh — shared shell for the in-cluster
-# build/publish pair (frontend-build.sh / frontend-publish.sh, T7b3 / Plan B
-# M3). Self-contained, no repo-level runtime lib (docs/designs/repo-structure.md
-# § Naming). Source it; do not execute.
+# build/publish pair (frontend-build.sh / frontend-publish.sh). Self-
+# contained, no repo-level runtime lib. Source it; do not execute.
 #
 # frontend_attestation_verify is the ONE allowed cross-concern edge:
-# deploy/frontend reaches the attestation verify seam. Per the DAG
-# (repo-structure.md § The concerns) that edge runs through the
-# TOOLBOX_ATTESTATION_VERIFY env seam — the same shape as
+# deploy/frontend reaches the attestation verify seam. That edge runs
+# through the TOOLBOX_ATTESTATION_VERIFY env seam — the same shape as
 # TOOLBOX_APPROVAL_PUBKEY / TOOLBOX_APPROVE_KEY. The default is resolved
 # through the checkout root (mise.toml marker), not a `../attestation`
 # relative climb, so the boundary lint stays honest: a resolved path is
 # fine, a relative climb into a sibling concern is not. The rest of this
 # file (frontend_kube*/frontend_tkn/frontend_strict_digest/
-# frontend_host_image/frontend_zot_ca) is T7b3's in-cluster-build helper
-# set, no cross-concern edge involved.
+# frontend_host_image/frontend_zot_ca) is the in-cluster-build helper set,
+# no cross-concern edge involved.
 
 # frontend_repo_root — the checkout root, walking up from this lib for the
 # mise.toml marker. Depth-independent.
@@ -45,27 +43,27 @@ frontend_attestation_verify() {
 	"$verify" "$@"
 }
 
-# --- frontend-build.sh helpers (T7b3) --------------------------------------
+# --- frontend-build.sh helpers ---------------------------------------------
 # frontend-build.sh fires the in-cluster build/scan/gate PipelineRun and
-# watches it. deploy/frontend may NOT depend on ci/ (repo-structure.md
-# § concerns), so the strict-digest check that ci/scripts/lib/ci.sh also
-# carries is INLINED here, not sourced.
+# watches it. deploy/frontend may NOT depend on ci/, so the strict-digest
+# check that ci/scripts/lib/ci.sh also carries is INLINED here, not sourced.
 
 # frontend_kube_context — the kube-context every kubectl/tkn call is pinned
-# to (A3 / Codex #7: never act on whatever context is current). Test seam.
+# to; never act on whatever context happens to be current. Test seam.
 frontend_kube_context() { printf '%s\n' "${TOOLBOX_KUBE_CONTEXT:-orbstack}"; }
 
 # frontend_kube <args...> / frontend_tkn <args...> — kubectl / tkn with the
 # context AND the `ci` namespace forced. Use these, never a bare kubectl/tkn
-# (the default-vs-ci namespace bug that bit twice in T7b1fu / T7b2).
+# — the default-vs-ci namespace mismatch otherwise silently targets the
+# wrong namespace.
 frontend_kube() { kubectl --context "$(frontend_kube_context)" -n ci "$@"; }
 frontend_tkn() { tkn --context "$(frontend_kube_context)" -n ci "$@"; }
 
 # frontend_strict_digest <s> — true only for a canonical manifest digest:
 # literally "sha256:" + exactly 64 lowercase hex. The digest IS the trust
-# boundary (ADR 0001); a tag, a short digest, or uppercase hex is a hard
-# reject. (Same logic as ci_is_strict_digest — deliberately duplicated
-# across the concern boundary rather than sourced.)
+# boundary; a tag, a short digest, or uppercase hex is a hard reject.
+# (Same logic as ci_is_strict_digest — deliberately duplicated across the
+# concern boundary rather than sourced.)
 frontend_strict_digest() {
 	case "$1" in
 	sha256:*)
@@ -83,10 +81,10 @@ frontend_host_image() {
 		-e image.host --out text
 }
 
-# frontend_zot_ca — the dev CA `mise run local:zot:trust` (T7c R1b-ii-b)
-# writes for the node's dockerd trust — reused here for host-side `oras`
-# calls against zot's HTTPS listener (T7c R1b-ii-c), same as
-# ci/scripts/registry-seed.sh. Test seam: $TOOLBOX_ZOT_CA.
+# frontend_zot_ca — the dev CA `mise run local:zot:trust` writes for the
+# node's dockerd trust — reused here for host-side `oras` calls against
+# zot's HTTPS listener, same as ci/scripts/registry-seed.sh. Test seam:
+# $TOOLBOX_ZOT_CA.
 frontend_zot_ca() {
 	printf '%s\n' "${TOOLBOX_ZOT_CA:-$HOME/.docker/certs.d/zot.zot.svc.cluster.local:5000/ca.crt}"
 }

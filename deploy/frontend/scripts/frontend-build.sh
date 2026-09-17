@@ -21,13 +21,14 @@ set -euo pipefail
 #      verdict).
 #
 # The digest is resolved once, here, by the operator — never a Tekton
-# result (ADR 0001, the tag-addressed flow). Human approval
-# (`attestation:sign`) and consumption (`frontend:publish`) stay outside.
+# result, since a tag is mutable and this pipeline is digest-addressed.
+# Human approval (`attestation:sign`) and consumption (`frontend:publish`)
+# stay outside.
 #
-# deploy/frontend may NOT depend on ci/ (repo-structure.md § concerns): the
-# Pipeline is referenced by NAME (cluster-side resolution), the strict-digest
-# check is inlined in lib/frontend.sh, and a base-image reseed goes through
-# the `frontend:seed` mise task, never a source of ci/scripts/.
+# deploy/frontend may NOT depend on ci/: the Pipeline is referenced by NAME
+# (cluster-side resolution), the strict-digest check is inlined in
+# lib/frontend.sh, and a base-image reseed goes through the
+# `frontend:seed` mise task, never a source of ci/scripts/.
 #
 # Env overrides:
 #   TOOLBOX_DEFS_REF      toolbox git ref for the Dockerfile (default: HEAD)
@@ -98,8 +99,8 @@ frontend_kube get configmap buildkitd-mirror >/dev/null 2>&1 ||
   mise run local:flux:bootstrap   # once per cluster
   # then wait for the reconcile: mise run local:flux:status"
 
-# curl honors SSL_CERT_FILE (T7c R1b-ii-b's mise [env] wiring) — no
-# explicit --cacert needed when run via `mise run frontend:build`.
+# curl honors SSL_CERT_FILE (mise [env] wiring) — no explicit --cacert
+# needed when run via `mise run frontend:build`.
 curl -sf -o /dev/null https://zot.zot.svc.cluster.local:5000/v2/ ||
 	miss "zot is not answering HTTPS on zot.zot.svc.cluster.local:5000 — either
   Flux hasn't reconciled it yet (the zot Kustomization):
@@ -159,11 +160,10 @@ if [ "$status" = "True" ]; then
 	host_image="$(frontend_host_image)"
 	zot_ca="$(frontend_zot_ca)"
 
-	# Read the digest THIS run's build actually captured at push time
-	# (Run-scoped build digest identity, TODOS.md) — never a fresh
-	# `oras resolve` of the mutable tag, which a concurrent/rerun
-	# PipelineRun could have since repointed. One source of truth: the
-	# same digest evidence was attached to.
+	# Read the digest THIS run's build actually captured at push time —
+	# never a fresh `oras resolve` of the mutable tag, which a
+	# concurrent/rerun PipelineRun could have since repointed. One source
+	# of truth: the same digest evidence was attached to.
 	digest="$(frontend_kube get pipelinerun "$name" \
 		-o jsonpath='{.status.results[?(@.name=="IMAGE_DIGEST")].value}')" ||
 		die "reading the PipelineRun's IMAGE_DIGEST result failed for $name"
