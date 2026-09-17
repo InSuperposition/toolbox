@@ -1,0 +1,82 @@
+# Admission-time enforcement of the rootless-BuildKit securityContext
+# ceiling on the `build` container specifically — the declarative
+# equivalent of ci/tests/build-pipeline/chainsaw-test.yaml's static assert
+# that buildkit-build.yaml's Task manifest matches this shape. The two are
+# complementary, not redundant: the chainsaw test proves the Task
+# DEFINITION is correct; this policy proves nothing looser can actually be
+# ADMITTED as a running pod, however it was created.
+#
+# Scope: any namespace LABELLED `toolbox.dev/build-posture: enforced` (the
+# `ci` namespace carries it; `kyverno-chainsaw`'s ephemeral test namespace
+# carries it too, via its Test's namespaceTemplate). A label, not a literal
+# namespace-name match, for the same reason as frontend-approval's scope:
+# a namespace-name match would silently exclude chainsaw's ephemeral test
+# namespaces, and the deny test would false-negative.
+#
+# `ci` runs 5 Tekton Tasks in one namespace, only one of which
+# (buildkit-build.yaml) has a step literally named `build` — so filtering
+# on container name alone, with no separate Tekton-label matcher, is
+# already precise: every other Task's pod has zero containers named
+# `build` and the validation is vacuously true against them.
+#
+# Every other step in this namespace, including the 3 Tasks' own
+# `disable-ipv6` privileged sysctl containers, is untouched by this
+# policy — that workaround is a separate, temporary IPv6 mitigation with
+# its own removal condition, not part of this ceiling.
+#
+# The ceiling itself matches ci/README.md's own "Residual privilege
+# surface": rootless BuildKit needs exactly SETUID/SETGID (newuidmap /
+# newgidmap), seccomp Unconfined (rootlesskit's unshare/clone), and
+# allowPrivilegeEscalation (this image's newuidmap is file-cap based, not
+# setuid, so no_new_privs would break it) — nothing else. `deny anything
+# looser` is implemented as an allow-list: the checked fields must equal
+# this exact shape, not merely avoid a few named-bad values, so a future
+# unreviewed addition (a new capability, a user change) fails closed at
+# admission instead of silently widening the surface.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: buildkit-build-posture
+spec:
+  failurePolicy: Fail
+  validationActions:
+    - Deny
+  webhookConfiguration:
+    timeoutSeconds: 30
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+    namespaceSelector:
+      matchLabels:
+        toolbox.dev/build-posture: enforced
+  variables:
+    - name: buildContainers
+      expression: object.spec.containers.filter(c, c.name == "build")
+  validations:
+    - expression: |-
+        variables.buildContainers.all(c,
+          has(c.securityContext) &&
+          c.securityContext.runAsUser == 1000 &&
+          c.securityContext.runAsGroup == 1000 &&
+          c.securityContext.runAsNonRoot == true &&
+          c.securityContext.allowPrivilegeEscalation == true &&
+          has(c.securityContext.seccompProfile) &&
+          c.securityContext.seccompProfile.type == "Unconfined" &&
+          (!has(c.securityContext.privileged) || c.securityContext.privileged == false)
+        )
+      message: "the 'build' container's securityContext does not match the spike-proven rootless-BuildKit ceiling (runAsUser/runAsGroup 1000, runAsNonRoot, seccomp Unconfined, allowPrivilegeEscalation, never privileged)"
+    - expression: |-
+        variables.buildContainers.all(c,
+          has(c.securityContext.capabilities) &&
+          has(c.securityContext.capabilities.drop) &&
+          c.securityContext.capabilities.drop.size() == 1 &&
+          "ALL" in c.securityContext.capabilities.drop &&
+          has(c.securityContext.capabilities.add) &&
+          c.securityContext.capabilities.add.size() == 2 &&
+          c.securityContext.capabilities.add.all(cap, cap in ["SETUID", "SETGID"]) &&
+          ["SETUID", "SETGID"].all(cap, cap in c.securityContext.capabilities.add)
+        )
+      message: "the 'build' container's capabilities must be exactly drop:[ALL] add:[SETUID,SETGID] — no SYS_ADMIN, SYS_PTRACE, or any other capability"

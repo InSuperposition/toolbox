@@ -14,9 +14,15 @@
 # Pod Security Admission: `privileged` is set explicitly, not inherited.
 # Rootless BuildKit needs seccomp Unconfined + SETUID/SETGID +
 # allowPrivilegeEscalation (ci/README.md § Residual privilege surface) —
-# `baseline` would reject the build pod. The real scoping mechanism is a
-# Kyverno policy targeting this namespace (a Kyverno-module concern),
-# not PSA. Blast radius today is the single-user OrbStack VM.
+# `baseline` would reject the build pod. Blast radius today is the
+# single-user OrbStack VM.
+#
+# The real scoping mechanism is the `buildkit-build-posture` Kyverno
+# ValidatingPolicy (environments/local/kyverno/), which this namespace's
+# `toolbox.dev/build-posture: enforced` label opts into: it enforces the
+# spike-proven `build` container ceiling at admission regardless of PSA.
+# The 3 Tasks' own `disable-ipv6` privileged sysctl steps are untouched —
+# a separate, temporary IPv6 workaround, not part of that ceiling.
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -26,3 +32,4 @@ metadata:
     pod-security.kubernetes.io/enforce: privileged
     pod-security.kubernetes.io/audit: privileged
     pod-security.kubernetes.io/warn: privileged
+    toolbox.dev/build-posture: enforced
