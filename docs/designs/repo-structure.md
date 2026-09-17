@@ -93,8 +93,13 @@ Runtime-only edges (env vars / mise-task calls, not file paths — allowed, not 
   environments/local/scripts/openbao-bootstrap.sh ··▶ `mise run attestation:export-pubkey`  (task call, not a file write)
   environments/local/spire (spire-server's own vault plugin) ··▶ OpenBao's auth/kubernetes + pki mount   runtime k8s-auth login, role name only (no tofu-to-tofu state read, docs/adr/0025)
 
-Deployment-composition edge (a manifest-ref, not a shell path — select + target-namespace + order + reconciliation policy; ownership stays with the target):
-  environments/local/  ──▶  ci/{runtime,tasks,pipelines}   Flux `Kustomization` CRs in environments/local/flux/ point at ci/ paths (T7c Increment 2)
+Deployment-composition edges (manifest-refs, not shell paths — select +
+target-namespace + order + reconciliation policy; ownership stays with the
+target). Both originate from Flux `Kustomization` CRs in
+environments/local/flux/, the one place allowed to point outside its own
+concern this way:
+  environments/local/  ──▶  ci/{runtime,tasks,pipelines}       ci-runtime.yaml, ci-defs.yaml
+  environments/local/  ──▶  deploy/frontend/k8s                frontend.yaml — the frontend namespace manifest
 ```
 
 **The 3-way split for the `ci/` reconcile (T7c Increment 2):** `ci/` owns
@@ -320,7 +325,8 @@ hook only.
 | tool | job | how |
 |---|---|---|
 | `ls-lint` (`aqua:loeffel-io/ls-lint`; the `hk` `ls_lint` builtin drives the binary) | structure + naming | `.ls-lint.yml`: `.dir` is `kebab-case`; the `.sh` **stem** matches `^[a-z]+(-[a-z]+)+$` (`<domain>-<verb>`, no `\.sh` in the pattern) |
-| `ast-grep` (`aqua:ast-grep/ast-grep`) | forbidden-edge + no-embedded-shell **lint** | `sgconfig.yml` + `rules/boundary-*.yml`: **shell** — a literal `deploy/` path in a script upstream of `deploy/` (`attestation/`, `environments/`) or in `ci/` (`boundary-ci.yml`); a `../` climb two-or-more levels or into a named sibling concern (`ci/ deploy/ attestation/ modules/ environments/`); a concern-directory name inside `tests/lib/*.bash`. **yaml** — a `script:` block in a Tekton manifest under `ci/tasks|runtime|pipelines/` (`boundary-no-embedded-shell.yml`). |
+| `ast-grep` (`aqua:ast-grep/ast-grep`) | forbidden-edge + no-embedded-shell **lint** | `sgconfig.yml` + `rules/boundary-*.yml`: **shell** — a literal `deploy/` path in a script upstream of `deploy/` (`attestation/`, `environments/`) or in `ci/` (`boundary-ci.yml`); a `../` climb two-or-more levels or into a named sibling concern (`ci/ deploy/ attestation/ modules/ environments/`); a concern-directory name inside `tests/lib/*.bash`. **yaml** — a `script:` block in a Tekton manifest under `ci/tasks|runtime|pipelines/` (`boundary-no-embedded-shell.yml`); a `kustomization.yaml`/Flux `Kustomization` manifest-ref climbing into `attestation/`, `deploy/`, or `modules/` (`boundary-yaml-manifest-ref.yml`); the same climbing into `ci/` from outside `environments/local/flux/` (`boundary-yaml-ci-ref.yml`). |
+| `tests/check-tf-path-boundary.sh` (own `hk` step) | HCL file-path **lint** | `git grep` for a `file()`/`templatefile()`/`filebase64()` call in `*.tf`/`*.tftpl` whose literal path climbs into a sibling concern — the HCL-layer sibling of `no-kubernetes-tf`, since `ast-grep` has no HCL grammar to cover it. `tests/check-tf-path-boundary.bats` mutation-tests it. |
 | `tests/check-coverage.sh` (Phase 1c, own `hk` step, `check` hook, runs last) | silent-coverage-drop guard | diffs three views: suites found on disk (its own `find`), `tests/manifest.txt` (committed path + case count), and what `hk check --all --plan --json` schedules. A mismatch fails the gate. `tests/check-coverage.bats` mutation-tests it. |
 
 Each phase's `.ls-lint.yml` and `rules/` describe the **then-current** tree.
@@ -331,28 +337,49 @@ phase named in the rule file, and listed in that phase's PR body.
 ### Honest scope
 
 `ls-lint` + `ast-grep` are a **strong lint, not dependency-graph
-analysis.** They catch literal path strings and relative climbs in shell.
-They do **not** catch: a path assembled from variables, `source "$x"`
-resolution, cross-language task references, or most of the **HCL
-layer** — `ast-grep` ships no Terraform/HCL grammar, so the tofu unit's
-edges (`environments/local/openbao ─╳▶ …`) are not machine-checked here.
-The one tofu edge that *is* enforced — no `kubernetes_*` /
-`kubernetes_manifest` resource (ADR 0018, in-cluster objects go through Flux
-plain-YAML or Crossplane, never tofu) — is the `no-kubernetes-tf` hk step
-(`tests/check-tf-boundary.sh`, a `git grep`).
-They also do **not** catch **manifest-ref edges** — a Flux `Kustomization`
-`spec.path` or a kustomize `resources:` entry pointing across a concern
-boundary (e.g. `environments/local/flux/ci-runtime.yaml` → `./ci/runtime`).
-The `boundary-*.yml` rules match shell path refs only; the
-`environments/local/ ──▶ ci/{runtime,tasks,pipelines}` deployment-composition
-edge is **not machine-checked** and relies on review + the per-path
-`kustomization.yaml` inventories as the selection control.
-The lint is paired with a review checklist for the rest.
+analysis.** A planning pass evaluated three candidates for closing this —
+`conftest`/OPA (Rego) validating a generated reference manifest, `tofu
+graph` for the HCL layer, and CUE/Timoni schemas expressing the
+allowed-edge set — against ground truth: a repo-wide check of every actual
+cross-concern reference found zero current violations in any gap
+category, and `tofu graph` turned out not to address the real risk at all
+(it shows intra-unit resource dependencies, not the `file()`/
+`templatefile()` path arguments that could climb a concern boundary). Two
+of the three gap categories closed at zero new-tool cost, reusing patterns
+already proven elsewhere in this repo:
 
-A real resolved-dependency-graph check — a generated manifest validated by
-`conftest`/OPA (Rego), `tofu graph` for the HCL layer, or CUE/Timoni
-schemas expressing the allowed-edge set — is a separate future planning
-session, tracked in [`TODOS.md`](../../TODOS.md).
+- **The HCL layer** — no `kubernetes_*` / `kubernetes_manifest` resource
+  (in-cluster objects go through Flux plain-YAML or Crossplane, never
+  tofu) is the `no-kubernetes-tf` hk step (`tests/check-tf-boundary.sh`, a
+  `git grep`). A `file()`/`templatefile()`/`filebase64()` call whose
+  literal path climbs into a sibling concern is now the sibling
+  `no-cross-concern-tf-paths` step (`tests/check-tf-path-boundary.sh`,
+  same `git grep` shape) — `ast-grep` still ships no Terraform/HCL
+  grammar, so this stays outside it.
+- **Manifest-ref edges** — a Flux `Kustomization` `spec.path` or a
+  kustomize `resources:`/`bases:` entry crossing a concern boundary (e.g.
+  `environments/local/flux/ci-runtime.yaml` → `./ci/runtime`) is now
+  machine-checked: `ast-grep` already parses YAML (`boundary-no-embedded-shell.yml`
+  proved it), so `boundary-yaml-manifest-ref.yml` denies any such entry
+  climbing into `attestation/`, `deploy/`, or `modules/` from anywhere,
+  and `boundary-yaml-ci-ref.yml` denies the same into `ci/` from outside
+  `environments/local/flux/` — the one place allowed to compose it (and,
+  found during the same ground-truth pass, also the one place that
+  composes `deploy/frontend/k8s` — an edge this doc's diagram had missed
+  entirely until now, now added above). Both rules deliberately leave a
+  `configMapGenerator.files:` read of a single committed artifact (e.g.
+  `environments/local/`'s read of `attestation/cosign-approval.pub`)
+  unflagged — that's a data ingestion, not a manifest-ref, and it's the
+  one edge this doc's allowed-edges table already names explicitly.
+
+The third gap — **a path assembled from a shell variable**, or a
+cross-language task reference (mise.toml/hk.pkl step definitions calling
+across a concern) — is **explicitly accepted risk, not silently missing**:
+solving it soundly needs either a new tool (`conftest`/OPA validating a
+generated reference manifest) or a best-effort heuristic resolver, for a
+category with zero observed violations to date. The lint stays paired
+with review for this one. Trigger to revisit: the next time a boundary
+violation of this shape is actually caught in review.
 
 ## Migration status
 

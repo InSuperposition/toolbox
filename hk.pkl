@@ -60,13 +60,17 @@ local fast = new Mapping<String, Step> {
   ["ls-lint"] = Builtins.ls_lint
   // Forbidden cross-concern path refs in shell (rules/boundary-shell-*,
   // boundary-*-ref) + no `script:` block in a Tekton manifest
-  // (rules/boundary-no-embedded-shell.yml, `language: yaml`). `ast-grep
-  // scan` reads sgconfig.yml + rules/ and walks the whole tree; the glob
-  // only gates whether the step runs when a relevant file changes.
+  // (rules/boundary-no-embedded-shell.yml, `language: yaml`) + no
+  // cross-concern manifest-ref in a kustomization.yaml or Flux
+  // `Kustomization` CR (rules/boundary-yaml-manifest-ref.yml,
+  // rules/boundary-yaml-ci-ref.yml). `ast-grep scan` reads sgconfig.yml +
+  // rules/ and walks the whole tree; the glob only gates whether the step
+  // runs when a relevant file changes.
   ["ast-grep"] {
     glob = List(
       "**/*.sh", "**/*.bash", "sgconfig.yml", "rules/**/*.yml",
-      "ci/tasks/**/*.yaml", "ci/runtime/**/*.yaml", "ci/pipelines/**/*.yaml"
+      "ci/tasks/**/*.yaml", "ci/runtime/**/*.yaml", "ci/pipelines/**/*.yaml",
+      "**/kustomization.yaml", "environments/local/flux/*.yaml"
     )
     allow_binary = true
     allow_symlinks = true
@@ -83,6 +87,15 @@ local fast = new Mapping<String, Step> {
   ["no-kubernetes-tf"] {
     glob = List("**/*.tf", "tests/check-tf-boundary.sh")
     check = "./tests/check-tf-boundary.sh"
+  }
+  // No file()/templatefile()/filebase64() call in the HCL layer climbs
+  // into a sibling concern — the same shape as no-kubernetes-tf, closing
+  // the gap docs/designs/repo-structure.md § Honest scope names for HCL
+  // (ast-grep ships no HCL grammar, so shell's boundary-shell-concern-climb
+  // rule can't cover it either).
+  ["no-cross-concern-tf-paths"] {
+    glob = List("**/*.tf", "**/*.tftpl", "tests/check-tf-path-boundary.sh")
+    check = "./tests/check-tf-path-boundary.sh"
   }
   // Static schema validation of the ci/ Tekton manifests — no cluster
   // needed, fast pre-merge gate. A wrapper script: the kubeconform

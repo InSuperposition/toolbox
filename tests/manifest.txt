@@ -43,6 +43,7 @@ bats    ci/scripts/tests/registry-seed.bats                  10
 bats    tests/chainsaw-config.bats                          5
 bats    tests/check-coverage.bats                           3
 bats    tests/check-tf-boundary.bats                        4
+bats    tests/check-tf-path-boundary.bats                   5
 
 tftest  environments/local/openbao/tests/helm_values.tftest.hcl   5
 tftest  environments/local/openbao/tests/phase_c.tftest.hcl       8

@@ -4,7 +4,7 @@ severity: error
 message: >-
   tests/lib is a leaf — it must not name a concern directory. A shared test
   helper stays concern-agnostic: the caller passes the paths to copy as
-  arguments (CX #3). See docs/designs/repo-structure.md § The concerns.
+  arguments. See docs/designs/repo-structure.md § The concerns.
 files:
   - "tests/lib/**/*.bash"
 rule:

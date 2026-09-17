@@ -62,7 +62,6 @@ open work):
 **P3**
 
 - *Tekton/CI*
-  - `A real resolved-dependency-graph boundary check`
   - `T7a-follow-up — rename frontend-*/attestation-* to <tool>-<verb>`
   - `R5 — OCI-bundle distribution of the ci/ defs` (now also owns signing
     the bundles, folded in from the old T8 scope)
@@ -87,6 +86,37 @@ open work):
 
 Newest first. Git-log density — commit/PR references, not a transcript.
 Full detail lives in the referenced PRs, ADRs, and commit messages.
+
+- **Resolved-dependency-graph boundary check — DONE** (`/plan-eng-review`).
+  Evaluated the three named candidates (`conftest`/OPA, `tofu graph`,
+  CUE/Timoni schemas) against ground truth first: a repo-wide check of
+  every actual cross-concern reference found zero current violations in
+  any of the three gap categories the design doc names, and `tofu graph`
+  turned out not to address the real HCL risk at all — it shows
+  intra-unit resource dependencies, not the `file()`/`templatefile()`
+  path arguments that could actually climb a concern boundary. Closed the
+  two gaps that needed zero new tooling, reusing patterns already proven
+  in this repo: `tests/check-tf-path-boundary.sh` (new `git grep` sibling
+  to `check-tf-boundary.sh`, wired as the `no-cross-concern-tf-paths` hk
+  step) denies a `file()`/`templatefile()`/`filebase64()` call whose
+  literal path climbs into a sibling concern; `rules/boundary-yaml-manifest-ref.yml`
+  + `rules/boundary-yaml-ci-ref.yml` (new `ast-grep` YAML rules — it
+  already parses YAML) deny a `kustomization.yaml`/Flux `Kustomization`
+  manifest-ref crossing a concern boundary, correctly excluding the
+  already-documented `configMapGenerator.files:` read of
+  `attestation/cosign-approval.pub` (a data ingestion, not a manifest-ref).
+  Found and fixed in passing: `docs/designs/repo-structure.md`'s
+  allowed-edges diagram was missing a real, already-shipped edge
+  (`environments/local/flux/frontend.yaml` → `deploy/frontend/k8s`) —
+  caught by ground-truthing every `kustomization.yaml`/Flux CR `path:`
+  before writing the rule, not by trusting the diagram. Also fixed 3 bare
+  PR-number/session-tag citations living in `rules/*.yml` `message:`
+  fields — missed by the earlier comment sweep because they're YAML
+  prose, not `#`-comment lines. The third gap (a shell-variable-assembled
+  path, or a cross-language TOML/Pkl task reference) stays explicit
+  accepted risk — zero observed violations, and closing it soundly needs
+  a new tool for a category with no live instance; reopen the next time a
+  violation of this shape is actually caught in review.
 
 - **Kyverno build-pod securityContext enforcement — DONE** (`/plan-eng-review`).
   New `buildkit-build-posture` `ValidatingPolicy` (`policies.kyverno.io/v1`,
@@ -1053,40 +1083,14 @@ titles going forward without touching the old ones yet).
 
 **Depends on:** nothing blocking. **Priority:** P2.
 
-### A real resolved-dependency-graph boundary check — planning session
+### Resolved-dependency-graph boundary check — DONE, see Recently closed
 
-**What:** Run `/plan-eng-review` on replacing (or backstopping) the
-`ls-lint` + `ast-grep` boundary **lint** with a check that validates the
-allowed-edge set against a **resolved** dependency graph, not literal path
-strings.
-
-**Why:** the lint shipped in the restructure (T2a) is honestly scoped — it
-catches literal path strings, relative climbs, and `source`/exec of a
-literal. It does **not** catch a path assembled from variables,
-`source "$x"` resolution, or cross-language task references (its `ast-grep`
-rules are per-language; TOML/Pkl task refs are uncovered). A boundary
-violation built from a variable passes the gate today.
-
-**Candidates to evaluate:** a generated manifest validated by
-`conftest`/OPA (Rego); `tofu graph` for the HCL layer; whether CUE or
-Timoni (already in the stack) can express and validate the edge set; a
-purpose-built resolver. Weigh each against "one more tool" — the lint may
-be enough paired with review.
-
-**Already covered (Plan B X1, ADR 0018):** the one hard tofu edge — no
-`kubernetes_*` / `kubernetes_manifest` resource — is the `no-kubernetes-tf`
-hk step (`tests/check-tf-boundary.sh`, a `git grep`). This session backstops
-only that one; the rest of the HCL layer stays review-only.
-
-**Context:** Codex 2nd-pass finding CX2, user decision CX1=A (ship the
-scoped lint + documented limits + this deferred session).
-`docs/designs/repo-structure.md` § Enforcement / Honest scope.
-
-**Effort:** planning ~1 session; implementation unknown until the approach
-is chosen.
-**Priority:** P3
-**Depends on:** the restructure landed (the lint is the thing being
-backstopped).
+Closed two of the three gap categories at zero new-tool cost
+(`no-cross-concern-tf-paths` hk step + two new `ast-grep` YAML rules); the
+third (a path assembled from a shell variable, or a cross-language TOML/Pkl
+task reference) is explicit accepted risk, not silently missing — see
+`docs/designs/repo-structure.md` § Enforcement / Honest scope for the
+full breakdown and the reopen trigger.
 
 ### T7a-follow-up — rename `frontend-*` / `attestation-*` to `<tool>-<verb>` — P3
 
