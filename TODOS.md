@@ -62,7 +62,6 @@ open work):
 **P3**
 
 - *Tekton/CI*
-  - `T7a-follow-up — rename frontend-*/attestation-* to <tool>-<verb>`
   - `R5 — OCI-bundle distribution of the ci/ defs` (now also owns signing
     the bundles, folded in from the old T8 scope)
   - `Build reproducibility (SOURCE_DATE_EPOCH, independent rebuild
@@ -86,6 +85,17 @@ open work):
 
 Newest first. Git-log density — commit/PR references, not a transcript.
 Full detail lives in the referenced PRs, ADRs, and commit messages.
+
+- **T7a-follow-up — resolved, not renamed — DONE** (`/plan-eng-review`).
+  `frontend-build.sh` / `frontend-publish.sh` / `attestation-sign.sh` /
+  `attestation-verify.sh` each orchestrate multiple pinned tools with none
+  dominant (Tekton+oras+CUE; Timoni+flux; cosign+OpenBao+CUE) — forcing a
+  single tool into `<domain>-<verb>.sh` would misdescribe the script, not
+  clarify it. Given the choice between three rename schemes (dominant-tool
+  guess, verb-first `op-*.sh`, or a documented policy exception), picked
+  the exception: CLAUDE.md's Scripts Policy now names these four as the
+  only `<domain>-<verb>.sh` files where `<domain>` is a concern, not a
+  tool. Zero file renames, zero churn to `mise.toml`/ADRs/bats.
 
 - **T10 — VEX suppression mechanism — DONE** (`/plan-eng-review`, re-verified
   against the live pinned trivy 0.74.0 before landing, not the original
@@ -1110,17 +1120,6 @@ third (a path assembled from a shell variable, or a cross-language TOML/Pkl
 task reference) is explicit accepted risk, not silently missing — see
 `docs/designs/repo-structure.md` § Enforcement / Honest scope for the
 full breakdown and the reopen trigger.
-
-### T7a-follow-up — rename `frontend-*` / `attestation-*` to `<tool>-<verb>` — P3
-
-**Open — rename `frontend-*` / `attestation-*` to `<tool>-<verb>`** (P3,
-own task). `frontend-build.sh` / `frontend-publish.sh` /
-`attestation-sign.sh` / `attestation-verify.sh` use the concern name and
-contradict the (unchanged, enforced) Scripts Policy. No single tool
-drives them (tekton + oras + cue; cosign + oras + openbao) — the rename
-needs thought, and it touches `mise.toml` tasks, ADRs, README, bats.
-(`frontend-deploy.sh`/`frontend-serve.sh`, the other two originally named
-here, are gone — ADR 0023 retired them, not renamed them.)
 
 ### `spire-verify.bats` has no local-fixture rigor for chart-dependent cases — P3
 
