@@ -81,6 +81,11 @@ spec:
     - name: REGISTRY_INSECURE
       type: string
       default: "false"
+    - name: IGNOREFILE
+      type: string
+      default: /dev/null
+      description: >-
+        Passed through to the gate Task — see ci/tasks/gate.yaml.
   workspaces:
     - name: shared
     - name: buildkitd-config
@@ -154,5 +159,7 @@ spec:
       runAfter: [provenance-sign]
       taskRef:
         name: gate
+      params:
+        - { name: IGNOREFILE, value: $(params.IGNOREFILE) }
       workspaces:
         - { name: shared, workspace: shared }
