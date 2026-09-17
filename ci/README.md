@@ -151,9 +151,13 @@ of**, this posture (spike result, `TODOS.md` T7a):
 
 **Not** needed by the `build` step: `privileged`, `CAP_SYS_ADMIN`,
 `CAP_SYS_PTRACE`, k8s user-namespaces. Blast radius is the single-user
-OrbStack VM. A Kyverno exception scoped to the `ci` namespace — and to the
-named `disable-ipv6` sysctl below — is a Kyverno-module concern
-(`TODOS.md` § Kyverno module).
+OrbStack VM. The `buildkit-build-posture` Kyverno `ValidatingPolicy`
+(`environments/local/kyverno/`) now enforces this exact ceiling at
+admission — deny anything looser, on any pod's `build` container, however
+created. The named `disable-ipv6` sysctl below stays outside that policy:
+it is a separate, temporary IPv6 workaround with its own removal
+condition, still scoped only by namespace-wide PSA — a Kyverno-module
+concern (`TODOS.md` § Kyverno module).
 
 ## Deterministic builds on OrbStack
 

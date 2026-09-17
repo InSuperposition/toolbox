@@ -23,15 +23,15 @@ teardown() {
 	rm -rf "$SCRATCH"
 }
 
-@test "passes on the committed policy + ConfigMap" {
+@test "passes on the committed policies + ConfigMap" {
 	run "$SW"
 	[ "$status" -eq 0 ]
 	[[ "$output" == *"Invalid: 0"* ]]
-	# the ImageValidatingPolicy + the generated approval-pubkey ConfigMap
-	[[ "$output" == *"Valid: 2"* ]]
+	# ImageValidatingPolicy + ValidatingPolicy + the generated approval-pubkey ConfigMap
+	[[ "$output" == *"Valid: 3"* ]]
 }
 
-@test "the vendored ImageValidatingPolicy CRD schema is actually used (nothing skipped)" {
+@test "both vendored CRD schemas are actually used (nothing skipped)" {
 	run "$SW"
 	[[ "$output" == *"Skipped: 0"* ]]
 }

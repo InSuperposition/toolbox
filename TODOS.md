@@ -88,6 +88,29 @@ open work):
 Newest first. Git-log density — commit/PR references, not a transcript.
 Full detail lives in the referenced PRs, ADRs, and commit messages.
 
+- **Kyverno build-pod securityContext enforcement — DONE** (`/plan-eng-review`).
+  New `buildkit-build-posture` `ValidatingPolicy` (`policies.kyverno.io/v1`,
+  matching the existing `ImageValidatingPolicy`'s CRD family rather than
+  the legacy `ClusterPolicy`) enforces the spike-proven rootless-BuildKit
+  ceiling — exact `runAsUser`/`runAsGroup`/`runAsNonRoot`,
+  `seccomp: Unconfined`, `allowPrivilegeEscalation`, capabilities exactly
+  `drop:[ALL] add:[SETUID,SETGID]` — as an allow-list at admission, on any
+  pod's container literally named `build` (verified unique across all 5
+  `ci/tasks/*.yaml` Tasks, so no separate Tekton-label matcher is needed;
+  vacuously true, and live-verified unaffected, on every other container).
+  Scoped by a `toolbox.dev/build-posture: enforced` label on `ci` (not a
+  literal namespace-name match — needed so chainsaw's ephemeral test
+  namespace is also covered). Live-verified end to end on the real
+  OrbStack cluster: CEL compiles and the policy goes Ready, an
+  exact-ceiling pod is admitted, a `privileged: true` or extra-capability
+  (`SYS_ADMIN`) `build` container is denied, a non-`build` container with
+  a fully privileged securityContext is unaffected. This is deliberately
+  the narrower half of "Kyverno `ci`-namespace privilege policies" (below)
+  — the `disable-ipv6` PSA-scalpel half stays blocked on its own trigger,
+  since a Cilium v4-only datapath may delete that step's target entirely.
+  Complements, not replaces, `ci/tests/build-pipeline/chainsaw-test.yaml`'s
+  static assert that the Task manifest itself is this shape.
+
 - **OpenBao tooling surface + openbao-verify.bats fail-closed fix — DONE**
   (PR #59 doc plan, PR #60, PR #61; `/plan-eng-review` + Codex outside
   voice, 13 findings folded). PR A: `openbao-bootstrap.sh`'s 2 direct-API
@@ -938,7 +961,7 @@ own trigger:
 | **Crossplane install** (core + `provider-*` + a Composition + its own ADR) | a consumer declares backing infra it does not own (bucket / DB / queue / DNS as a CR) — **not** a directory count. |
 | **G1** — Flux SOPS (`--sops-vault-configmap` + ConfigMap + `spec.decryption`) | a named secret needs SOPS decryption. Plan A's Phase C left the OpenBao side (`sops` key, `flux_sops` role) ready. |
 | **Manifest authorization** (Codex #7) — scoped RBAC for the `frontend` kustomize-controller SA + a defined rendered-manifest review path (image approval ≠ authz of the manifests around it) | own review/session. |
-| **Kyverno `ci`-namespace privilege policies** (PSA scalpel, build-pod securityContext) | `cluster-k0sctl` built + the Cilium planning session done. (Also referenced from the "Kyverno module — accumulating design inputs" entry below — this table is the row's one home.) |
+| **Kyverno `ci`-namespace PSA scalpel** (the `disable-ipv6` privileged allowance specifically) | `cluster-k0sctl` built + the Cilium planning session done — a v4-only datapath may delete the `disable-ipv6` step entirely, so scoping it now risks rework. (Also referenced from the "Kyverno module — accumulating design inputs" entry below — this table is the row's one home.) Build-pod securityContext enforcement shipped separately — see Recently Closed. |
 | **`chainsaw-frontend` HTTP-200 assertion** | the cv_frontend Remix v3 boot crash is fixed (cv_frontend repo). |
 
 **Depends on:** nothing blocking. **Priority:** P2. Related: **T-DR**
@@ -955,17 +978,13 @@ engines' overlap is an open question there).
 
 Known inputs so far:
 
-- **Scope the `ci` namespace privileged allowance** — duplicates a row
-  already in "Plan B — deferred follow-ups" (this file, above — "Kyverno
-  `ci`-namespace privilege policies") — see there for the trigger, not
-  restated here.
-- **Build-pod posture enforcement** (from `ci/README.md` § Residual privilege
-  surface). The spike-proven `buildkit-build` `securityContext` ceiling
-  (`SETUID`/`SETGID` only, `seccomp: Unconfined`, `allowPrivilegeEscalation`,
-  `--oci-worker-no-process-sandbox`) is currently guarded by a chainsaw
-  drift-test. A Kyverno policy scoped to `ns=ci` could enforce it at admission —
-  deny anything looser, and deny `SYS_ADMIN`/`SYS_PTRACE`/`privileged` on the
-  build step outright.
+- **Scope the `ci` namespace privileged allowance** (the `disable-ipv6`
+  PSA scalpel) — duplicates a row already in "Plan B — deferred
+  follow-ups" (this file, above — "Kyverno `ci`-namespace PSA scalpel") —
+  see there for the trigger, not restated here.
+- **Build-pod posture enforcement — DONE**, see Recently closed. The
+  `buildkit-build-posture` `ValidatingPolicy` now enforces this at
+  admission, on the `build` container specifically.
 - **ImageValidatingPolicy** — the approval-referrer admission check (its own
   entry below).
 

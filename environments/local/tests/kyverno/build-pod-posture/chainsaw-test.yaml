@@ -1,0 +1,151 @@
+# [k8s]-gated (kyverno-chainsaw.sh skips without an orbstack cluster whose
+# `buildkit-build-posture` ValidatingPolicy has reconciled). Own subdirectory
+# because chainsaw resolves a fixed test-file name per directory — a second
+# Test alongside the existing frontend-approval one needs its own dir, not
+# a second file in the same one.
+#
+# Asserts the RUNNING state against two synthetic pods, not real Tekton
+# TaskRun output — this is an admission-control policy, not an
+# image-verification one, so there is no real evidence artifact to fetch;
+# the exact securityContext shape is the whole input. The Task manifest
+# itself (that buildkit-build.yaml's `build` step actually IS this shape)
+# is asserted separately and statically by
+# ci/tests/build-pipeline/chainsaw-test.yaml.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: kyverno-build-pod-posture
+spec:
+  # namespaceSelector on the policy needs a matching label on whatever
+  # namespace these pods land in.
+  namespaceTemplate:
+    metadata:
+      labels:
+        toolbox.dev/build-posture: enforced
+  steps:
+    - name: policy-is-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: policies.kyverno.io/v1
+              kind: ValidatingPolicy
+              metadata:
+                name: buildkit-build-posture
+              status:
+                (conditionStatus.ready): true
+
+    - name: exact-ceiling-is-admitted
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: build-ceiling-ok
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: build
+                    image: docker.io/moby/buildkit:rootless@sha256:80b15f0735e87bab7bf59ec4d695dfb4a7cfb25521cf56dc75d6f256285b63ef
+                    command: ["true"]
+                    securityContext:
+                      runAsUser: 1000
+                      runAsGroup: 1000
+                      runAsNonRoot: true
+                      seccompProfile:
+                        type: Unconfined
+                      allowPrivilegeEscalation: true
+                      capabilities:
+                        drop: ["ALL"]
+                        add: ["SETUID", "SETGID"]
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: build-ceiling-ok
+              # existing == admitted; nothing mutates this policy's target
+
+    - name: a-non-build-container-is-unaffected
+      try:
+        - apply:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: not-a-build-step
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: clone
+                    image: docker.io/moby/buildkit:rootless@sha256:80b15f0735e87bab7bf59ec4d695dfb4a7cfb25521cf56dc75d6f256285b63ef
+                    command: ["true"]
+                    securityContext:
+                      privileged: true
+                      runAsUser: 0
+        - assert:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: not-a-build-step
+
+    - name: privileged-build-container-is-denied
+      try:
+        - create:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: build-privileged
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: build
+                    image: docker.io/moby/buildkit:rootless@sha256:80b15f0735e87bab7bf59ec4d695dfb4a7cfb25521cf56dc75d6f256285b63ef
+                    command: ["true"]
+                    securityContext:
+                      runAsUser: 1000
+                      runAsGroup: 1000
+                      runAsNonRoot: true
+                      seccompProfile:
+                        type: Unconfined
+                      allowPrivilegeEscalation: true
+                      privileged: true
+                      capabilities:
+                        drop: ["ALL"]
+                        add: ["SETUID", "SETGID"]
+            expect:
+              - check:
+                  ($error != null): true
+                  (contains($error, 'buildkit-build-posture')): true
+
+    - name: extra-capability-on-build-container-is-denied
+      try:
+        - create:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: build-sys-admin
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: build
+                    image: docker.io/moby/buildkit:rootless@sha256:80b15f0735e87bab7bf59ec4d695dfb4a7cfb25521cf56dc75d6f256285b63ef
+                    command: ["true"]
+                    securityContext:
+                      runAsUser: 1000
+                      runAsGroup: 1000
+                      runAsNonRoot: true
+                      seccompProfile:
+                        type: Unconfined
+                      allowPrivilegeEscalation: true
+                      capabilities:
+                        drop: ["ALL"]
+                        add: ["SETUID", "SETGID", "SYS_ADMIN"]
+            expect:
+              - check:
+                  ($error != null): true
+                  (contains($error, 'buildkit-build-posture')): true
+                  (contains($error, 'capabilities')): true

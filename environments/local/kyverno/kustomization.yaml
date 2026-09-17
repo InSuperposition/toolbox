@@ -22,6 +22,7 @@ kind: Kustomization
 # ConfigMap gets its namespace on the generator entry.
 resources:
   - imagevalidatingpolicy.yaml
+  - validatingpolicy-buildkit-build-posture.yaml
 
 configMapGenerator:
   - name: kyverno-approval-pubkey
