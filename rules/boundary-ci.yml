@@ -7,7 +7,7 @@ message: >-
   or any other consumer. The per-consumer PipelineRun lives in
   deploy/<consumer>/ and consumes ci/ bundles by digest. Pass the paths in
   as script arguments instead. See docs/designs/repo-structure.md § The
-  concerns and ADR 0014.
+  concerns.
 files:
   - "ci/**/*.sh"
   - "ci/**/*.bash"

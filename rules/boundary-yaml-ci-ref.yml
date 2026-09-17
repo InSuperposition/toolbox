@@ -1,0 +1,24 @@
+id: boundary-yaml-ci-ref
+language: yaml
+severity: error
+message: >-
+  A manifest-ref path climbs into ci/ from outside environments/local/flux/.
+  ci/'s Task/Pipeline defs are only ever composed by the Flux
+  `Kustomization` CRs in environments/local/flux/ (the one deployment
+  target that owns selection, target-namespace, order, and reconciliation
+  policy) — nowhere else names ci/ as a manifest-ref target. See
+  docs/designs/repo-structure.md § The concerns and their allowed edges.
+files:
+  - "**/kustomization.yaml"
+  - "environments/**/*.yaml"
+ignores:
+  - "environments/local/flux/*.yaml"
+rule:
+  kind: string_scalar
+  regex: "(^|/)(\\.\\./)*ci/"
+  inside:
+    stopBy: end
+    kind: block_mapping_pair
+    has:
+      field: key
+      regex: "^(resources|bases|patches|path)$"

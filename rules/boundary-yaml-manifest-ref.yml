@@ -1,0 +1,22 @@
+id: boundary-yaml-manifest-ref
+language: yaml
+severity: error
+message: >-
+  A kustomization/Flux-Kustomization manifest-ref path climbs into
+  attestation/, deploy/, or modules/ — no concern's deployment composition
+  may name these as a target, ever (a seam never names its consumers, and
+  modules/ is only ever reached by a published-module `source` pin, never a
+  manifest ref). See docs/designs/repo-structure.md § The concerns and
+  their allowed edges.
+files:
+  - "**/kustomization.yaml"
+  - "environments/local/flux/*.yaml"
+rule:
+  kind: string_scalar
+  regex: "(^|/)(\\.\\./)*(attestation|deploy|modules)/"
+  inside:
+    stopBy: end
+    kind: block_mapping_pair
+    has:
+      field: key
+      regex: "^(resources|bases|patches|path)$"

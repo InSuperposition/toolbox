@@ -6,8 +6,8 @@ message: >-
   a configuration file (CLAUDE.md § Constraints, "No Tekton `script:`
   blocks"). Use a pinned `command` + `args`; anything a CLI cannot express
   (digest extraction, format guards, verification) lives in a
-  shellcheck-clean, bats-tested `ci/scripts/*.sh`. PR #9 shipped one of
-  these and it was reverted; this rule stops the next one.
+  shellcheck-clean, bats-tested `ci/scripts/*.sh`. An embedded `script:`
+  block shipped and was reverted once already; this rule stops the next one.
 files:
   - "ci/tasks/**/*.yaml"
   - "ci/runtime/**/*.yaml"
