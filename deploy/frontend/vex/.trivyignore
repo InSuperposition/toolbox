@@ -1,0 +1,7 @@
+# CVE IDs suppressed at the gate Task (ci/tasks/gate.yaml, --ignorefile),
+# one per line, e.g.:
+#   CVE-2024-9999
+# A change to this file is a security-relevant review, not a formatting
+# one: add an entry only after confirming this specific CVE does not
+# affect the way cv_frontend actually uses the flagged package, and say
+# why in the same commit.

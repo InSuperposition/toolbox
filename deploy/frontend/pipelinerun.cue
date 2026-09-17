@@ -79,6 +79,10 @@ image: #image
 			{name: "DEFS_REPO_URL", value: "https://github.com/InSuperposition/toolbox.git"},
 			{name: "DEFS_REVISION", value: _defsRev},
 			{name: "DOCKERFILE_DIR", value: "deploy/frontend"},
+			// Relative to the shared workspace root — the defs checkout lands
+			// at defs/ (clone-defs's SUBDIR). Committed, initially empty: no
+			// CVE is suppressed until a reviewed PR adds one.
+			{name: "IGNOREFILE", value: "defs/deploy/frontend/vex/.trivyignore"},
 		]
 		workspaces: [
 			{

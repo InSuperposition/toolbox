@@ -1,14 +1,15 @@
 # The blocking CRITICAL gate. Runs last (`runAfter: [scan-attach]`)
 # in build-scan-approve.yaml; a CRITICAL finding fails the PipelineRun.
 #
-# Consumer-agnostic: no params, no consumer name — it reads a fixed file
-# off the shared workspace.
+# Consumer-agnostic: IGNOREFILE is a generic param, never a consumer name
+# — it reads a fixed file off the shared workspace, whatever path the
+# caller points it at.
 #
 # No embedded shell: one pinned `trivy` `command` + `args`, never a
 # `script:` block.
 #
 #   trivy convert --scanners=vuln --exit-code=2 --severity=CRITICAL \
-#     --format=table scan.json
+#     --ignorefile=<IGNOREFILE> --format=table scan.json
 #
 # `--scanners=vuln` is set so `convert` re-emits the vuln report without a
 # "no enabled scanners" warning — scan-attach ran a vuln-only scan.
@@ -17,8 +18,18 @@
 # attached as the `vnd.trivy.report+json` referrer — so the gate verdict
 # cannot drift from the evidence on the image.
 #
+# `--ignorefile` lets a consumer suppress specific CVE IDs via a
+# git-committed, PR-reviewed `.trivyignore` — the exception is code,
+# reviewed once, replayed identically forever, never a runtime side
+# effect. `trivy convert` reads it purely statically (no vulnerability-DB
+# call, no network), matching this Task's own no-network invariant below.
+# Live-verified: trivy 0.74.0 FATALs (exit 1) if the path does not exist —
+# `--ignorefile` is required, defaulting to `/dev/null` (always present,
+# always empty) so a caller with nothing to suppress needs no extra file
+# and behaves byte-identical to before this param existed.
+#
 # Exit codes (verified against trivy 0.74.0):
-#   0  no CRITICAL           -> pipeline continues
+#   0  no CRITICAL (or ignorefile-suppressed) -> pipeline continues
 #   2  CRITICAL match        -> pipeline fails, a real vulnerability verdict
 #   1  trivy error           -> pipeline fails, NOT a verdict (malformed
 #                               scan.json / missing file / decode error)
@@ -29,8 +40,8 @@
 # exactly 2 — a 1 is reported as "gate ERRORED, see logs".
 #
 # No `disable-ipv6` step (unlike git-clone / buildkit-build / scan-attach):
-# `convert` reads a LOCAL file, makes no network call, so nothing here is
-# privileged. This keeps `gate` the simplest Task in the set.
+# `convert` reads LOCAL files only, makes no network call, so nothing here
+# is privileged. This keeps `gate` the simplest Task in the set.
 #
 # Steps run as root (`stepTemplate`, like scan-attach): scan.json is written
 # into the OrbStack `local-path` PVC by trivy running uid 0 in scan-attach,
@@ -45,10 +56,20 @@ metadata:
     app.kubernetes.io/part-of: toolbox-ci
 spec:
   description: >-
-    Fail the pipeline on a CRITICAL vulnerability. Re-renders the scan.json
-    that scan-attach produced (and attached as an OCI referrer) with
-    `trivy convert --exit-code=2 --severity=CRITICAL`, so the blocking
-    verdict is read from the same evidence bytes hung off the image digest.
+    Fail the pipeline on a CRITICAL vulnerability, unless it's suppressed
+    by IGNOREFILE. Re-renders the scan.json that scan-attach produced (and
+    attached as an OCI referrer) with `trivy convert --exit-code=2
+    --severity=CRITICAL --ignorefile=<IGNOREFILE>`, so the blocking verdict
+    is read from the same evidence bytes hung off the image digest.
+  params:
+    - name: IGNOREFILE
+      type: string
+      default: /dev/null
+      description: >-
+        Path (relative to the shared workspace) to a `.trivyignore` file
+        of CVE IDs to suppress. Must exist — trivy fails closed on a
+        missing path. Defaults to /dev/null (always present, always
+        empty): no suppressions unless a caller opts in.
   workspaces:
     - name: shared
       description: >-
@@ -68,5 +89,6 @@ spec:
         - --scanners=vuln
         - --exit-code=2
         - --severity=CRITICAL
+        - --ignorefile=$(params.IGNOREFILE)
         - --format=table
         - scan.json

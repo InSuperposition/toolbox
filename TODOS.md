@@ -72,7 +72,7 @@ open work):
   - `Run-scoped digest identity — race-simulating test` — empirical proof,
     deferred from the shipped fix (provable by construction today)
   - `Tekton Dashboard`
-  - `T10 — VEX hardening`
+  - `T10 — VEX hardening` — mechanism shipped, signed authorship deferred
   - `Publish a multi-arch image once a real amd64 consumer exists`
 - *Kyverno/Cilium*
   - `Kyverno ImageValidatingPolicy for real admission-time enforcement` —
@@ -86,6 +86,25 @@ open work):
 
 Newest first. Git-log density — commit/PR references, not a transcript.
 Full detail lives in the referenced PRs, ADRs, and commit messages.
+
+- **T10 — VEX suppression mechanism — DONE** (`/plan-eng-review`, re-verified
+  against the live pinned trivy 0.74.0 before landing, not the original
+  task text). `ci/tasks/gate.yaml` gains an `IGNOREFILE` param (default
+  `/dev/null` — always present, always empty, byte-identical behavior to
+  before this param existed) applied via `trivy convert --ignorefile`;
+  `ci/pipelines/build-scan-approve.yaml` threads it through;
+  `deploy/frontend/pipelinerun.cue` points it at the new, committed-empty
+  `deploy/frontend/vex/.trivyignore`. Live-verified before writing any
+  YAML: `trivy convert` has no VEX-format support at all (only `trivy
+  image`/`trivy sbom` read OpenVEX, and both need a live vulnerability-DB
+  call); `--ignorefile` on a nonexistent path FATALs (exit 1), ruling out
+  a "pass an optional empty string" design; `/dev/null` works as the
+  always-valid empty default. Full `ci/tests/build-pipeline/chainsaw-test.yaml`
+  suite (including the 3 existing standalone `gate` TaskRun fixtures) still
+  passes unchanged against the real cluster — the default made this a
+  zero-test-change addition. Signed OpenVEX authorship (`vexctl` +
+  a new OpenBao Transit key) deliberately deferred — see the item's own
+  entry above for why.
 
 - **Resolved-dependency-graph boundary check — DONE** (`/plan-eng-review`).
   Evaluated the three named candidates (`conftest`/OPA, `tofu graph`,
@@ -1219,23 +1238,32 @@ is a lateral-movement target without a network policy.
 Closed); fully actionable now, just not yet scheduled. Blocked for
 production on the Cilium + Kyverno module builds.
 
-### T10 — VEX hardening — P3, post-T8
+### T10 — VEX hardening — mechanism DONE, signed authorship deferred — P3
 
-**What:** Promote the scan-clean-first posture to an enforced mechanism:
-`.openvex.json` statement(s) → `vexctl attest` (signed via an OpenBao
-Transit key, same custody as approval/provenance) → attached as an OCI
-referrer → `mise run frontend:publish` re-runs `trivy image --vex <referrer>
---severity CRITICAL --exit-code 1` against the SBOM referrer before
-accepting a digest (the ADR-0009 pitchfork path this named is retired,
-ADR 0023 — `frontend:publish` is the only consume gate now).
+**Mechanism shipped, see Recently closed:** `gate.yaml` now takes an
+`IGNOREFILE` param (default `/dev/null`) and applies it via `trivy
+convert --ignorefile` — a git-committed, PR-reviewed `.trivyignore`
+statically suppresses specific CVE IDs at the same build-time gate that
+already re-renders `scan.json`, no live vulnerability-DB call. The
+original proposal (`mise run frontend:publish` re-running `trivy image
+--vex <referrer>`) turned out not to fit either real tool: `trivy convert`
+has no VEX ingestion at all, and the only trivy subcommands that read
+OpenVEX (`image`, `sbom`) need a live DB call — which `frontend-publish.sh`
+and `gate.yaml` both explicitly do not do. Re-verified against the live
+pinned trivy (0.74.0) before landing this, not against the original text.
 
-**Why:** an unsigned, consume-unenforced VEX statement buys no present
-enforcement benefit; this is where the benefit lands. `vexctl`
-(`aqua:openvex/vexctl`) is already pinned.
-
-**Priority:** P3 · **Depends on:** nothing blocking — T8 (build-provenance
-signing infra, no Chains) shipped (Recently Closed); fully actionable now,
-just not yet scheduled.
+**Deferred — signed OpenVEX authorship, own follow-up, no current
+trigger:** `.trivyignore` is unsigned/unattributed — anyone with commit
+access can add a line, same trust model as any other reviewed file, but
+not the "same custody as approval/provenance" T10 originally wanted.
+Layering `vexctl attest` (signed via a new OpenBao Transit key) on top —
+producing the canonical, attributable OpenVEX statement, with a small
+script deriving `deploy/frontend/vex/.trivyignore` FROM it — is additive,
+not a redo, whenever a real CVE actually needs a signed, attributed
+exception. Zero current CRITICAL findings have ever needed a suppression
+(checked git history before scoping this session); building the signing
+ceremony now would be unused machinery. **Depends on:** nothing blocking,
+just no live trigger yet.
 
 ### Publish a multi-arch image once a real amd64 consumer exists
 
